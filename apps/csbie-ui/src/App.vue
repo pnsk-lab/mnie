@@ -1,0 +1,310 @@
+<script setup lang="ts">
+import { AnimatePresence } from 'motion-v'
+import { computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { revokeApiKey } from './api'
+import AppHeader from './components/layout/AppHeader.vue'
+import AppSidebar from './components/layout/AppSidebar.vue'
+import SearchDialog from './features/search/SearchDialog.vue'
+import AuthGate from './features/auth/AuthGate.vue'
+import { useAuthAdmin } from './features/auth/useAuthAdmin'
+import HistoryView from './features/history/HistoryView.vue'
+import OAuthApprovalPanel from './features/oauth/OAuthApprovalPanel.vue'
+import { useOAuthApproval } from './features/oauth/useOAuthApproval'
+import OrderDialogs from './features/orders/OrderDialogs.vue'
+import PortfolioView from './features/portfolio/PortfolioView.vue'
+import SettingsView from './features/settings/SettingsView.vue'
+import TradeView from './features/trade/TradeView.vue'
+import { useTradingSession } from './features/trading/useTradingSession'
+import { routeNames, type RouteName } from './router'
+import { ui } from './styles/ui'
+
+const route = useRoute()
+const router = useRouter()
+const activeTab = computed<RouteName>(() => {
+  return routeNames.includes(route.name as RouteName) ? (route.name as RouteName) : 'portfolio'
+})
+const showAuthGate = computed(() => true)
+const navigate = (name: RouteName) => router.push({ name })
+
+const {
+  status,
+  apiKeys,
+  sbiPasskeys,
+  selectedPasskeyId,
+  setupPassword,
+  authBusy,
+  apiKeyLabel,
+  newApiKeySettings,
+  newApiToken,
+  sbiLabel,
+  sbiCredentialJson,
+  tradePassword,
+  sbiDeviceId,
+  refresh,
+  addApiKey,
+  saveApiKeySettings,
+  setupOwnerPasskey,
+  loginWithPasskey,
+  addSbiPasskey,
+  removeSbiPasskey,
+} = useAuthAdmin()
+
+const {
+  selectedStockCode,
+  tradeSide,
+  orderKind,
+  cashOrderAccountType,
+  cashOrderMarket,
+  cashOrderPriceCondition,
+  cashOrderTerm,
+  cashOrderDateInput,
+  cashOrderMethod,
+  cashOrderTriggerZone,
+  cashOrderTriggerPriceInput,
+  cashOrderSecondaryPriceCondition,
+  cashOrderSecondaryPriceInput,
+  quantityInput,
+  priceInput,
+  chartMode,
+  showSearch,
+  searchQuery,
+  countryFilter,
+  marketFilter,
+  showEstimateDialog,
+  showOrderDialog,
+  lastCashEstimate,
+  connected,
+  dataLoading,
+  searchLoading,
+  buyingPower,
+  holdingsMarketValue,
+  totalProfitLoss,
+  totalProfitLossRate,
+  orders,
+  orderHistoryLoaded,
+  orderHistoryNotice,
+  positions,
+  chartPricePoints,
+  pricePolling,
+  selectedStock,
+  orderQuantity,
+  orderPrice,
+  cashOrderPrimaryRequiresPrice,
+  cashOrderTriggerPrice,
+  cashOrderSecondaryPrice,
+  estimatedAmount,
+  showPortfolioSpinner,
+  canRequestCashEstimate,
+  canPlaceCashOrder,
+  countries,
+  markets,
+  viewedStocks,
+  filteredStocks,
+  selectedPosition,
+  recentOrders,
+  totalAssetValue,
+  stockAssetRatio,
+  cashAssetRatio,
+  boxPlotStyle,
+  hasQuote,
+  selectStock,
+  connect,
+  loadTradingData,
+  estimateCashOrder,
+  askPlaceOrder,
+  placeCashOrder,
+  cancelOrder,
+  downloadCsv,
+  openTradeForStock,
+  openTradeForPosition,
+} = useTradingSession(selectedPasskeyId)
+
+const { oauthApproval, oauthSettings, loadOAuthApproval, approveOAuth } = useOAuthApproval()
+
+const refreshAndMaybeConnect = () =>
+  refresh({
+    autoConnect: true,
+    connect: () => {
+      if (!connected.value) connect()
+    },
+  })
+
+const addSbiPasskeyAndConnect = async () => {
+  await addSbiPasskey()
+  connect()
+}
+
+const revokeAndRefresh = async (id: string) => {
+  await revokeApiKey(id)
+  await refresh()
+}
+
+onMounted(async () => {
+  try {
+    await refreshAndMaybeConnect()
+  } catch {
+    status.value = { configured: false, authenticated: false }
+  }
+  await loadOAuthApproval()
+})
+</script>
+
+<template>
+  <main :class="ui.appShell">
+    <AppSidebar :active-tab="activeTab" @navigate="navigate" />
+
+    <section :class="ui.workspace">
+      <AppHeader :active-tab="activeTab" />
+
+      <OAuthApprovalPanel
+        v-if="oauthApproval.active && status.authenticated"
+        v-model:settings="oauthSettings"
+        :approval="oauthApproval"
+        @approve="approveOAuth"
+      />
+
+      <AuthGate
+        v-else-if="showAuthGate && !status.authenticated"
+        v-model:setup-password="setupPassword"
+        :status="status"
+        :auth-busy="authBusy"
+        @login="loginWithPasskey"
+        @setup="setupOwnerPasskey"
+      />
+
+      <template v-else>
+        <PortfolioView
+          v-if="activeTab === 'portfolio'"
+          :show-portfolio-spinner="showPortfolioSpinner"
+          :total-asset-value="totalAssetValue"
+          :buying-power="buyingPower"
+          :holdings-market-value="holdingsMarketValue"
+          :total-profit-loss="totalProfitLoss"
+          :total-profit-loss-rate="totalProfitLossRate"
+          :stock-asset-ratio="stockAssetRatio"
+          :cash-asset-ratio="cashAssetRatio"
+          :positions="positions"
+          :recent-orders="recentOrders"
+          :data-loading="dataLoading"
+          :connected="connected"
+          :order-history-loaded="orderHistoryLoaded"
+          :order-history-notice="orderHistoryNotice"
+          @connect="connect"
+          @open-position="(code) => openTradeForPosition(code, () => void navigate('trade'))"
+        />
+
+        <TradeView
+          v-if="activeTab === 'trade'"
+          v-model:trade-side="tradeSide"
+          v-model:order-kind="orderKind"
+          v-model:cash-order-account-type="cashOrderAccountType"
+          v-model:cash-order-market="cashOrderMarket"
+          v-model:cash-order-price-condition="cashOrderPriceCondition"
+          v-model:cash-order-term="cashOrderTerm"
+          v-model:cash-order-date-input="cashOrderDateInput"
+          v-model:cash-order-method="cashOrderMethod"
+          v-model:cash-order-trigger-zone="cashOrderTriggerZone"
+          v-model:cash-order-trigger-price-input="cashOrderTriggerPriceInput"
+          v-model:cash-order-secondary-price-condition="cashOrderSecondaryPriceCondition"
+          v-model:cash-order-secondary-price-input="cashOrderSecondaryPriceInput"
+          v-model:quantity-input="quantityInput"
+          v-model:price-input="priceInput"
+          v-model:chart-mode="chartMode"
+          :viewed-stocks="viewedStocks"
+          :selected-stock="selectedStock"
+          :selected-position="selectedPosition"
+          :connected="connected"
+          :order-quantity="orderQuantity"
+          :estimated-amount="estimatedAmount"
+          :can-request-cash-estimate="canRequestCashEstimate"
+          :can-place-cash-order="canPlaceCashOrder"
+          :realtime-price-points="chartPricePoints"
+          :price-polling="pricePolling"
+          :box-plot-style="boxPlotStyle"
+          :has-quote="hasQuote"
+          @open-search="showSearch = true"
+          @select-stock="selectStock"
+          @download-csv="downloadCsv"
+          @estimate="estimateCashOrder"
+          @confirm-order="askPlaceOrder"
+        />
+
+        <HistoryView
+          v-if="activeTab === 'history'"
+          :orders="orders"
+          :connected="connected"
+          :data-loading="dataLoading"
+          :order-history-loaded="orderHistoryLoaded"
+          :order-history-notice="orderHistoryNotice"
+          @refresh="loadTradingData"
+          @cancel="cancelOrder"
+        />
+
+        <SettingsView
+          v-if="activeTab === 'settings'"
+          v-model:api-key-label="apiKeyLabel"
+          v-model:new-api-key-settings="newApiKeySettings"
+          v-model:new-api-token="newApiToken"
+          v-model:sbi-label="sbiLabel"
+          v-model:sbi-credential-json="sbiCredentialJson"
+          v-model:trade-password="tradePassword"
+          v-model:sbi-device-id="sbiDeviceId"
+          v-model:selected-passkey-id="selectedPasskeyId"
+          :api-keys="apiKeys"
+          :sbi-passkeys="sbiPasskeys"
+          @add-api-key="addApiKey"
+          @refresh="refresh"
+          @save-api-key-settings="saveApiKeySettings"
+          @revoke-api-key="revokeAndRefresh"
+          @add-sbi-passkey="addSbiPasskeyAndConnect"
+          @connect="connect"
+          @remove-sbi-passkey="removeSbiPasskey"
+        />
+      </template>
+    </section>
+
+    <AnimatePresence>
+      <SearchDialog
+        v-if="showSearch"
+        key="search-dialog"
+        v-model:search-query="searchQuery"
+        v-model:country-filter="countryFilter"
+        v-model:market-filter="marketFilter"
+        :stocks="filteredStocks"
+        :selected-stock-code="selectedStockCode"
+        :countries="countries"
+        :markets="markets"
+        :loading="searchLoading"
+        @close="showSearch = false"
+        @select="(stock) => openTradeForStock(stock, () => void navigate('trade'))"
+      />
+    </AnimatePresence>
+
+    <OrderDialogs
+      :estimate="lastCashEstimate"
+      :show-estimate="showEstimateDialog"
+      :show-order="showOrderDialog"
+      :stock-name="selectedStock.name"
+      :side="tradeSide"
+      :kind="orderKind"
+      :account-type="cashOrderAccountType"
+      :market="cashOrderMarket"
+      :price-condition="cashOrderPriceCondition"
+      :price="cashOrderPrimaryRequiresPrice ? orderPrice : 0"
+      :order-term="cashOrderTerm"
+      :order-date="cashOrderDateInput"
+      :order-method="cashOrderMethod"
+      :trigger-zone="cashOrderTriggerZone"
+      :trigger-price="cashOrderTriggerPrice"
+      :secondary-price-condition="cashOrderSecondaryPriceCondition"
+      :secondary-price="cashOrderSecondaryPrice"
+      :quantity="orderQuantity"
+      :amount="estimatedAmount"
+      @close-estimate="showEstimateDialog = false"
+      @proceed="askPlaceOrder"
+      @close-order="showOrderDialog = false"
+      @place="placeCashOrder"
+    />
+  </main>
+</template>

@@ -1,0 +1,63 @@
+# dependencies (bun install)
+node_modules
+
+# output
+out
+dist
+*.tgz
+*.zip
+*.tar
+*.tar.gz
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+_.log
+report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+
+# dotenv environment variable files
+.env*
+!.env.example
+
+# credentials and captured sessions
+*.har
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+passkey*.json
+session*.json
+
+# third-party/proprietary app artifacts
+tunnel-client
+*.apk
+*.aab
+*.dex
+*.jar
+*.class
+apktool/
+jadx/
+decoded/
+analysis/
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# IDEs
+.idea
+.vscode
+
+# Finder (MacOS) folder config
+.DS_Store
+
+workspace/
+
+tmp
+
+data/

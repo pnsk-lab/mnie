@@ -1,0 +1,32 @@
+{
+  "name": "csbi",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "type": "module",
+  "module": "index.ts",
+  "scripts": {
+    "analyze:apk": "bun tools/analyze-sbi-apk.ts --jadx workspace/decoded/jadx --apktool workspace/decoded/apktool --out workspace/analysis",
+    "build": "vp run app:build",
+    "check": "vp run verify",
+    "dev": "vp run app:dev",
+    "db:push": "vp run server:db:push",
+    "env:check": "vp run env:doctor",
+    "fmt": "vp check --fix",
+    "typecheck": "vp run typecheck:all"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "vite-plus": "^0.1.24"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "engines": {
+    "bun": ">=1.3.0",
+    "node": ">=22.12.0"
+  },
+  "packageManager": "bun@1.3.3"
+}
