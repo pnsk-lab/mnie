@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { ChevronDown, Download, FileCheck2, Search, ShieldCheck } from 'lucide-vue-next'
+import {
+  ChevronDown,
+  Download,
+  FileCheck2,
+  Minus,
+  Plus,
+  RotateCcw,
+  Search,
+  ShieldCheck,
+} from 'lucide-vue-next'
 import { AnimatePresence, LayoutGroup, motion } from 'motion-v'
 import { computed, ref } from 'vue'
 import Spinner from '../../components/ui/Spinner.vue'
@@ -7,19 +16,17 @@ import UiButton from '../../components/ui/UiButton.vue'
 import UiField from '../../components/ui/UiField.vue'
 import UiSegmented from '../../components/ui/UiSegmented.vue'
 import {
-  cashOrderAccountTypeOptions,
-  cashOrderMarketOptions,
   cashOrderMethodOptions,
   cashOrderPriceConditionOptions,
-  cashOrderTermOptions,
   cashOrderTriggerZoneOptions,
   orderKindOptions,
-  sKabuOrderMarketOptions,
   tradeSideOptions,
 } from '../../constants/trade'
 import { ui } from '../../styles/ui'
 import type {
   ChartMode,
+  ChartNotice,
+  ChartRange,
   CashOrderAccountType,
   CashOrderMarket,
   CashOrderMethod,
@@ -36,6 +43,24 @@ import { currency } from '../../utils/format'
 import RealtimePriceChart from './RealtimePriceChart.vue'
 
 type StockInfoTab = 'detail' | 'holding'
+type CashOrderAccountTypeOption = {
+  label: string
+  value: CashOrderAccountType
+}
+type CashOrderMarketOption = {
+  label: string
+  value: CashOrderMarket
+}
+type CashOrderTermOption = {
+  label: string
+  value: CashOrderTerm
+}
+type CashOrderDateOption = {
+  label: string
+  value: string
+}
+
+const chartRangeOptions: ChartRange[] = ['1D', '7D', '1M', '3M', '1Y', 'ALL']
 
 defineProps<{
   viewedStocks: Stock[]
@@ -44,17 +69,16 @@ defineProps<{
   connected: boolean
   orderQuantity: number
   estimatedAmount: number
+  cashOrderAccountTypeOptions: CashOrderAccountTypeOption[]
+  cashOrderMarketOptions: CashOrderMarketOption[]
+  cashOrderTermOptions: CashOrderTermOption[]
+  cashOrderDateOptions: CashOrderDateOption[]
+  cashOrderPriceStep: number
   canRequestCashEstimate: boolean
   canPlaceCashOrder: boolean
   realtimePricePoints: RealtimePricePoint[]
+  chartNotice: ChartNotice | null
   pricePolling: boolean
-  boxPlotStyle: {
-    min: string
-    q1: string
-    median: string
-    q3: string
-    max: string
-  }
   hasQuote: (stock: Stock) => boolean
 }>()
 
@@ -90,11 +114,10 @@ const cashOrderSecondaryPriceInput = defineModel<string>('cashOrderSecondaryPric
 const quantityInput = defineModel<string>('quantityInput', { required: true })
 const priceInput = defineModel<string>('priceInput', { required: true })
 const chartMode = defineModel<ChartMode>('chartMode', { required: true })
+const chartRange = defineModel<ChartRange>('chartRange', { required: true })
 const activeStockInfoTab = ref<StockInfoTab>('detail')
 const advancedOptionsOpen = ref(false)
-const orderMarketOptions = computed(() =>
-  orderKind.value === 's' ? sKabuOrderMarketOptions : cashOrderMarketOptions,
-)
+const priceChart = ref<InstanceType<typeof RealtimePriceChart> | null>(null)
 const primaryPriceConditionRequiresPrice = computed(() =>
   ['limit', 'limitAtOpen', 'limitAtClose', 'limitIoc', 'funari'].includes(
     cashOrderPriceCondition.value,
@@ -178,27 +201,65 @@ const emit = defineEmits<{
         </div>
 
         <div :class="ui.periodTabs">
-          <button :class="[ui.periodButton, ui.periodButtonActive]" type="button">1D</button>
-          <button :class="ui.periodButton" type="button">1W</button>
-          <button :class="ui.periodButton" type="button">1M</button>
+          <button
+            v-for="range in chartRangeOptions"
+            :key="range"
+            :class="[ui.periodButton, chartRange === range && ui.periodButtonActive]"
+            type="button"
+            :aria-pressed="chartRange === range"
+            @click="chartRange = range"
+          >
+            {{ range }}
+          </button>
         </div>
 
         <div :class="ui.chartActions">
-          <div :class="ui.smallTabs">
-            <button
-              :class="[ui.smallTab, chartMode === 'line' && ui.smallTabActive]"
-              type="button"
-              @click="chartMode = 'line'"
-            >
-              推移
-            </button>
-            <button
-              :class="[ui.smallTab, chartMode === 'box' && ui.smallTabActive]"
-              type="button"
-              @click="chartMode = 'box'"
-            >
-              箱ひげ
-            </button>
+          <div class="flex items-center gap-2">
+            <div :class="ui.smallTabs">
+              <button
+                :class="[ui.smallTab, chartMode === 'line' && ui.smallTabActive]"
+                type="button"
+                @click="chartMode = 'line'"
+              >
+                推移
+              </button>
+              <button
+                :class="[ui.smallTab, chartMode === 'box' && ui.smallTabActive]"
+                type="button"
+                @click="chartMode = 'box'"
+              >
+                箱ひげ
+              </button>
+            </div>
+            <div class="flex items-center gap-1">
+              <button
+                class="grid h-8 w-8 place-items-center rounded-md border border-[#2d3440] text-[#d3e3fd] transition hover:bg-[#1d232b] disabled:opacity-40"
+                type="button"
+                aria-label="縮小"
+                :disabled="!hasQuote(selectedStock)"
+                @click="priceChart?.zoomOut()"
+              >
+                <Minus class="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+              <button
+                class="grid h-8 w-8 place-items-center rounded-md border border-[#2d3440] text-[#d3e3fd] transition hover:bg-[#1d232b] disabled:opacity-40"
+                type="button"
+                aria-label="拡大"
+                :disabled="!hasQuote(selectedStock)"
+                @click="priceChart?.zoomIn()"
+              >
+                <Plus class="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+              <button
+                class="grid h-8 w-8 place-items-center rounded-md border border-[#2d3440] text-[#8f949d] transition hover:bg-[#1d232b] hover:text-[#d3e3fd] disabled:opacity-40"
+                type="button"
+                aria-label="縮尺を戻す"
+                :disabled="!hasQuote(selectedStock)"
+                @click="priceChart?.resetZoom()"
+              >
+                <RotateCcw class="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </div>
           </div>
           <button :class="ui.ghostButton" type="button" @click="emit('downloadCsv')">
             <Download class="h-4 w-4" aria-hidden="true" />
@@ -206,52 +267,21 @@ const emit = defineEmits<{
           </button>
         </div>
 
-        <div v-if="chartMode === 'line'" :class="ui.chartBox">
+        <div :class="ui.chartBox">
           <RealtimePriceChart
             v-if="hasQuote(selectedStock)"
+            ref="priceChart"
             :points="realtimePricePoints"
             :stock-name="selectedStock.name"
             :active="pricePolling"
+            :mode="chartMode"
+            :range="chartRange"
+            :previous-close="selectedStock.prevClose"
+            :notice="chartNotice"
           />
           <span v-else class="grid h-full place-items-center text-[#8f949d]">
             <Spinner />
           </span>
-        </div>
-        <div v-else :class="ui.boxplot">
-          <div :class="ui.boxplotScale">
-            <span>
-              <template v-if="hasQuote(selectedStock)">{{
-                currency(selectedStock.box.min)
-              }}</template>
-              <Spinner v-else size="sm" />
-            </span>
-            <span>
-              <template v-if="hasQuote(selectedStock)">{{
-                currency(selectedStock.box.max)
-              }}</template>
-              <Spinner v-else size="sm" />
-            </span>
-          </div>
-          <div v-if="hasQuote(selectedStock)" :class="ui.boxplotTrack">
-            <i
-              :class="ui.whisker"
-              :style="{
-                left: boxPlotStyle.min,
-                width: `calc(${boxPlotStyle.max} - ${boxPlotStyle.min})`,
-              }"
-            ></i>
-            <i
-              :class="ui.box"
-              :style="{
-                left: boxPlotStyle.q1,
-                width: `calc(${boxPlotStyle.q3} - ${boxPlotStyle.q1})`,
-              }"
-            ></i>
-            <i :class="ui.median" :style="{ left: boxPlotStyle.median }"></i>
-          </div>
-          <div v-else class="grid min-h-20 place-items-center text-[#8f949d]">
-            <Spinner />
-          </div>
         </div>
       </article>
 
@@ -413,10 +443,30 @@ const emit = defineEmits<{
                 :transition="advancedTransition"
               >
                 <span :class="ui.advancedLabel">預り区分</span>
-                <UiSegmented
-                  v-model="cashOrderAccountType"
-                  :options="cashOrderAccountTypeOptions"
-                />
+                <LayoutGroup id="cash-order-account-type">
+                  <div :class="ui.accountTypeGrid" role="radiogroup" aria-label="預り区分">
+                    <button
+                      v-for="option in cashOrderAccountTypeOptions"
+                      :key="option.value"
+                      type="button"
+                      role="radio"
+                      :aria-checked="cashOrderAccountType === option.value"
+                      :class="[
+                        ui.accountTypeButton,
+                        cashOrderAccountType === option.value && ui.accountTypeButtonActive,
+                      ]"
+                      @click="cashOrderAccountType = option.value"
+                    >
+                      <motion.span
+                        v-if="cashOrderAccountType === option.value"
+                        layout-id="cash-order-account-type-indicator"
+                        :class="ui.accountTypeIndicator"
+                        :transition="tabTransition"
+                      />
+                      <span :class="ui.accountTypeText">{{ option.label }}</span>
+                    </button>
+                  </div>
+                </LayoutGroup>
                 <UiField
                   v-model="cashOrderMarket"
                   as="select"
@@ -424,7 +474,7 @@ const emit = defineEmits<{
                   :disabled="orderKind === 's'"
                 >
                   <option
-                    v-for="option in orderMarketOptions"
+                    v-for="option in cashOrderMarketOptions"
                     :key="option.value"
                     :value="option.value"
                   >
@@ -447,6 +497,7 @@ const emit = defineEmits<{
                     label="注文価格"
                     type="number"
                     min="1"
+                    :step="cashOrderPriceStep"
                     placeholder="価格を入力"
                   />
                   <UiField v-model="cashOrderTerm" as="select" label="有効期限">
@@ -459,7 +510,21 @@ const emit = defineEmits<{
                     </option>
                   </UiField>
                   <UiField
-                    v-if="cashOrderTerm === 'date'"
+                    v-if="cashOrderTerm === 'date' && cashOrderDateOptions.length"
+                    v-model="cashOrderDateInput"
+                    as="select"
+                    label="指定日"
+                  >
+                    <option
+                      v-for="option in cashOrderDateOptions"
+                      :key="option.value"
+                      :value="option.value"
+                    >
+                      {{ option.label }}
+                    </option>
+                  </UiField>
+                  <UiField
+                    v-else-if="cashOrderTerm === 'date'"
                     v-model="cashOrderDateInput"
                     label="指定日"
                     type="date"
@@ -488,6 +553,7 @@ const emit = defineEmits<{
                       label="逆指値価格"
                       type="number"
                       min="1"
+                      :step="cashOrderPriceStep"
                       placeholder="価格を入力"
                     />
                   </template>
@@ -511,6 +577,7 @@ const emit = defineEmits<{
                       label="OCO価格"
                       type="number"
                       min="1"
+                      :step="cashOrderPriceStep"
                       placeholder="価格を入力"
                     />
                   </template>

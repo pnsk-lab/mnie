@@ -12,10 +12,13 @@ COPY . .
 RUN bun --filter @repo/csbie build
 
 FROM oven/bun:1-slim AS runtime
-WORKDIR /app
 ENV NODE_ENV=production
+ENV CSBIE_DATABASE_PATH=/app/data/csbie.sqlite
+WORKDIR /app
 COPY --from=build /app/apps/csbie/dist ./apps/csbie/dist
 COPY --from=build /app/apps/csbie-ui/dist ./apps/csbie-ui/dist
-COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/node_modules/.bun/@napi-rs+keyring@*/node_modules/@napi-rs/keyring ./node_modules/@napi-rs/keyring
+COPY --from=build /app/node_modules/.bun/@napi-rs+keyring-linux-x64-gnu@*/node_modules/@napi-rs/keyring-linux-x64-gnu ./node_modules/@napi-rs/keyring-linux-x64-gnu
+WORKDIR /app/apps/csbie/dist
 EXPOSE 8787
-CMD ["bun", "apps/csbie/dist/index.js"]
+CMD ["bun", "index.js"]

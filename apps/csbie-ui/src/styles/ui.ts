@@ -79,7 +79,7 @@ export const ui = {
   stockHoldingNote:
     'inline-flex w-fit items-center rounded-full border border-[#2f343b] bg-[#111418] px-4 py-2 text-sm font-semibold text-[#c3c7cf]',
   quoteBox: 'grid justify-items-end gap-1',
-  periodTabs: 'flex justify-end gap-3',
+  periodTabs: 'flex flex-wrap justify-end gap-2',
   periodButton: 'min-h-7 rounded-full bg-transparent px-3 text-xs font-bold text-[#8f949d]',
   periodButtonActive: 'bg-[#d3e3fd] text-[#102033]',
   chartActions: 'flex items-center justify-between gap-4',
@@ -120,6 +120,12 @@ export const ui = {
   advancedSummaryIcon: 'h-4 w-4',
   advancedBody: 'grid gap-2 pt-3',
   advancedLabel: 'text-xs font-extrabold text-[#9aa0a9]',
+  accountTypeGrid: 'grid grid-cols-2 gap-2',
+  accountTypeButton:
+    'relative isolate grid min-h-11 place-items-center overflow-hidden rounded-[14px] bg-[#111418] px-2 py-2 text-center text-xs font-extrabold leading-snug text-[#9aa0a9] transition hover:bg-[#1d232b] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d3e3fd]',
+  accountTypeButtonActive: 'text-[#d3e3fd]',
+  accountTypeIndicator: 'absolute inset-0 -z-10 rounded-[14px] bg-[#263141]',
+  accountTypeText: 'relative block whitespace-normal break-keep leading-snug',
   label: 'grid gap-2 text-xs font-extrabold text-[#9aa0a9]',
   input:
     'min-h-12 w-full rounded-[16px] border border-[#4a5058] bg-[#111418] px-4 text-[#e3e3e9] outline-none transition placeholder:text-[#747982] focus:border-[#a8c7fa]',

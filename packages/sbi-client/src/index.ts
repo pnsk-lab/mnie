@@ -23,5 +23,12 @@ export type {
   IssueSearchItem,
   IssueSearchResult,
   IssueSearchStatus,
+  OrderCorrectionPreOrder,
+  OrderCorrectionPreOrderDetail,
+  OrderPreview,
+  StockOrderPreOrder,
+  StockOrderPreOrderMarginTradeType,
+  StockOrderPreOrderPaymentLimit,
+  StockOrderPreOrderPriceStep,
 } from './types'
 export type * from './methods/types'

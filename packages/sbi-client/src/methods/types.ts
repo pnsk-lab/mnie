@@ -19,6 +19,7 @@ import type {
   OrderKind,
   OrderList,
   OrderPreview,
+  StockOrderPreOrder,
   OrderReceipt,
   OrderStatus,
   PositionId,
@@ -156,6 +157,19 @@ export type CashOrderTriggerZone = 'above' | 'below'
 
 export type CashOrderMethod = 'normal' | 'stop' | 'oco'
 
+export type StockOrderMarginPosition = {
+  /** Open trade date from the margin position record, in yyyyMMdd or yyyy-MM-dd format. */
+  openTradeDate: string
+  /** Open price from the margin position record. Raw strings are accepted to preserve APK values. */
+  openPrice: number | string
+  /** Quantity selected from the margin position record. */
+  quantity: number | string
+  /** Original new-trade date from the margin position record, in yyyyMMdd or yyyy-MM-dd format. */
+  orgNewTradeDate: string
+  /** Bargain market code from the margin position record. */
+  bargainMarketCode: MarketCode
+}
+
 export type StandardCashOrderOptions = StockOrderBaseOptions & {
   /** Order price for limit and other price-based orders. */
   price?: number
@@ -177,18 +191,68 @@ export type StandardCashOrderOptions = StockOrderBaseOptions & {
   secondaryPriceCondition?: CashOrderPriceCondition
   /** Secondary order price used by OCO price-based conditions. */
   secondaryPrice?: number
+  /** APK ippan margin payment-limit code returned by stock board/pre-order information. */
+  ippanMarginPaymentLimit?: string
 }
 
 export type SKabuOrderOptions = StockOrderBaseOptions & {
   /** Places the cash order as an S-kabu order. S-kabu cannot specify a price. */
   kind: 's'
+  /** APK pre-order market for the underlying issue. The live S-kabu order still sends `market: "STK"`. */
+  preOrderMarket?: MarketCode
   /** S-kabu cannot specify a price. */
   price?: never
 }
 
 export type CashOrderOptions = StandardCashOrderOptions | SKabuOrderOptions
 
-export type MarginOpenOrderOptions = StandardCashOrderOptions
+export type CashOrderPreOrderOptions = Pick<
+  StockOrderBaseOptions,
+  'issueCode' | 'market' | 'side' | 'accountType' | 'depositType'
+> & {
+  /** Requests the APK S-kabu pre-order route constraints for this issue. */
+  kind?: 's'
+  /** APK pre-order market for S-kabu checks. The live S-kabu order still sends `market: "STK"`. */
+  preOrderMarket?: MarketCode
+}
+
+export type MarginOpenTradeType =
+  | 'standard'
+  | 'generalBuy'
+  | 'generalSellShort'
+  | 'generalSellInventoryLimited'
+  | 'generalSellInventoryUnlimited'
+  | 'day'
+  | 'hyper'
+
+export type MarginOpenOrderPreOrderOptions = Pick<
+  StockOrderBaseOptions,
+  'issueCode' | 'market' | 'side' | 'accountType' | 'depositType'
+>
+
+export type MarginOpenOrderOptions = StandardCashOrderOptions & {
+  /** APK margin-open trade type. Required because the mobile payload has no safe default. */
+  marginTradeType: MarginOpenTradeType
+  /** APK ippan margin payment-limit code, when returned by board/pre-order information. */
+  ippanMarginPaymentLimit?: string
+}
+
+export type MarginCloseTradeType = 'sixMonth' | 'noLimit' | 'oneDay' | 'fifteenDay'
+
+export type MarginCloseOrderPreOrderOptions = Pick<
+  StockOrderBaseOptions,
+  'issueCode' | 'market' | 'side' | 'accountType' | 'depositType'
+> & {
+  /** APK margin-close trade type used by the mobile pre-order request. */
+  marginCloseTradeType?: MarginCloseTradeType
+}
+
+export type MarginClosePositionOrder =
+  | 'profitFirst'
+  | 'lossFirst'
+  | 'newestFirst'
+  | 'oldestFirst'
+  | 'specify'
 
 export type ActualDeliveryKind = 'genbiki' | 'genwatashi'
 
@@ -209,11 +273,22 @@ export type ActualDeliveryOrderOptions = {
   kind: ActualDeliveryKind
   /** Position ID to deliver. */
   positionId?: PositionId
+  /** Margin position records selected for genbiki/genwatashi delivery. */
+  marginPositions?: StockOrderMarginPosition[]
+  /** APK ippan margin payment-limit code returned by stock board/pre-order information. */
+  ippanMarginPaymentLimit?: string
 }
+
+export type ActualDeliveryOrderPreOrderOptions = Pick<
+  ActualDeliveryOrderOptions,
+  'issueCode' | 'market' | 'accountType' | 'depositType' | 'kind'
+>
 
 export type PlaceCashOrderOptions = CashOrderOptions & {
   /** Confirmation ID returned by the confirmation step. */
   confirmationId?: string
+  /** APK confirmation-screen omission flag. Only valid for live submit calls. */
+  omitConfirmation?: boolean
   /** Explicitly allows sending a live order. */
   allowTrading?: true
 }
@@ -221,6 +296,8 @@ export type PlaceCashOrderOptions = CashOrderOptions & {
 export type PlaceMarginOpenOrderOptions = MarginOpenOrderOptions & {
   /** Confirmation ID returned by the confirmation step. */
   confirmationId?: string
+  /** APK confirmation-screen omission flag. Only valid for live submit calls. */
+  omitConfirmation?: boolean
   /** Explicitly allows sending a live margin open order. */
   allowTrading?: true
 }
@@ -228,13 +305,59 @@ export type PlaceMarginOpenOrderOptions = MarginOpenOrderOptions & {
 export type PlaceActualDeliveryOrderOptions = ActualDeliveryOrderOptions & {
   /** Confirmation ID returned by the confirmation step. */
   confirmationId?: string
+  /** APK confirmation-screen omission flag. Only valid for live submit calls. */
+  omitConfirmation?: boolean
   /** Explicitly allows sending a live actual-delivery order. */
   allowTrading?: true
 }
 
 export type OrderCorrectionOptions = {
+  /** Order number shown in order inquiry. Required by the mobile pre-correction route. */
+  orderNumber?: string
   /** Order ID to correct. */
   orderId: OrderId
+  /** Issue code from the pre-correction response. */
+  issueCode?: IssueCode
+  /** Market code from the pre-correction response. */
+  market?: MarketCode
+  /** Original trade ID code. */
+  tradeId?: string
+  /** Additional correction flag used by the mobile MTS route. */
+  correctionType?: string
+  /** Original order status code from the pre-correction response. */
+  status?: string
+  /** Original RBE order status code from the pre-correction response. */
+  rbeOrderStatus?: string
+  /** Display deposit type text from the original order. */
+  depositTypeText?: string
+  /** Primary order method for correction. */
+  orderMethod?: CashOrderMethod
+  /** Corrected primary execution condition. */
+  priceCondition?: CashOrderPriceCondition
+  /** Stop trigger direction for correction. */
+  triggerZone?: CashOrderTriggerZone
+  /** Stop trigger price for correction. */
+  triggerPrice?: number
+  /** Secondary/OCO execution condition for correction. */
+  secondaryPriceCondition?: CashOrderPriceCondition
+  /** Secondary/OCO price for correction. */
+  secondaryPrice?: number
+  /** IFD follow-up execution condition for IF/IFDOCO correction. */
+  ifdPriceCondition?: CashOrderPriceCondition
+  /** IFD follow-up price for IF/IFDOCO correction. */
+  ifdPrice?: number
+  /** IFD follow-up special order method for correction. */
+  ifdOrderMethod?: CashOrderMethod
+  /** IFD follow-up stop trigger direction for correction. */
+  ifdTriggerZone?: CashOrderTriggerZone
+  /** IFD follow-up stop trigger price for correction. */
+  ifdTriggerPrice?: number
+  /** IFD follow-up secondary/OCO execution condition for correction. */
+  ifdSecondaryPriceCondition?: CashOrderPriceCondition
+  /** IFD follow-up secondary/OCO price for correction. */
+  ifdSecondaryPrice?: number
+  /** Mobile correction control flag. Defaults to normal mobile value when omitted. */
+  correctionControlFlag?: '1' | '2'
   /** Corrected order quantity. */
   quantity?: number
   /** Corrected order price. */
@@ -267,9 +390,17 @@ export type PlaceOrderCancelOptions = OrderCancelOptions & {
 export type MarginCloseOrderOptions = StandardCashOrderOptions & {
   /** Position ID to close. */
   positionId?: PositionId
+  /** APK margin-close trade type. Required because the mobile payload has no safe default. */
+  marginCloseTradeType: MarginCloseTradeType
+  /** Margin position records selected for specified close orders. */
+  marginPositions?: StockOrderMarginPosition[]
+  /** APK close-position ordering used by summary close orders. */
+  marginClosePositionOrder?: MarginClosePositionOrder
 }
 
 export type PlaceMarginCloseOrderOptions = MarginCloseOrderOptions & {
+  /** APK confirmation-screen omission flag. Only valid for live submit calls. */
+  omitConfirmation?: boolean
   /** Explicitly allows sending a live margin close order. */
   allowTrading?: true
 }
@@ -277,6 +408,8 @@ export type PlaceMarginCloseOrderOptions = MarginCloseOrderOptions & {
 export type MarginCloseSummaryOrderOptions = MarginCloseOrderOptions
 
 export type PlaceMarginCloseSummaryOrderOptions = MarginCloseSummaryOrderOptions & {
+  /** APK confirmation-screen omission flag. Only valid for live submit calls. */
+  omitConfirmation?: boolean
   /** Explicitly allows sending a live margin close summary order. */
   allowTrading?: true
 }
@@ -284,11 +417,35 @@ export type PlaceMarginCloseSummaryOrderOptions = MarginCloseSummaryOrderOptions
 export type IfdOrderOptions = StandardCashOrderOptions & {
   /** Product to use for the first IFD leg. Defaults to cash. */
   tradeType?: 'cash' | 'marginOpen'
+  /** APK margin-open trade type for the first leg when `tradeType` is `marginOpen`. */
+  marginTradeType?: MarginOpenTradeType
+  /** APK ippan margin payment-limit code for the first leg. */
+  ippanMarginPaymentLimit?: string
+  /** Execution condition for the IFD follow-up leg. */
+  ifdPriceCondition?: CashOrderPriceCondition
+  /** Order price for the IFD follow-up leg. */
+  ifdPrice?: number
+  /** Validity for the IFD follow-up leg. */
+  ifdOrderTerm?: CashOrderTerm
+  /** Explicit validity date for the IFD follow-up leg. */
+  ifdOrderDate?: string
+  /** Special order method for the IFD follow-up leg. */
+  ifdOrderMethod?: CashOrderMethod
+  /** Stop trigger direction for the IFD follow-up leg. */
+  ifdTriggerZone?: CashOrderTriggerZone
+  /** Stop trigger price for the IFD follow-up leg. */
+  ifdTriggerPrice?: number
+  /** Secondary OCO execution condition for IFDOCO. */
+  ifdSecondaryPriceCondition?: CashOrderPriceCondition
+  /** Secondary OCO price for IFDOCO. */
+  ifdSecondaryPrice?: number
 }
 
 export type PlaceIfdOrderOptions = IfdOrderOptions & {
   /** Confirmation ID returned by the confirmation step. */
   confirmationId?: string
+  /** APK confirmation-screen omission flag. Only valid for live submit calls. */
+  omitConfirmation?: boolean
   /** Explicitly allows sending a live IFD order. */
   allowTrading?: true
 }
@@ -296,10 +453,45 @@ export type PlaceIfdOrderOptions = IfdOrderOptions & {
 export type ThemeInvestmentOrderOptions = {
   /** Theme ID for the theme investment order. */
   themeId: ThemeId
+  /** Theme set year/month (`theme_set_yyyymm`) from the mobile APK handoff. */
+  themeSetYyyymm: string
+  /** Theme course (`theme_course`) from the mobile APK handoff. */
+  themeCourse: number | string
   /** Buy or sell side for the order. */
   side: TradeSide
+  /** Account/deposit type used for the theme investment order. */
+  accountType?: AccountType
+  /** Deposit type used for the theme investment order. */
+  depositType?: DepositType
+  /** Component stock orders selected by the mobile theme investment flow. */
+  components: ThemeInvestmentOrderComponent[]
   /** Order amount for the theme investment order. */
   amount?: number
+}
+
+export type ThemeInvestmentOrderComponent = {
+  /** Component stock issue code. */
+  issueCode: IssueCode
+  /** Component order quantity. */
+  quantity: number | string
+}
+
+export type ThemeInvestmentPreOrderComponent = {
+  /** Component stock issue code selected by the mobile theme investment flow. */
+  issueCode: IssueCode
+  /** Component order quantity from the mobile handoff, when already selected. */
+  quantity?: number | string
+}
+
+export type ThemeInvestmentPreOrderOptions = {
+  /** Theme ID for the theme investment order target. */
+  themeId: ThemeId
+  /** Theme name from the mobile theme investment flow, when available. */
+  themeName?: string
+  /** Exchange code used for all component stocks in the mobile pre-order call. */
+  exchangeCode: MarketCode
+  /** Component stocks selected by the mobile theme investment flow. */
+  components: ThemeInvestmentPreOrderComponent[]
 }
 
 export type PlaceThemeInvestmentOrderOptions = ThemeInvestmentOrderOptions & {
@@ -425,6 +617,8 @@ export interface SbiClientMethodOrderInquiry {
 }
 
 export interface SbiClientMethodCashOrder {
+  /** Fetches APK cash pre-order information and selectable constraints. */
+  preOrder(options: CashOrderPreOrderOptions): Promise<StockOrderPreOrder>
   /** Estimates a cash order without submitting a live order. */
   estimate(options: CashOrderOptions): Promise<OrderPreview>
   /** Places a live cash order. Requires `allowTrading: true`. */
@@ -442,10 +636,14 @@ export interface SbiClientMethodCashOrder {
 }
 
 export interface SbiClientMethodMarginOrder {
+  /** Fetches APK margin-open pre-order information and selectable constraints. */
+  preOrderOpen(options: MarginOpenOrderPreOrderOptions): Promise<StockOrderPreOrder>
   /** Estimates a margin-open order without submitting a live order. */
   estimateOpen(options: MarginOpenOrderOptions): Promise<OrderPreview>
   /** Places a live margin-open order. Requires `allowTrading: true`. */
   open(options: PlaceMarginOpenOrderOptions): Promise<OrderReceipt>
+  /** Fetches APK margin-close pre-order information and selectable constraints. */
+  preOrderClose(options: MarginCloseOrderPreOrderOptions): Promise<StockOrderPreOrder>
   /** Estimates a margin close order without submitting a live order. */
   estimateClose(options: MarginCloseOrderOptions): Promise<OrderPreview>
   /** Places a live margin close order. Requires `allowTrading: true`. */
@@ -458,6 +656,8 @@ export interface SbiClientMethodMarginOrder {
   estimateSummary(options: MarginCloseSummaryOrderOptions): Promise<OrderPreview>
   /** Places a mobile margin close summary order. Requires `allowTrading: true`. */
   placeSummary(options: PlaceMarginCloseSummaryOrderOptions): Promise<OrderReceipt>
+  /** Fetches APK genbiki/genwatashi pre-order information and selectable constraints. */
+  preOrderActualDelivery(options: ActualDeliveryOrderPreOrderOptions): Promise<StockOrderPreOrder>
   /** Estimates a genbiki/genwatashi actual-delivery order without submitting a live order. */
   estimateActualDelivery(options: ActualDeliveryOrderOptions): Promise<OrderPreview>
   /** Places a genbiki/genwatashi actual-delivery order. Requires `allowTrading: true`. */
@@ -474,14 +674,14 @@ export interface SbiClientMethodIfdOrder {
   /** Places a live IFD order correction. Requires `allowTrading: true`. */
   placeCorrection(options: PlaceOrderCorrectionOptions): Promise<OrderReceipt>
   /** Estimates an IFD order cancellation without submitting a live cancellation. */
-  estimateCancel(options: OrderCorrectionOptions): Promise<OrderPreview>
+  estimateCancel(options: OrderCancelOptions): Promise<OrderPreview>
   /** Places a live IFD order cancellation. Requires `allowTrading: true`. */
-  placeCancel(options: PlaceOrderCorrectionOptions): Promise<OrderReceipt>
+  placeCancel(options: PlaceOrderCancelOptions): Promise<OrderReceipt>
 }
 
 export interface SbiClientMethodThemeInvestmentOrder {
-  /** Fetches theme investment holdings or order targets. */
-  list(): Promise<ThemeInvestmentList>
+  /** Fetches APK theme investment pre-order targets for selected component stocks. */
+  list(options: ThemeInvestmentPreOrderOptions): Promise<ThemeInvestmentList>
   /** Estimates a theme investment order without submitting a live order. */
   estimate(options: ThemeInvestmentOrderOptions): Promise<OrderPreview>
   /** Places a live theme investment order. Requires `allowTrading: true`. */

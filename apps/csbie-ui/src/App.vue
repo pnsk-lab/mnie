@@ -25,7 +25,10 @@ const activeTab = computed<RouteName>(() => {
   return routeNames.includes(route.name as RouteName) ? (route.name as RouteName) : 'portfolio'
 })
 const showAuthGate = computed(() => true)
-const navigate = (name: RouteName) => router.push({ name })
+const navigate = (name: RouteName) => {
+  if (name === 'settings') return router.push('/settings/api-keys')
+  return router.push({ name })
+}
 
 const {
   status,
@@ -67,6 +70,7 @@ const {
   quantityInput,
   priceInput,
   chartMode,
+  chartRange,
   showSearch,
   searchQuery,
   countryFilter,
@@ -86,6 +90,7 @@ const {
   orderHistoryNotice,
   positions,
   chartPricePoints,
+  chartNotice,
   pricePolling,
   selectedStock,
   orderQuantity,
@@ -93,6 +98,11 @@ const {
   cashOrderPrimaryRequiresPrice,
   cashOrderTriggerPrice,
   cashOrderSecondaryPrice,
+  cashOrderAccountTypeOptions,
+  cashOrderMarketOptions,
+  cashOrderTermOptions,
+  cashOrderDateOptions,
+  cashOrderPriceStep,
   estimatedAmount,
   showPortfolioSpinner,
   canRequestCashEstimate,
@@ -106,7 +116,6 @@ const {
   totalAssetValue,
   stockAssetRatio,
   cashAssetRatio,
-  boxPlotStyle,
   hasQuote,
   selectStock,
   connect,
@@ -211,17 +220,23 @@ onMounted(async () => {
           v-model:quantity-input="quantityInput"
           v-model:price-input="priceInput"
           v-model:chart-mode="chartMode"
+          v-model:chart-range="chartRange"
           :viewed-stocks="viewedStocks"
           :selected-stock="selectedStock"
           :selected-position="selectedPosition"
           :connected="connected"
           :order-quantity="orderQuantity"
           :estimated-amount="estimatedAmount"
+          :cash-order-account-type-options="cashOrderAccountTypeOptions"
+          :cash-order-market-options="cashOrderMarketOptions"
+          :cash-order-term-options="cashOrderTermOptions"
+          :cash-order-date-options="cashOrderDateOptions"
+          :cash-order-price-step="cashOrderPriceStep"
           :can-request-cash-estimate="canRequestCashEstimate"
           :can-place-cash-order="canPlaceCashOrder"
           :realtime-price-points="chartPricePoints"
+          :chart-notice="chartNotice"
           :price-polling="pricePolling"
-          :box-plot-style="boxPlotStyle"
           :has-quote="hasQuote"
           @open-search="showSearch = true"
           @select-stock="selectStock"

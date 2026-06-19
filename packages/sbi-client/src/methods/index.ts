@@ -10,6 +10,7 @@ import type {
   ChartPeriod,
   ChartPrice,
   CurrencyAmount,
+  DepositType,
   DomesticMarket,
   IssueChart,
   IssueRef,
@@ -18,10 +19,13 @@ import type {
   IssueSearchStatus,
   MarginPosition,
   MarginPositionList,
+  MarketCode,
   MarketIndex,
   NewsItem,
   NewsList,
   Order,
+  OrderCorrectionPreOrder,
+  OrderKind,
   OrderList,
   OrderPreview,
   OrderReceipt,
@@ -34,14 +38,18 @@ import type {
   SbiSession,
   SbiTradeAuthenticationRequest,
   SignedTextValue,
+  StockOrderPreOrder,
+  StockOrderPreOrderPriceStep,
   ThemeInvestmentList,
   TradeSide,
   Watchlist,
 } from '../types'
 import type {
   AccountPowerOptions,
+  ActualDeliveryOrderPreOrderOptions,
   ActualDeliveryOrderOptions,
   BoardOptions,
+  CashOrderPreOrderOptions,
   CashOrderMethod,
   CashOrderOptions,
   CashOrderPriceCondition,
@@ -52,8 +60,14 @@ import type {
   IssueChartOptions,
   IssueSearchOptions,
   IssueOptions,
+  MarginClosePositionOrder,
+  MarginCloseOrderPreOrderOptions,
   MarginCloseOrderOptions,
+  MarginCloseSummaryOrderOptions,
+  MarginCloseTradeType,
+  MarginOpenOrderPreOrderOptions,
   MarginOpenOrderOptions,
+  MarginOpenTradeType,
   MarketIssueBoardPollingOptions,
   MarginPositionOptions,
   OrderCancelOptions,
@@ -62,7 +76,10 @@ import type {
   PlaceCashOrderOptions,
   PlaceOrderCancelOptions,
   SbiClientMethods,
+  StandardCashOrderOptions,
+  StockOrderMarginPosition,
   ThemeInvestmentOrderOptions,
+  ThemeInvestmentPreOrderOptions,
 } from './types'
 import { SbiServerError } from './error-map'
 
@@ -397,7 +414,13 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
           ),
       },
       cash: {
+        preOrder: async (options) =>
+          parseStockOrderPreOrder(
+            await callMts(session, cashPreOrderTrCode(options), cashPreOrderTrin(session, options)),
+            options,
+          ),
         estimate: async (options) => {
+          assertNoOmitConfirmation(options, 'orders.cash.estimate')
           assertCashOrderOptions(options)
           await prepareCashOrder(session, options)
           return parseOrderPreview(
@@ -422,45 +445,63 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
           )
         },
         estimateCorrection: async (options) =>
-          parseOrderPreview(
-            await callMts(session, 'F2301', orderCorrectionTrin(session, options)),
+          parseOrderCorrectionPreOrder(
+            await callMts(session, 'F2301', orderCorrectionPreOrderTrin(session, options)),
             cashCorrectionPreviewInput,
           ),
         estimateCorrectionConfirm: async (options) =>
           parseOrderPreview(
-            await callMts(session, 'F2302', orderCorrectionTrin(session, options)),
+            await callMts(session, 'F2302', orderCorrectionSubmitTrin(session, options)),
             cashCorrectionPreviewInput,
           ),
         placeCorrection: async (options) => {
           assertTradingAllowed(options, 'orders.cash.placeCorrection')
           return parseOrderReceipt(
-            await callMts(session, 'F2302', orderCorrectionTrin(session, options)),
+            await callMts(session, 'F2303', orderCorrectionSubmitTrin(session, options)),
           )
         },
-        estimateCancel: async (options) =>
-          parseOrderPreview(
+        estimateCancel: async (options) => {
+          assertOrderCancelOptions(options)
+          return parseOrderCorrectionPreOrder(
             await callMts(session, 'F2311', orderCancelPreOrderTrin(session, options)),
             cashCorrectionPreviewInput,
-          ),
+          )
+        },
         placeCancel: async (options) => {
           assertTradingAllowed(options, 'orders.cash.placeCancel')
+          assertPlaceOrderCancelOptions(session, options, 'orders.cash.placeCancel')
           return parseOrderReceipt(
-            await callMts(session, 'F2302', orderCancelSubmitTrin(session, options)),
+            await callMts(session, 'F2304', orderCancelSubmitTrin(session, options)),
           )
         },
       },
       margin: {
-        estimateOpen: async (options) =>
-          parseOrderPreview(
+        preOrderOpen: async (options) =>
+          parseStockOrderPreOrder(
+            await callMts(
+              session,
+              stockPreOrderTrCode('marginOpen', options.side),
+              stockPreOrderTrin(session, options, 'marginOpen'),
+            ),
+            options,
+          ),
+        estimateOpen: async (options) => {
+          assertNoOmitConfirmation(options, 'orders.margin.estimateOpen')
+          assertMarginOpenOrderOptions(options)
+          await prepareMarginOpenOrder(session, options)
+          return parseOrderPreview(
             await callMtsReturningHeaderError(
               session,
               marginOpenConfirmTrCode(options),
               marginOpenOrderTrin(session, options),
             ),
             options,
-          ),
+          )
+        },
         open: async (options) => {
           assertTradingAllowed(options, 'orders.margin.open')
+          assertMarginOpenOrderOptions(options)
+          await prepareMarginOpenOrder(session, options)
           return parseOrderReceipt(
             await callMtsReturningHeaderError(
               session,
@@ -469,74 +510,108 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
             ),
           )
         },
-        estimateClose: async (options) =>
-          parseOrderPreview(
+        preOrderClose: async (options) =>
+          parseStockOrderPreOrder(
             await callMts(
               session,
-              marginCloseConfirmTrCode(options),
-              orderConfirmTrin(session, options),
+              stockPreOrderTrCode('marginClose', options.side),
+              stockPreOrderTrin(session, options, 'marginClose'),
             ),
             options,
           ),
+        estimateClose: async (options) => {
+          assertNoOmitConfirmation(options, 'orders.margin.estimateClose')
+          assertMarginCloseOrderOptions(options)
+          return parseOrderPreview(
+            await callMts(
+              session,
+              marginCloseConfirmTrCode(options),
+              marginCloseOrderTrin(session, options),
+            ),
+            options,
+          )
+        },
         close: async (options) => {
           assertTradingAllowed(options, 'orders.margin.close')
+          assertMarginCloseOrderOptions(options)
           return parseOrderReceipt(
             await callMts(
               session,
               marginCloseReceptionTrCode(options),
-              orderConfirmTrin(session, options),
+              marginCloseOrderTrin(session, options),
             ),
           )
         },
-        estimateCloseSummary: async (options) =>
-          parseOrderPreview(
+        estimateCloseSummary: async (options) => {
+          assertNoOmitConfirmation(options, 'orders.margin.estimateCloseSummary')
+          assertMarginCloseOrderOptions(options)
+          return parseOrderPreview(
             await callMts(
               session,
               marginCloseConfirmTrCode(options),
-              orderConfirmTrin(session, options),
+              marginCloseOrderTrin(session, options),
             ),
             options,
-          ),
+          )
+        },
         closeSummary: async (options) => {
           assertTradingAllowed(options, 'orders.margin.closeSummary')
+          assertMarginCloseOrderOptions(options)
           return parseOrderReceipt(
             await callMts(
               session,
               marginCloseReceptionTrCode(options),
-              orderConfirmTrin(session, options),
+              marginCloseOrderTrin(session, options),
             ),
           )
         },
-        estimateSummary: async (options) =>
-          parseOrderPreview(
+        estimateSummary: async (options) => {
+          assertNoOmitConfirmation(options, 'orders.margin.estimateSummary')
+          assertMarginCloseSummaryOrderOptions(options)
+          return parseOrderPreview(
             await callMts(
               session,
               marginCloseSummaryConfirmTrCode(options),
-              marginSummaryOrderTrin(session, options),
+              marginCloseSummaryOrderTrin(session, options),
             ),
             options,
-          ),
+          )
+        },
         placeSummary: async (options) => {
           assertTradingAllowed(options, 'orders.margin.placeSummary')
+          assertMarginCloseSummaryOrderOptions(options)
           return parseOrderReceipt(
             await callMts(
               session,
               marginCloseSummaryReceptionTrCode(options),
-              marginSummaryOrderTrin(session, options),
+              marginCloseSummaryOrderTrin(session, options),
             ),
           )
         },
-        estimateActualDelivery: async (options) =>
-          parseOrderPreview(
+        preOrderActualDelivery: async (options) =>
+          parseStockOrderPreOrder(
+            await callMts(
+              session,
+              stockPreOrderTrCode(options.kind, actualDeliverySide(options)),
+              stockPreOrderTrin(session, options, options.kind),
+            ),
+            options,
+          ),
+        estimateActualDelivery: async (options) => {
+          assertNoOmitConfirmation(options, 'orders.margin.estimateActualDelivery')
+          assertActualDeliveryOrderOptions(options)
+          return parseOrderPreview(
             await callMts(
               session,
               actualDeliveryConfirmTrCode(options),
               actualDeliveryOrderTrin(session, options),
             ),
             { ...options, side: actualDeliverySide(options) },
-          ),
+          )
+        },
         actualDelivery: async (options) => {
           assertTradingAllowed(options, 'orders.margin.actualDelivery')
+          assertActualDeliveryOrderOptions(options)
           return parseOrderReceipt(
             await callMts(
               session,
@@ -547,48 +622,72 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
         },
       },
       ifd: {
-        estimate: async (options) =>
-          parseOrderPreview(
-            await callMts(session, ifdConfirmTrCode(options), ifdOrderTrin(session, options)),
+        estimate: async (options) => {
+          assertNoOmitConfirmation(options, 'orders.ifd.estimate')
+          assertIfdOrderOptions(options)
+          return parseOrderPreview(
+            await callMtsReturningHeaderError(
+              session,
+              ifdConfirmTrCode(options),
+              ifdOrderTrin(session, options),
+            ),
             options,
-          ),
+          )
+        },
         place: async (options) => {
           assertTradingAllowed(options, 'orders.ifd.place')
+          assertIfdOrderOptions(options)
           return parseOrderReceipt(
-            await callMts(session, ifdReceptionTrCode(options), ifdOrderTrin(session, options)),
+            await callMtsReturningHeaderError(
+              session,
+              ifdReceptionTrCode(options),
+              ifdOrderTrin(session, options),
+            ),
           )
         },
         estimateCorrection: async (options) =>
           parseOrderPreview(
-            await callMts(session, 'F2331', orderCorrectionTrin(session, options)),
+            await callMts(session, 'F2331', orderIfdCorrectionSubmitTrin(session, options)),
             cashCorrectionPreviewInput,
           ),
         placeCorrection: async (options) => {
           assertTradingAllowed(options, 'orders.ifd.placeCorrection')
           return parseOrderReceipt(
-            await callMts(session, 'F2332', orderCorrectionTrin(session, options)),
+            await callMts(session, 'F2332', orderIfdCorrectionSubmitTrin(session, options)),
           )
         },
-        estimateCancel: async (options) =>
-          parseOrderPreview(
-            await callMts(session, 'F2331', orderCorrectionTrin(session, options)),
+        estimateCancel: async (options) => {
+          assertOrderCancelOptions(options)
+          return parseOrderPreview(
+            await callMts(session, 'F2311', orderCancelPreOrderTrin(session, options)),
             cashCorrectionPreviewInput,
-          ),
+          )
+        },
         placeCancel: async (options) => {
           assertTradingAllowed(options, 'orders.ifd.placeCancel')
+          assertPlaceOrderCancelOptions(session, options, 'orders.ifd.placeCancel')
           return parseOrderReceipt(
-            await callMts(session, 'F2332', orderCorrectionTrin(session, options)),
+            await callMts(session, 'F2304', orderCancelSubmitTrin(session, options)),
           )
         },
       },
       themeInvestment: {
-        list: async () => parseThemeInvestmentList(await callMts(session, 'F1750')),
-        estimate: async (options) =>
-          parseThemeOrderPreview(
+        list: async (options) => {
+          assertThemeInvestmentPreOrderOptions(options)
+          return parseThemeInvestmentList(
+            await callMts(session, 'F1750', themePreOrderTrin(session, options)),
+            options,
+          )
+        },
+        estimate: async (options) => {
+          assertThemeInvestmentOrderOptions(session, options)
+          return parseThemeOrderPreview(
             await callMts(session, 'F1904', themeOrderTrin(session, options)),
             options,
-          ),
+          )
+        },
         place: async (options) => {
+          assertThemeInvestmentOrderOptions(session, options)
           assertTradingAllowed(options, 'orders.themeInvestment.place')
           return parseOrderReceipt(
             await callMts(session, 'F1905', themeOrderTrin(session, options)),
@@ -1782,6 +1881,189 @@ const parseOrderPreview = (response: MtsResponse, options: OrderPreviewInput): O
   error: methodErrorFromHeader(response),
 })
 
+const parseOrderCorrectionPreOrder = (
+  response: MtsResponse,
+  options: OrderPreviewInput,
+): OrderPreview => {
+  const headerError = methodErrorFromHeader(response)
+  const warnings = collectMessages(response.text)
+  const fallback = {
+    issue: { code: options.issueCode, market: options.market },
+    side: options.side,
+    warnings,
+    confirmationId: response.header.lastExecutionTime || undefined,
+    message: warnings.join('\n') || undefined,
+    error: headerError,
+  } satisfies OrderPreview
+
+  if (headerError || response.buffer.length <= MTS_HEADER_BYTES) return fallback
+
+  const reader = readerFor(response)
+  const tradeTitle = reader.text(20)
+  const buyingPowerTotal = reader.text(15)
+  const controlledStockCode = reader.text(1)
+  const deficitMessageFlag = reader.text(1)
+  const deficitMessage = reader.text(1500)
+  const issueCode = reader.text(5)
+  const market = reader.text(3)
+  const details: OrderCorrectionPreOrder['details'] = []
+  const detailCount = safeCount(reader, 1)
+
+  for (let index = 0; index < detailCount; index += 1) {
+    const exchangeName = reader.text(30)
+    const marketLoanKbn = reader.text(4)
+    const marketIppanLoanKbn = reader.text(4)
+    const currentPrice = reader.text(11)
+    const tradeColorFlag = reader.text(1)
+    const priceTick = reader.text(1)
+    const priceTickText = reader.text(2)
+    const tradeTime = reader.text(5)
+    const changeText = reader.text(25)
+    const volumeText = reader.text(11)
+    details.push({
+      exchangeName: emptyToUndefined(exchangeName),
+      marketLoanKbn: emptyToUndefined(marketLoanKbn),
+      marketIppanLoanKbn: emptyToUndefined(marketIppanLoanKbn),
+      currentPrice: yen(currentPrice),
+      tradeColorFlag: emptyToUndefined(tradeColorFlag),
+      priceTick: emptyToUndefined(priceTick),
+      priceTickText: emptyToUndefined(priceTickText),
+      tradeTime: emptyToUndefined(tradeTime),
+      changeText: emptyToUndefined(changeText),
+      volumeText: emptyToUndefined(volumeText),
+    })
+  }
+
+  const orderNumber = reader.text(6)
+  const orderId = reader.text(7)
+  const primaryOrderMethod = reader.text(3)
+  const primaryTriggerZone = reader.text(1)
+  const primaryTriggerPrice = reader.text(10)
+  const status = reader.text(1)
+  const statusText = reader.text(6)
+  const tradeId = reader.text(1)
+  const tradeName = reader.text(6)
+  const quantityText = reader.text(8)
+  const quantityDetailText = reader.text(20)
+  reader.skip(18)
+  reader.skip(2)
+  reader.skip(40)
+  reader.skip(40)
+  const orderLimit = reader.text(2)
+  const orderLimitText = reader.text(20)
+  const priceSteps: StockOrderPreOrderPriceStep[] = []
+  const priceStepCount = safeCount(reader, 4)
+
+  for (let index = 0; index < priceStepCount; index += 1) {
+    const from = reader.text(11)
+    const to = reader.text(11)
+    priceSteps.push({ from: yen(from), to: yen(to) })
+  }
+
+  const sessionRange = reader.text(30)
+  const inputDateText = reader.text(8)
+  const primaryOrderTerm = reader.text(14)
+  const nonSpecificTradeText = reader.text(12)
+  const marketName = reader.text(10)
+  const rbeOrderStatus = reader.text(1)
+  const priceCondition = reader.text(1)
+  const price = reader.text(10)
+  const exchangeName = reader.text(30)
+  const transId = reader.text(1)
+  const ptsDayNightFlag = reader.text(1)
+  const smallTickFlag = reader.text(1)
+  const juniorBuyingPowerTotal = reader.text(17)
+  const secondaryPriceCondition = reader.text(1)
+  const secondaryPrice = reader.text(15)
+  const autoOrderKind = reader.text(4)
+  const autoOrderNumber = reader.text(7)
+  const autoOrderInputDate = reader.text(14)
+  const secondaryOrderMethod = reader.text(3)
+  const secondaryTriggerZone = reader.text(1)
+  const secondaryTriggerPrice = reader.text(10)
+  const secondaryOrderCondition = reader.text(1)
+  const secondaryLimitPrice = reader.text(10)
+  const secondaryOrderTerm = reader.text(8)
+  const secondaryOcoPriceCondition = reader.text(1)
+  const secondaryOcoPrice = reader.text(10)
+  reader.skip(1)
+  const exchangeList = reader.text(30)
+
+  const issue = {
+    code: emptyToUndefined(issueCode) ?? options.issueCode,
+    market: emptyToUndefined(market) ?? options.market,
+  }
+  const parsedPrice = yen(price)
+  const parsedQuantity = parseNumber(quantityText)
+  const correction: OrderCorrectionPreOrder = {
+    issue,
+    tradeTitle: emptyToUndefined(tradeTitle),
+    buyingPowerTotal: yen(buyingPowerTotal),
+    controlledStockCode: emptyToUndefined(controlledStockCode),
+    hasTradeWarning: controlledStockCode === '1',
+    deficitMessageFlag: emptyToUndefined(deficitMessageFlag),
+    deficitMessage: emptyToUndefined(deficitMessage),
+    details,
+    orderNumber: emptyToUndefined(orderNumber),
+    orderId: emptyToUndefined(orderId),
+    primaryOrderMethod: emptyControlFieldToUndefined(primaryOrderMethod),
+    primaryTriggerZone: emptyControlFieldToUndefined(primaryTriggerZone),
+    primaryTriggerPrice: parseNumber(primaryTriggerPrice),
+    status: emptyToUndefined(status),
+    statusText: emptyToUndefined(statusText),
+    tradeId: emptyToUndefined(tradeId),
+    tradeName: emptyToUndefined(tradeName),
+    quantity: parsedQuantity,
+    quantityText: emptyToUndefined(quantityDetailText),
+    orderLimit: emptyToUndefined(orderLimit),
+    orderLimitText: emptyToUndefined(orderLimitText),
+    priceSteps,
+    sessionRange: emptyToUndefined(sessionRange),
+    inputDateText: emptyToUndefined(inputDateText),
+    primaryOrderTerm: emptyToUndefined(primaryOrderTerm),
+    nonSpecificTradeText: emptyToUndefined(nonSpecificTradeText),
+    marketName: emptyToUndefined(marketName),
+    rbeOrderStatus: emptyToUndefined(rbeOrderStatus),
+    priceCondition: emptyControlFieldToUndefined(priceCondition),
+    price: parsedPrice.value,
+    priceAmount: parsedPrice,
+    exchangeName: emptyToUndefined(exchangeName),
+    transId: emptyToUndefined(transId),
+    ptsDayNightFlag: emptyToUndefined(ptsDayNightFlag),
+    smallTickFlag: emptyToUndefined(smallTickFlag),
+    juniorBuyingPowerTotal: yen(juniorBuyingPowerTotal),
+    secondaryPriceCondition: emptyControlFieldToUndefined(secondaryPriceCondition),
+    secondaryPrice: parseNumber(secondaryPrice),
+    secondaryPriceAmount: yen(secondaryPrice),
+    autoOrderKind: emptyToUndefined(autoOrderKind),
+    autoOrderNumber: emptyToUndefined(autoOrderNumber),
+    autoOrderInputDate: emptyToUndefined(autoOrderInputDate),
+    secondaryOrderMethod: emptyControlFieldToUndefined(secondaryOrderMethod),
+    secondaryTriggerZone: emptyControlFieldToUndefined(secondaryTriggerZone),
+    secondaryTriggerPrice: parseNumber(secondaryTriggerPrice),
+    secondaryOrderCondition: emptyControlFieldToUndefined(secondaryOrderCondition),
+    secondaryLimitPrice: parseNumber(secondaryLimitPrice),
+    secondaryLimitPriceAmount: yen(secondaryLimitPrice),
+    secondaryOrderTerm: emptyToUndefined(secondaryOrderTerm),
+    secondaryOcoPriceCondition: emptyControlFieldToUndefined(secondaryOcoPriceCondition),
+    secondaryOcoPrice: parseNumber(secondaryOcoPrice),
+    secondaryOcoPriceAmount: yen(secondaryOcoPrice),
+    exchangeList: emptyToUndefined(exchangeList),
+  }
+
+  return {
+    issue,
+    side: correction.tradeId ? mapSide(correction.tradeId) : options.side,
+    quantity: parsedQuantity ?? undefined,
+    price: parsedPrice,
+    warnings,
+    confirmationId: response.header.lastExecutionTime || undefined,
+    message: warnings.join('\n') || undefined,
+    correction,
+    error: headerError,
+  }
+}
+
 const parseThemeOrderPreview = (
   response: MtsResponse,
   options: ThemeInvestmentOrderOptions,
@@ -1806,7 +2088,269 @@ const parseOrderReceipt = (response: MtsResponse): OrderReceipt => {
   }
 }
 
-const parseThemeInvestmentList = (_response: MtsResponse): ThemeInvestmentList => ({ themes: [] })
+type StockOrderPreOrderInput =
+  | CashOrderOptions
+  | CashOrderPreOrderOptions
+  | MarginOpenOrderPreOrderOptions
+  | MarginCloseOrderPreOrderOptions
+  | ActualDeliveryOrderPreOrderOptions
+
+const parseStockOrderPreOrder = (
+  response: MtsResponse,
+  options: StockOrderPreOrderInput,
+): StockOrderPreOrder => {
+  const headerError = methodErrorFromHeader(response)
+  const fallback = {
+    issue: { code: options.issueCode, market: options.market },
+    market: options.market,
+    priceSteps: [],
+    orderTerms: [],
+    orderTermDates: [],
+    paymentLimits: [],
+    error: headerError,
+  } satisfies StockOrderPreOrder
+
+  if (headerError || response.buffer.length <= MTS_HEADER_BYTES) return fallback
+
+  const reader = readerFor(response)
+  const tradeTitle = reader.text(20)
+  const buyingPowerTotal = reader.text(25)
+  const controlledStockCode = reader.text(1)
+  const deficitMessageFlag = reader.text(1)
+  const deficitMessage = reader.text(1500)
+  const issueCode = reader.text(5)
+  const market = reader.text(3)
+  const issueName = reader.text(30)
+  const exchangeList = reader.text(30)
+  const exchangeListName = reader.text(30)
+  const exchangeListIndexFlag = reader.text(1)
+  const marketLoanKbn = reader.text(4)
+  const marketIppanLoanKbn = reader.text(4)
+  const currentPrice = reader.text(11)
+  const tradeColorFlag = reader.text(1)
+  const priceTick = reader.text(1)
+  const priceTickText = reader.text(2)
+  const tradeTime = reader.text(5)
+  const changeText = reader.text(25)
+  const volume = reader.text(11)
+  const lotSize = reader.text(20)
+  const priceSteps: StockOrderPreOrderPriceStep[] = []
+  const priceStepCount = safeCount(reader, 4)
+
+  for (let index = 0; index < priceStepCount; index += 1) {
+    const from = reader.text(11)
+    const to = reader.text(11)
+    priceSteps.push({ from: yen(from), to: yen(to) })
+  }
+
+  const sessionRange = reader.text(30)
+  const basePrice = reader.text(11)
+  const orderTerms: string[] = []
+  const orderTermDates: string[] = []
+  const orderTermCount = safeCount(reader, 2)
+  for (let index = 0; index < orderTermCount; index += 1) {
+    const term = reader.text(8)
+    const termDate = reader.text(8)
+    const normalizedTerm = emptyControlFieldToUndefined(term)
+    const normalizedTermDate = emptyControlFieldToUndefined(termDate)
+    if (normalizedTerm) orderTerms.push(normalizedTerm)
+    if (normalizedTermDate) orderTermDates.push(normalizedTermDate)
+  }
+
+  const paymentLimits: StockOrderPreOrder['paymentLimits'] = []
+  const paymentLimitCount = safeCount(reader, 2)
+  for (let index = 0; index < paymentLimitCount; index += 1) {
+    const text = reader.text(16)
+    const code = reader.text(1)
+    paymentLimits.push({
+      text: emptyToUndefined(text),
+      code: emptyToUndefined(code),
+    })
+  }
+
+  const nonSpecificTradeText = reader.text(12)
+  const paymentLimitText = reader.text(16)
+  const acquisitionPrice = reader.text(11)
+  const position = reader.text(36)
+  const unexecutedQuantity = reader.text(16)
+  const lotSize2 = reader.text(11)
+  const ptsDayNightFlag = reader.text(1)
+  const sorServiceType = reader.text(1)
+  const isaServiceKbn = reader.text(1)
+  const isaBuyLimit = reader.text(12)
+  const isaGrowthServiceKbn = reader.text(1)
+  const smallTickFlag = reader.text(1)
+  const ippanShort = reader.text(1)
+  const ippanLong = reader.text(1)
+  const dayBuy = reader.text(1)
+  const daySell = reader.text(1)
+  const premiumShortSelling = reader.text(1)
+  const premiumFee = reader.text(25)
+  const ippanPaymentLimit = reader.text(2)
+  const positionStatus = reader.text(1)
+  const juniorNisaBuyLimit = reader.text(12)
+  const juniorNisaServiceKbn = reader.text(1)
+  const juniorBuyingPowerTotal = reader.text(17)
+  const sKabuCode = reader.text(1)
+
+  return {
+    issue: {
+      code: emptyToUndefined(issueCode) ?? options.issueCode,
+      market: emptyToUndefined(market) ?? options.market,
+      name: emptyToUndefined(stripIssueCodePrefix(issueName, issueCode)),
+    },
+    tradeTitle: emptyToUndefined(tradeTitle),
+    buyingPowerTotal: yen(buyingPowerTotal),
+    controlledStockCode: emptyToUndefined(controlledStockCode),
+    hasTradeWarning: controlledStockCode === '1',
+    market: emptyToUndefined(market) ?? options.market,
+    exchangeList: emptyToUndefined(exchangeList),
+    exchangeListName: emptyToUndefined(exchangeListName),
+    exchangeListIndexFlag: emptyToUndefined(exchangeListIndexFlag),
+    marketLoanKbn: emptyToUndefined(marketLoanKbn),
+    marketIppanLoanKbn: emptyToUndefined(marketIppanLoanKbn),
+    currentPrice: yen(currentPrice),
+    tradeColorFlag: emptyToUndefined(tradeColorFlag),
+    priceTick: emptyToUndefined(priceTick),
+    priceTickText: emptyToUndefined(priceTickText),
+    tradeTime: emptyToUndefined(tradeTime),
+    changeText: emptyToUndefined(changeText),
+    volume: parseNumber(volume),
+    lotSize: parseNumber(lotSize),
+    priceSteps,
+    sessionRange: emptyToUndefined(sessionRange),
+    basePrice: yen(basePrice),
+    orderTerms,
+    orderTermDates,
+    paymentLimits,
+    nonSpecificTradeText: emptyToUndefined(nonSpecificTradeText),
+    paymentLimitText: emptyToUndefined(paymentLimitText),
+    acquisitionPrice: yen(acquisitionPrice),
+    position: parseNumber(position),
+    unexecutedQuantity: parseNumber(unexecutedQuantity),
+    lotSize2: parseNumber(lotSize2),
+    ptsDayNightFlag: emptyToUndefined(ptsDayNightFlag),
+    sorServiceType: emptyToUndefined(sorServiceType),
+    nisa: {
+      serviceKbn: emptyToUndefined(isaServiceKbn),
+      buyLimit: yen(isaBuyLimit),
+      growthServiceKbn: emptyToUndefined(isaGrowthServiceKbn),
+      juniorServiceKbn: emptyToUndefined(juniorNisaServiceKbn),
+      juniorBuyLimit: yen(juniorNisaBuyLimit),
+      juniorBuyingPowerTotal: yen(juniorBuyingPowerTotal),
+    },
+    smallTickFlag: emptyToUndefined(smallTickFlag),
+    margin: {
+      tradeTypes: stockPreOrderMarginTradeTypes(paymentLimits),
+      ippanShort: emptyToUndefined(ippanShort),
+      ippanLong: emptyToUndefined(ippanLong),
+      dayBuy: emptyToUndefined(dayBuy),
+      daySell: emptyToUndefined(daySell),
+      premiumShortSelling: emptyToUndefined(premiumShortSelling),
+      premiumFee: yen(premiumFee),
+      ippanPaymentLimit: emptyToUndefined(ippanPaymentLimit),
+      positionStatus: emptyToUndefined(positionStatus),
+    },
+    sKabu: {
+      code: emptyToUndefined(sKabuCode),
+      available: sKabuCode === '1',
+    },
+    deficitMessageFlag: emptyToUndefined(deficitMessageFlag),
+    deficitMessage: emptyToUndefined(deficitMessage),
+    error: headerError,
+  }
+}
+
+const stockPreOrderMarginTradeTypes = (
+  paymentLimits: StockOrderPreOrder['paymentLimits'],
+): MarginOpenTradeType[] => {
+  const tradeTypes = paymentLimits
+    .map((paymentLimit) => marginOpenTradeTypeFromCode(paymentLimit.code))
+    .filter((value): value is MarginOpenTradeType => Boolean(value))
+  return [...new Set(tradeTypes)]
+}
+
+const marginOpenTradeTypeFromCode = (
+  value: string | undefined,
+): MarginOpenTradeType | undefined => {
+  if (value === '6') return 'standard'
+  if (value === '9') return 'generalBuy'
+  if (value === 'A') return 'generalSellShort'
+  if (value === 'B') return 'generalSellInventoryLimited'
+  if (value === 'C') return 'generalSellInventoryUnlimited'
+  if (value === 'D') return 'day'
+  if (value === 'E') return 'hyper'
+  return undefined
+}
+
+const parseThemeInvestmentList = (
+  response: MtsResponse,
+  options: ThemeInvestmentPreOrderOptions,
+): ThemeInvestmentList => {
+  const reader = readerFor(response)
+  const buyingPowerTotal = reader.text(25)
+  const deficitMessageFlag = reader.text(1)
+  const deficitMessage = reader.text(1500)
+  const isaBuyLimit = reader.text(12)
+  const juniorNisaBuyLimit = reader.text(12)
+  const buyingPowerTotalJuniorNisa = reader.text(17)
+  const count = safeCount(reader, 4)
+  const issues: ThemeInvestmentList['themes'][number]['issues'] = []
+
+  for (let index = 0; index < count; index += 1) {
+    const productName = reader.text(30)
+    const exchangeCode = reader.text(3)
+    const controlledStockCode = reader.text(1)
+    const nisaServiceKbn = reader.text(1)
+    const juniorNisaServiceKbn = reader.text(1)
+    const growthNisaServiceKbn = reader.text(1)
+    const sKabuCode = reader.text(1)
+    const lotSize = reader.text(10)
+    const currentPrice = reader.text(11)
+    const tradeColorFlag = reader.text(1)
+    const priceTick = reader.text(1)
+    const priceTickText = reader.text(2)
+    const tradeTime = reader.text(5)
+
+    const code = options.components[index]?.issueCode
+    if (!code) continue
+    issues.push({
+      code,
+      market: emptyToUndefined(exchangeCode) ?? options.exchangeCode,
+      name: emptyToUndefined(productName),
+      controlledStockCode: emptyToUndefined(controlledStockCode),
+      hasTradeWarning: Boolean(emptyToUndefined(controlledStockCode)),
+      nisaServiceKbn: emptyToUndefined(nisaServiceKbn),
+      juniorNisaServiceKbn: emptyToUndefined(juniorNisaServiceKbn),
+      growthNisaServiceKbn: emptyToUndefined(growthNisaServiceKbn),
+      sKabuCode: emptyToUndefined(sKabuCode),
+      sKabuAvailable: sKabuCode === '1',
+      lotSize: parseNumber(lotSize),
+      currentPrice: yen(currentPrice),
+      tradeColorFlag: emptyToUndefined(tradeColorFlag),
+      priceTick: emptyToUndefined(priceTick),
+      priceTickText: emptyToUndefined(priceTickText),
+      tradeTime: emptyToUndefined(tradeTime),
+    })
+  }
+
+  return {
+    themes: [
+      {
+        id: options.themeId,
+        name: options.themeName ?? options.themeId,
+        issues,
+      },
+    ],
+    buyingPowerTotal: yen(buyingPowerTotal),
+    isaBuyLimit: yen(isaBuyLimit),
+    juniorNisaBuyLimit: yen(juniorNisaBuyLimit),
+    buyingPowerTotalJuniorNisa: yen(buyingPowerTotalJuniorNisa),
+    deficitMessage: emptyToUndefined(deficitMessage),
+    deficitMessageFlag: emptyToUndefined(deficitMessageFlag),
+    error: methodErrorFromHeader(response),
+  }
+}
 
 const assertTradingAllowed = (options: { allowTrading?: true }, name: string) => {
   if (options.allowTrading !== true) {
@@ -1816,7 +2360,23 @@ const assertTradingAllowed = (options: { allowTrading?: true }, name: string) =>
   }
 }
 
+const assertNoOmitConfirmation = (options: unknown, methodName: string) => {
+  if (
+    options &&
+    typeof options === 'object' &&
+    !Array.isArray(options) &&
+    (options as { omitConfirmation?: unknown }).omitConfirmation
+  ) {
+    throw new Error(
+      `${methodName} cannot use omitConfirmation because APK confirmation calls may submit orders`,
+    )
+  }
+}
+
 const assertCashOrderOptions = (options: CashOrderOptions) => {
+  if (options.accountType && options.depositType && options.accountType !== options.depositType) {
+    throw new Error('orders.cash accountType and depositType must match when both are specified')
+  }
   if (options.kind === 's') {
     const optionRecord = options as Record<string, unknown>
     const unsupportedFields = [
@@ -1829,6 +2389,7 @@ const assertCashOrderOptions = (options: CashOrderOptions) => {
       'triggerPrice',
       'secondaryPriceCondition',
       'secondaryPrice',
+      'ippanMarginPaymentLimit',
       'sorLastMarket',
     ].filter((key) => key in optionRecord && optionRecord[key] != null)
     if (unsupportedFields.length) {
@@ -1837,22 +2398,35 @@ const assertCashOrderOptions = (options: CashOrderOptions) => {
     if (options.market !== 'STK') {
       throw new Error('orders.cash with kind: "s" requires market: "STK"')
     }
+    if (!options.preOrderMarket) {
+      throw new Error('orders.cash with kind: "s" requires preOrderMarket for APK pre-order')
+    }
     if (!Number.isInteger(options.quantity)) {
       throw new Error('orders.cash with kind: "s" requires an integer quantity')
     }
     return
   }
 
+  assertStandardStockOrderOptions(options, 'orders.cash')
+}
+
+const assertStandardStockOrderOptions = (
+  options: StandardStockOrderOptions,
+  methodName: string,
+) => {
+  if (options.accountType && options.depositType && options.accountType !== options.depositType) {
+    throw new Error(`${methodName} accountType and depositType must match when both are specified`)
+  }
   const priceCondition = cashOrderPriceCondition(options)
   if (cashOrderPriceConditionRequiresPrice(priceCondition) && options.price == null) {
-    throw new Error(`orders.cash priceCondition: "${priceCondition}" requires price`)
+    throw new Error(`${methodName} priceCondition: "${priceCondition}" requires price`)
   }
   if (!cashOrderPriceConditionRequiresPrice(priceCondition) && options.price != null) {
-    throw new Error(`orders.cash priceCondition: "${priceCondition}" cannot specify price`)
+    throw new Error(`${methodName} priceCondition: "${priceCondition}" cannot specify price`)
   }
   if (options.orderTerm === 'date') normalizeOrderDate(options.orderDate)
   if (options.orderTerm !== 'date' && options.orderDate) {
-    throw new Error('orders.cash orderDate requires orderTerm: "date"')
+    throw new Error(`${methodName} orderDate requires orderTerm: "date"`)
   }
 
   const orderMethod = cashOrderMethod(options)
@@ -1860,36 +2434,233 @@ const assertCashOrderOptions = (options: CashOrderOptions) => {
   const hasSecondary = options.secondaryPriceCondition != null || options.secondaryPrice != null
   if (orderMethod === 'normal') {
     if (hasTrigger)
-      throw new Error('orders.cash trigger fields require orderMethod: "stop" or "oco"')
-    if (hasSecondary) throw new Error('orders.cash secondary fields require orderMethod: "oco"')
+      throw new Error(`${methodName} trigger fields require orderMethod: "stop" or "oco"`)
+    if (hasSecondary) throw new Error(`${methodName} secondary fields require orderMethod: "oco"`)
   }
   if (orderMethod === 'stop' || orderMethod === 'oco') {
     if (!options.triggerZone) {
-      throw new Error(`orders.cash orderMethod: "${orderMethod}" requires triggerZone`)
+      throw new Error(`${methodName} orderMethod: "${orderMethod}" requires triggerZone`)
     }
     if (options.triggerPrice == null) {
-      throw new Error(`orders.cash orderMethod: "${orderMethod}" requires triggerPrice`)
+      throw new Error(`${methodName} orderMethod: "${orderMethod}" requires triggerPrice`)
     }
   }
   if (orderMethod === 'stop' && hasSecondary) {
-    throw new Error('orders.cash orderMethod: "stop" cannot specify secondary fields')
+    throw new Error(`${methodName} orderMethod: "stop" cannot specify secondary fields`)
   }
   if (orderMethod === 'oco') {
     if (!options.secondaryPriceCondition) {
-      throw new Error('orders.cash orderMethod: "oco" requires secondaryPriceCondition')
+      throw new Error(`${methodName} orderMethod: "oco" requires secondaryPriceCondition`)
     }
     if (
       cashOrderPriceConditionRequiresPrice(options.secondaryPriceCondition) &&
       options.secondaryPrice == null
     ) {
-      throw new Error('orders.cash orderMethod: "oco" requires secondaryPrice')
+      throw new Error(`${methodName} orderMethod: "oco" requires secondaryPrice`)
     }
     if (
       !cashOrderPriceConditionRequiresPrice(options.secondaryPriceCondition) &&
       options.secondaryPrice != null
     ) {
       throw new Error(
-        `orders.cash secondaryPriceCondition: "${options.secondaryPriceCondition}" cannot specify secondaryPrice`,
+        `${methodName} secondaryPriceCondition: "${options.secondaryPriceCondition}" cannot specify secondaryPrice`,
+      )
+    }
+  }
+}
+
+type StandardStockOrderOptions = StandardCashOrderOptions
+
+const assertMarginOpenOrderOptions = (options: MarginOpenOrderOptions) => {
+  assertStandardStockOrderOptions(options, 'orders.margin.open')
+  marginOpenTradeTypeCode(options.marginTradeType)
+}
+
+const assertMarginCloseOrderOptions = (options: MarginCloseOrderOptions) => {
+  assertStandardStockOrderOptions(options, 'orders.margin.close')
+  marginCloseTradeTypeCode(options.marginCloseTradeType)
+  if (options.positionId && !options.marginPositions?.length) {
+    throw new Error(
+      'orders.margin.close positionId is not enough for the APK payload; specify marginPositions',
+    )
+  }
+  if (!options.marginPositions?.length) {
+    throw new Error('orders.margin.close requires marginPositions selected from the APK fields')
+  }
+  if (options.marginClosePositionOrder) {
+    throw new Error(
+      'orders.margin.close marginClosePositionOrder is only sent by orders.margin.estimateSummary/placeSummary',
+    )
+  }
+}
+
+const assertMarginCloseSummaryOrderOptions = (options: MarginCloseSummaryOrderOptions) => {
+  assertStandardStockOrderOptions(options, 'orders.margin.placeSummary')
+  marginCloseTradeTypeCode(options.marginCloseTradeType)
+  marginClosePositionOrderCode(options.marginClosePositionOrder)
+  if (options.marginPositions?.length) {
+    throw new Error(
+      'orders.margin.placeSummary does not send marginPositions; use orders.margin.close for specified close',
+    )
+  }
+}
+
+const assertActualDeliveryOrderOptions = (options: ActualDeliveryOrderOptions) => {
+  if (options.accountType && options.depositType && options.accountType !== options.depositType) {
+    throw new Error(
+      'orders.margin.actualDelivery accountType and depositType must match when both are specified',
+    )
+  }
+  if (options.price != null) {
+    throw new Error(
+      'orders.margin.actualDelivery uses market orders in the APK and cannot specify price',
+    )
+  }
+  if (options.positionId && !options.marginPositions?.length) {
+    throw new Error(
+      'orders.margin.actualDelivery positionId is not enough for the APK payload; specify marginPositions',
+    )
+  }
+  if (!options.marginPositions?.length) {
+    throw new Error(
+      'orders.margin.actualDelivery requires marginPositions selected from the APK fields',
+    )
+  }
+}
+
+const assertThemeInvestmentOrderOptions = (
+  session: SbiSession,
+  options: ThemeInvestmentOrderOptions,
+) => {
+  if (options.accountType && options.depositType && options.accountType !== options.depositType) {
+    throw new Error(
+      'orders.themeInvestment accountType and depositType must match when both are specified',
+    )
+  }
+  if (options.side !== 'buy') {
+    throw new Error('orders.themeInvestment APK payload does not support side: "sell"')
+  }
+  if (!options.themeSetYyyymm) {
+    throw new Error('orders.themeInvestment requires themeSetYyyymm from the APK handoff')
+  }
+  if (String(options.themeSetYyyymm).length !== 6) {
+    throw new Error('orders.themeInvestment themeSetYyyymm must be 6 digits')
+  }
+  if (options.themeCourse == null || String(options.themeCourse).length > 2) {
+    throw new Error('orders.themeInvestment themeCourse must fit the APK 2-byte field')
+  }
+  if (!options.components?.length) {
+    throw new Error('orders.themeInvestment requires components selected from the APK fields')
+  }
+  if (options.components.length > 10) {
+    throw new Error('orders.themeInvestment supports up to 10 component stocks from the APK')
+  }
+  for (const [index, component] of options.components.entries()) {
+    if (!component.issueCode) {
+      throw new Error(`orders.themeInvestment components.${index}.issueCode is required`)
+    }
+    if (component.quantity == null || String(component.quantity).length === 0) {
+      throw new Error(`orders.themeInvestment components.${index}.quantity is required`)
+    }
+  }
+  if (!session.tradePassword) {
+    throw new Error('orders.themeInvestment requires tradePassword in loginWithPasskey options')
+  }
+  orderDepositType(session, options, 'orders.themeInvestment')
+}
+
+const assertThemeInvestmentPreOrderOptions = (options: ThemeInvestmentPreOrderOptions) => {
+  if (!options.themeId) {
+    throw new Error('orders.themeInvestment.list requires themeId from the APK handoff')
+  }
+  if (!options.exchangeCode) {
+    throw new Error('orders.themeInvestment.list requires exchangeCode from the APK handoff')
+  }
+  if (!options.components?.length) {
+    throw new Error('orders.themeInvestment.list requires components selected from the APK fields')
+  }
+  if (options.components.length > 10) {
+    throw new Error('orders.themeInvestment.list supports up to 10 component stocks from the APK')
+  }
+  for (const [index, component] of options.components.entries()) {
+    if (!component.issueCode) {
+      throw new Error(`orders.themeInvestment.list components.${index}.issueCode is required`)
+    }
+  }
+}
+
+const assertOrderCancelOptions = (options: OrderCancelOptions) => {
+  if (!options.orderNumber) {
+    throw new Error('orders cancel requires orderNumber')
+  }
+}
+
+const assertPlaceOrderCancelOptions = (
+  session: SbiSession,
+  options: PlaceOrderCancelOptions,
+  methodName: string,
+) => {
+  assertOrderCancelOptions(options)
+  if (!options.tradePassword && !session.tradePassword) {
+    throw new Error(`${methodName} requires tradePassword in loginWithPasskey options`)
+  }
+}
+
+const assertIfdOrderOptions = (options: IfdOrderOptions) => {
+  assertCashOrderOptions(options)
+  if (options.tradeType === 'marginOpen') {
+    marginOpenTradeTypeCode(options.marginTradeType)
+  } else if (options.marginTradeType) {
+    throw new Error('orders.ifd marginTradeType requires tradeType: "marginOpen"')
+  }
+  const ifdPriceCondition = ifdOrderPriceCondition(options)
+  if (cashOrderPriceConditionRequiresPrice(ifdPriceCondition) && options.ifdPrice == null) {
+    throw new Error(`orders.ifd ifdPriceCondition: "${ifdPriceCondition}" requires ifdPrice`)
+  }
+  if (!cashOrderPriceConditionRequiresPrice(ifdPriceCondition) && options.ifdPrice != null) {
+    throw new Error(`orders.ifd ifdPriceCondition: "${ifdPriceCondition}" cannot specify ifdPrice`)
+  }
+  if (options.ifdOrderTerm === 'date') normalizeOrderDate(options.ifdOrderDate)
+  if (options.ifdOrderTerm !== 'date' && options.ifdOrderDate) {
+    throw new Error('orders.ifd ifdOrderDate requires ifdOrderTerm: "date"')
+  }
+
+  const method = ifdOrderMethod(options)
+  const hasTrigger = options.ifdTriggerZone != null || options.ifdTriggerPrice != null
+  const hasSecondary =
+    options.ifdSecondaryPriceCondition != null || options.ifdSecondaryPrice != null
+  if (method === 'normal') {
+    if (hasTrigger)
+      throw new Error('orders.ifd trigger fields require ifdOrderMethod: "stop" or "oco"')
+    if (hasSecondary) throw new Error('orders.ifd secondary fields require ifdOrderMethod: "oco"')
+  }
+  if (method === 'stop' || method === 'oco') {
+    if (!options.ifdTriggerZone) {
+      throw new Error(`orders.ifd ifdOrderMethod: "${method}" requires ifdTriggerZone`)
+    }
+    if (options.ifdTriggerPrice == null) {
+      throw new Error(`orders.ifd ifdOrderMethod: "${method}" requires ifdTriggerPrice`)
+    }
+  }
+  if (method === 'stop' && hasSecondary) {
+    throw new Error('orders.ifd ifdOrderMethod: "stop" cannot specify secondary fields')
+  }
+  if (method === 'oco') {
+    if (!options.ifdSecondaryPriceCondition) {
+      throw new Error('orders.ifd ifdOrderMethod: "oco" requires ifdSecondaryPriceCondition')
+    }
+    if (
+      cashOrderPriceConditionRequiresPrice(options.ifdSecondaryPriceCondition) &&
+      options.ifdSecondaryPrice == null
+    ) {
+      throw new Error('orders.ifd ifdOrderMethod: "oco" requires ifdSecondaryPrice')
+    }
+    if (
+      !cashOrderPriceConditionRequiresPrice(options.ifdSecondaryPriceCondition) &&
+      options.ifdSecondaryPrice != null
+    ) {
+      throw new Error(
+        `orders.ifd ifdSecondaryPriceCondition: "${options.ifdSecondaryPriceCondition}" cannot specify ifdSecondaryPrice`,
       )
     }
   }
@@ -1901,27 +2672,254 @@ const prepareCashOrder = async (session: SbiSession, options: CashOrderOptions) 
     cashPreOrderTrCode(options),
     cashPreOrderTrin(session, options),
   )
-  const preOrderInfo = parseCashPreOrderInfo(preOrder)
-  await ensureTradeAuthenticated(session, options, preOrderInfo)
+  const preOrderInfo = parseStockOrderPreOrder(preOrder, options)
+  if (options.kind === 's' && preOrderInfo.sKabu?.available === false) {
+    throw new Error('orders.cash S-kabu is not available for this issue according to APK pre-order')
+  }
+  assertStockOrderQuantityAvailable(options, preOrderInfo, 'orders.cash')
+  assertStockOrderMarketAvailable(options, preOrderInfo, 'orders.cash')
+  assertStockOrderTermAvailable(options, preOrderInfo, 'orders.cash')
+  assertCashOrderDepositTypeAvailable(options, preOrderInfo)
+  assertCashOrderPriceSteps(options, preOrderInfo)
+  await ensureTradeAuthenticated(session, options, cashPreOrderInfoForAuthentication(preOrderInfo))
 }
 
-const parseCashPreOrderInfo = (response: MtsResponse): CashPreOrderInfo => {
-  if (methodErrorFromHeader(response) || response.buffer.length <= MTS_HEADER_BYTES) return {}
-  const reader = readerFor(response)
-  reader.skip(20)
-  reader.skip(25)
-  reader.skip(1)
-  reader.skip(1)
-  reader.skip(1500)
-  const issueCode = reader.text(5)
-  const market = reader.text(3)
-  const issueName = reader.text(30)
-  return {
-    issueCode: emptyToUndefined(issueCode),
-    market: emptyToUndefined(market),
-    issueName: emptyToUndefined(stripIssueCodePrefix(issueName, issueCode)),
+const prepareMarginOpenOrder = async (session: SbiSession, options: MarginOpenOrderOptions) => {
+  const depositType = orderDepositType(session, options, 'orders.margin.open')
+  assertMarginOrderDepositType(depositType, 'orders.margin.open')
+  const preOrder = await callMts(
+    session,
+    stockPreOrderTrCode('marginOpen', options.side),
+    stockPreOrderTrin(session, options, 'marginOpen'),
+  )
+  const preOrderInfo = parseStockOrderPreOrder(preOrder, options)
+  assertStockOrderQuantityAvailable(options, preOrderInfo, 'orders.margin.open')
+  assertStockOrderMarketAvailable(options, preOrderInfo, 'orders.margin.open')
+  assertStockOrderTermAvailable(options, preOrderInfo, 'orders.margin.open')
+  assertMarginOpenTradeTypeAvailable(options, preOrderInfo)
+  assertCashOrderPriceSteps(options, preOrderInfo, 'orders.margin.open')
+}
+
+const assertStockOrderQuantityAvailable = (
+  options: { kind?: OrderKind; quantity: number },
+  preOrder: StockOrderPreOrder,
+  methodName: string,
+) => {
+  if (!Number.isInteger(options.quantity) || options.quantity <= 0) {
+    throw new Error(`${methodName} quantity must be a positive integer`)
+  }
+  const lotSize = preOrder.lotSize2
+  if (typeof lotSize !== 'number' || lotSize <= 1) return
+  if (options.kind === 's') {
+    if (options.quantity >= lotSize) {
+      throw new Error(
+        `${methodName} with kind: "s" quantity must be less than APK lotSize2: ${lotSize}`,
+      )
+    }
+    return
+  }
+  if (options.quantity % lotSize !== 0) {
+    throw new Error(`${methodName} quantity must be a multiple of APK lotSize2: ${lotSize}`)
   }
 }
+
+const assertStockOrderMarketAvailable = (
+  options: { kind?: OrderKind; market: MarketCode },
+  preOrder: StockOrderPreOrder,
+  methodName: string,
+) => {
+  if (options.kind === 's') return
+  const markets = stockPreOrderExchangeMarkets(preOrder.exchangeList)
+  if (!markets.length || markets.includes(options.market)) return
+  throw new Error(
+    `${methodName} market: "${options.market}" is not available according to APK pre-order exchangeList`,
+  )
+}
+
+const assertStockOrderTermAvailable = (
+  options: { kind?: OrderKind; orderTerm?: CashOrderTerm; orderDate?: string },
+  preOrder: StockOrderPreOrder,
+  methodName: string,
+) => {
+  if (options.kind === 's') return
+  const terms = stockPreOrderTermValues(preOrder)
+  if (!terms.size) return
+  const orderTerm = options.orderTerm ?? 'day'
+  if (!terms.has(orderTerm)) {
+    throw new Error(
+      `${methodName} orderTerm: "${orderTerm}" is not available according to APK pre-order`,
+    )
+  }
+  if (orderTerm !== 'date') return
+  const dates = stockPreOrderTermDates(preOrder)
+  if (!dates.length) return
+  const orderDate = normalizeOrderDate(options.orderDate)
+  if (!dates.includes(orderDate)) {
+    throw new Error(
+      `${methodName} orderDate: "${orderDate}" is not available according to APK pre-order`,
+    )
+  }
+}
+
+const stockPreOrderTermValues = (preOrder: StockOrderPreOrder): Set<CashOrderTerm> => {
+  const terms = new Set<CashOrderTerm>()
+  for (const term of preOrder.orderTerms) {
+    if (term === '当日中') terms.add('day')
+    if (term === '今週中') terms.add('week')
+    if (/\d/.test(term)) terms.add('date')
+  }
+  if (preOrder.orderTermDates.length) terms.add('date')
+  return terms
+}
+
+const stockPreOrderTermDates = (preOrder: StockOrderPreOrder) => {
+  const values = preOrder.orderTermDates.length
+    ? preOrder.orderTermDates
+    : preOrder.orderTerms.filter((term) => /\d/.test(term))
+  return values.map((value) => value.replace(/\D/g, '')).filter((value) => value.length === 8)
+}
+
+const assertMarginOpenTradeTypeAvailable = (
+  options: MarginOpenOrderOptions,
+  preOrder: StockOrderPreOrder,
+) => {
+  const tradeTypes = preOrder.margin?.tradeTypes ?? []
+  const tradeType = options.marginTradeType
+  const sideTradeTypes =
+    options.side === 'buy'
+      ? new Set<MarginOpenTradeType>(['standard', 'generalBuy', 'day'])
+      : new Set<MarginOpenTradeType>([
+          'standard',
+          'generalSellShort',
+          'generalSellInventoryLimited',
+          'generalSellInventoryUnlimited',
+          'day',
+          'hyper',
+        ])
+  if (!sideTradeTypes.has(tradeType)) {
+    throw new Error(
+      `orders.margin.open marginTradeType: "${tradeType}" is not selectable for side: "${options.side}" in the APK`,
+    )
+  }
+  if (tradeTypes.length && !marginOpenTradeTypeSelectableFromPreOrder(tradeType, tradeTypes)) {
+    throw new Error(
+      `orders.margin.open marginTradeType: "${tradeType}" is not available according to APK pre-order`,
+    )
+  }
+}
+
+const marginOpenTradeTypeSelectableFromPreOrder = (
+  tradeType: MarginOpenTradeType,
+  tradeTypes: MarginOpenTradeType[],
+) => {
+  if (tradeTypes.includes(tradeType)) return true
+  if (tradeType === 'generalSellInventoryLimited') {
+    return tradeTypes.includes('generalSellInventoryUnlimited')
+  }
+  return false
+}
+
+const STOCK_PRE_ORDER_EXCHANGE_MARKET_CODES = new Set([
+  'SOR',
+  'TKY',
+  'NGY',
+  'FKO',
+  'SPR',
+  'PTS',
+  'PTX',
+])
+
+const stockPreOrderExchangeMarkets = (value: string | undefined): MarketCode[] => {
+  if (!value) return []
+  const markets: MarketCode[] = []
+  for (let index = 0; index < value.length; index += 3) {
+    const code = value.slice(index, index + 3)
+    if (STOCK_PRE_ORDER_EXCHANGE_MARKET_CODES.has(code) && !markets.includes(code)) {
+      markets.push(code)
+    }
+  }
+  return markets
+}
+
+const assertCashOrderDepositTypeAvailable = (
+  options: CashOrderOptions,
+  preOrder: StockOrderPreOrder,
+) => {
+  const depositType = cashOrderDepositType(options)
+  if (!depositType || depositType === 'specific' || depositType === 'general') return
+  if (depositType === 'growthInvestment' && preOrder.nisa?.growthServiceKbn !== '1') {
+    throw new Error(
+      'orders.cash depositType: "growthInvestment" is not available according to APK pre-order',
+    )
+  }
+  if (depositType === 'nisa' && preOrder.nisa?.serviceKbn !== '1') {
+    throw new Error('orders.cash depositType: "nisa" is not available according to APK pre-order')
+  }
+  if (depositType === 'juniorNisa' && preOrder.nisa?.juniorServiceKbn !== '1') {
+    throw new Error(
+      'orders.cash depositType: "juniorNisa" is not available according to APK pre-order',
+    )
+  }
+  if (depositType === 'unknown') {
+    throw new Error('orders.cash depositType: "unknown" cannot be sent as an APK order payload')
+  }
+}
+
+const assertCashOrderPriceSteps = (
+  options: CashOrderOptions,
+  preOrder: StockOrderPreOrder,
+  methodName = 'orders.cash',
+) => {
+  if (options.kind === 's') return
+  const values: Array<{ field: string; value: number | undefined }> = []
+  const priceCondition = cashOrderPriceCondition(options)
+  if (cashOrderPriceConditionRequiresPrice(priceCondition)) {
+    values.push({ field: 'price', value: options.price })
+  }
+  const method = cashOrderMethod(options)
+  if (method !== 'normal') values.push({ field: 'triggerPrice', value: options.triggerPrice })
+  if (
+    method === 'oco' &&
+    options.secondaryPriceCondition &&
+    cashOrderPriceConditionRequiresPrice(options.secondaryPriceCondition)
+  ) {
+    values.push({ field: 'secondaryPrice', value: options.secondaryPrice })
+  }
+
+  for (const { field, value } of values) {
+    if (value == null) continue
+    const step = cashOrderPriceStepFor(preOrder, value)
+    if (!step || priceMatchesStep(value, step)) continue
+    throw new Error(`${methodName} ${field} must match APK price step ${step}`)
+  }
+}
+
+const cashOrderPriceStepFor = (preOrder: StockOrderPreOrder, price: number) => {
+  const steps = preOrder.priceSteps
+    .map((step) => ({
+      upper: step.from?.value,
+      step: step.to?.value,
+    }))
+    .filter(
+      (step): step is { upper: number; step: number } =>
+        typeof step.upper === 'number' &&
+        typeof step.step === 'number' &&
+        step.upper > 0 &&
+        step.step > 0,
+    )
+    .sort((left, right) => left.upper - right.upper)
+  if (!steps.length) return undefined
+  return steps.find((step) => price <= step.upper)?.step ?? steps.at(-1)?.step
+}
+
+const priceMatchesStep = (price: number, step: number) =>
+  Math.abs(price / step - Math.round(price / step)) < 1e-8
+
+const cashPreOrderInfoForAuthentication = (preOrder: StockOrderPreOrder): CashPreOrderInfo => ({
+  issueCode: preOrder.issue.code,
+  market: preOrder.issue.market,
+  issueName: preOrder.issue.name,
+})
 
 const ensureTradeAuthenticated = async (
   session: SbiSession,
@@ -2269,72 +3267,246 @@ const recentOrdersTrin = (session: SbiSession, options?: OrderInquiryOptions) =>
     { width: 1, value: '' },
   ])
 
-const orderPreviewTrin = (session: SbiSession, options: StockOrderTrinOptions) =>
-  fixedTrin([
-    { width: 3, value: session.profile.butenCode ?? session.profile.branchCode },
-    { width: 7, value: session.profile.accountNumber },
-    { width: 5, value: options.issueCode },
-    { width: 3, value: options.market },
-    { width: 1, value: sideCode(options.side) },
-  ])
-
 const cashOrderTrin = (session: SbiSession, options: CashOrderOptions) =>
   appCashOrderTrin(session, options)
 
-const cashPreOrderTrin = (session: SbiSession, options: CashOrderOptions) =>
+const cashPreOrderTrin = (
+  session: SbiSession,
+  options: CashOrderOptions | CashOrderPreOrderOptions,
+) => stockPreOrderTrin(session, options, 'cash')
+
+type StockPreOrderTradeType =
+  | 'cash'
+  | 'marginOpen'
+  | 'marginClose'
+  | ActualDeliveryOrderOptions['kind']
+
+const stockPreOrderTrin = (
+  session: SbiSession,
+  options: StockOrderPreOrderInput,
+  tradeType: StockPreOrderTradeType,
+) =>
   fixedTrin([
     { width: 5, value: options.issueCode },
     { width: 80, value: '' },
-    { width: 3, value: options.market },
+    { width: 3, value: stockPreOrderMarket(options, tradeType) },
     { width: 3, value: session.profile.butenCode ?? session.profile.branchCode },
     { width: 7, value: session.profile.accountNumber },
     { width: 1, value: session.profile.marginAccount ?? '' },
-    { width: 1, value: cashPreOrderDepositType(options) },
-    { width: 2, value: '' },
+    { width: 1, value: stockPreOrderDepositType(options, tradeType) },
+    { width: 1, value: stockPreOrderMarginCloseTradeType(options, tradeType) },
+    { width: 1, value: '' },
   ])
 
-const cashPreOrderDepositType = (options: CashOrderOptions) =>
-  options.side === 'sell' ? orderDepositTypeCode(options.accountType) : ''
+const stockPreOrderDepositType = (
+  options: StockOrderPreOrderInput,
+  tradeType: StockPreOrderTradeType,
+) =>
+  stockPreOrderSide(options, tradeType) === 'sell'
+    ? orderDepositTypeCode(cashOrderDepositType(options))
+    : ''
 
-const appCashOrderTrin = (session: SbiSession, options: CashOrderOptions) => {
-  if (!session.tradePassword) {
-    throw new Error('orders.cash requires tradePassword in loginWithPasskey options')
+const stockPreOrderSide = (
+  options: StockOrderPreOrderInput,
+  tradeType: StockPreOrderTradeType,
+): TradeSide => {
+  if (tradeType === 'genwatashi') return 'sell'
+  if (tradeType === 'genbiki') return 'buy'
+  if (!('side' in options)) {
+    throw new Error(`orders preOrder with tradeType "${tradeType}" requires side`)
   }
-  const accountType = options.accountType ?? session.profile.accountType
-  const standardOptions = options.kind === 's' ? undefined : options
-  const priceCondition = cashOrderPriceCondition(options)
-  const isPriceBased = cashOrderPriceConditionRequiresPrice(priceCondition)
+  return options.side
+}
+
+const stockPreOrderMarket = (
+  options: StockOrderPreOrderInput,
+  tradeType: StockPreOrderTradeType,
+) => {
+  if (tradeType === 'genbiki' || tradeType === 'genwatashi') return null
+  if (!isCashPreOrderInput(options) || options.kind !== 's') return options.market
+  if (!options.preOrderMarket) {
+    throw new Error('orders.cash.preOrder with kind: "s" requires preOrderMarket')
+  }
+  return options.preOrderMarket
+}
+
+const stockPreOrderMarginCloseTradeType = (
+  options: StockOrderPreOrderInput,
+  tradeType: StockPreOrderTradeType,
+) => {
+  if (tradeType !== 'marginClose') return null
+  const marginCloseTradeType = (options as MarginCloseOrderPreOrderOptions).marginCloseTradeType
+  return marginCloseTradeType ? marginCloseTradeTypeCode(marginCloseTradeType) : null
+}
+
+const isCashPreOrderInput = (
+  options: StockOrderPreOrderInput,
+): options is CashOrderOptions | CashOrderPreOrderOptions => 'kind' in options
+
+type AppStockOrderTrinOptions = {
+  issueCode: string
+  market: MarketCode
+  quantity: number
+  price?: number
+  priceCondition: CashOrderPriceCondition
+  depositType: AccountType | DepositType
+  marginTradeTypeCode: string
+  orderTermCode: string
+  orderMethod: CashOrderMethod
+  triggerZone?: CashOrderTriggerZone
+  triggerPrice?: number
+  marginPositions?: StockOrderMarginPosition[]
+  bCode?: string
+  ippanMarginPaymentLimit?: string
+  secondaryPriceCondition?: CashOrderPriceCondition
+  secondaryPrice?: number
+  sorLastMarket?: MarketCode
+  omitConfirmation?: boolean
+  methodName: string
+}
+
+type OmitConfirmationOption = {
+  omitConfirmation?: boolean
+}
+
+const appStockOrderTrin = (session: SbiSession, options: AppStockOrderTrinOptions) => {
+  if (!session.tradePassword) {
+    throw new Error(`${options.methodName} requires tradePassword in loginWithPasskey options`)
+  }
+  const isPriceBased = cashOrderPriceConditionRequiresPrice(options.priceCondition)
+  const secondaryRequiresPrice =
+    options.secondaryPriceCondition != null &&
+    cashOrderPriceConditionRequiresPrice(options.secondaryPriceCondition)
   return fixedTrin([
     { width: 32, value: mtsTradePassword(session.tradePassword) },
     { width: 3, value: session.profile.butenCode ?? session.profile.branchCode },
     { width: 7, value: session.profile.accountNumber },
     { width: 5, value: options.issueCode },
-    { width: 3, value: orderMarketCode(options) },
+    { width: 3, value: options.market },
     { width: 8, value: options.quantity },
-    { width: 1, value: cashOrderPriceConditionCode(priceCondition) },
+    { width: 1, value: cashOrderPriceConditionCode(options.priceCondition) },
     { width: 10, value: isPriceBased ? options.price : '' },
-    { width: 1, value: orderDepositTypeCode(accountType) },
-    { width: 1, value: '0' },
-    { width: 8, value: cashOrderTermCode(options) },
-    { width: 2, value: '00' },
-    { width: 3, value: cashOrderMethodCode(cashOrderMethod(options)) },
-    { width: 1, value: triggerZoneCode(standardOptions?.triggerZone) },
-    { width: 10, value: standardOptions?.triggerPrice ?? '' },
-    { width: 1, value: '2' },
+    { width: 1, value: orderDepositTypeCode(options.depositType) },
+    { width: 1, value: options.marginTradeTypeCode },
+    { width: 8, value: options.orderTermCode },
+    ...stockOrderMarginPositionFields(options.marginPositions),
+    { width: 3, value: cashOrderMethodCode(options.orderMethod) },
+    { width: 1, value: triggerZoneCode(options.triggerZone) },
+    { width: 10, value: options.triggerPrice ?? '' },
+    { width: 1, value: options.omitConfirmation ? '1' : (options.bCode ?? '2') },
     { width: 1, value: '' },
-    { width: 2, value: '' },
-    { width: 1, value: secondaryPriceConditionCode(options) },
+    { width: 2, value: options.ippanMarginPaymentLimit ?? '' },
+    {
+      width: 1,
+      value: options.secondaryPriceCondition
+        ? cashOrderPriceConditionCode(options.secondaryPriceCondition)
+        : '',
+    },
     {
       width: 10,
-      value: secondaryPriceConditionRequiresPrice(options) ? standardOptions?.secondaryPrice : '',
+      value: secondaryRequiresPrice ? options.secondaryPrice : '',
       align: 'right',
-      pad: secondaryPriceConditionRequiresPrice(options) ? '0' : ' ',
+      pad: secondaryRequiresPrice ? '0' : ' ',
     },
-    { width: 3, value: sorLastMarketCode(session, options) },
+    { width: 3, value: options.sorLastMarket ?? '' },
   ])
 }
 
-const orderMarketCode = (options: CashOrderOptions) => options.market
+const appCashOrderTrin = (
+  session: SbiSession,
+  options: CashOrderOptions | PlaceCashOrderOptions,
+) => {
+  const depositType = orderDepositType(session, options, 'orders.cash')
+  const standardOptions = options.kind === 's' ? undefined : options
+  const priceCondition = cashOrderPriceCondition(options)
+  return appStockOrderTrin(session, {
+    issueCode: options.issueCode,
+    market: orderMarketCode(options),
+    quantity: options.quantity,
+    price: standardOptions?.price,
+    priceCondition,
+    depositType,
+    marginTradeTypeCode: '0',
+    orderTermCode: cashOrderTermCode(options),
+    orderMethod: cashOrderMethod(options),
+    triggerZone: standardOptions?.triggerZone,
+    triggerPrice: standardOptions?.triggerPrice,
+    ippanMarginPaymentLimit: standardOptions?.ippanMarginPaymentLimit,
+    secondaryPriceCondition: standardOptions?.secondaryPriceCondition,
+    secondaryPrice: standardOptions?.secondaryPrice,
+    sorLastMarket: sorLastMarketCode(session, options),
+    omitConfirmation: 'omitConfirmation' in options ? options.omitConfirmation : undefined,
+    methodName: 'orders.cash',
+  })
+}
+
+const stockOrderMarginPositionFields = (
+  positions: StockOrderMarginPosition[] = [],
+  countWidth = 2,
+) => {
+  const maxCount = 10 ** countWidth - 1
+  if (positions.length > maxCount) {
+    throw new Error(`stock order marginPositions cannot exceed ${maxCount} records`)
+  }
+  return [
+    { width: countWidth, value: positions.length.toString().padStart(countWidth, '0') },
+    ...positions.flatMap((position) => [
+      { width: 8, value: normalizeStockOrderRecordDate(position.openTradeDate, 'openTradeDate') },
+      { width: 13, value: position.openPrice },
+      { width: 8, value: position.quantity },
+      {
+        width: 8,
+        value: normalizeStockOrderRecordDate(position.orgNewTradeDate, 'orgNewTradeDate'),
+      },
+      { width: 3, value: position.bargainMarketCode },
+    ]),
+  ]
+}
+
+const normalizeStockOrderRecordDate = (value: string, fieldName: string) => {
+  const date = value.replace(/\D/g, '')
+  if (date.length !== 8) {
+    throw new Error(`stock order marginPositions.${fieldName} must be yyyyMMdd or yyyy-MM-dd`)
+  }
+  return date
+}
+
+const orderMarketCode = (options: { market: MarketCode }) => options.market
+
+const cashOrderDepositType = (options: { depositType?: DepositType; accountType?: AccountType }) =>
+  options.depositType ?? options.accountType
+
+const orderDepositType = (
+  session: SbiSession,
+  options: { depositType?: DepositType; accountType?: AccountType },
+  methodName: string,
+): AccountType | DepositType => {
+  const depositType = cashOrderDepositType(options) ?? session.profile.accountType
+  if (!depositType) {
+    throw new Error(`${methodName} requires accountType or depositType when login profile has none`)
+  }
+  return depositType
+}
+
+const assertMarginOrderDepositType = (
+  depositType: AccountType | DepositType,
+  methodName: string,
+) => {
+  if (depositType !== 'specific') {
+    throw new Error(
+      `${methodName} requires depositType/accountType: "specific" for APK margin orders`,
+    )
+  }
+}
+
+const assertActualDeliveryDepositType = (
+  depositType: AccountType | DepositType,
+  methodName: string,
+) => {
+  if (depositType !== 'specific' && depositType !== 'general') {
+    throw new Error(`${methodName} supports only "specific" or "general" depositType/accountType`)
+  }
+}
 
 const CASH_ORDER_PRICE_CONDITION_CODES = {
   limit: '',
@@ -2374,10 +3546,18 @@ const CASH_ORDER_TERM_CODES = {
   week: 'WEEKLY',
 } as const satisfies Record<Exclude<CashOrderTerm, 'date'>, string>
 
-const cashOrderTermCode = (options: CashOrderOptions) => {
+const cashOrderTermCode = (options: {
+  kind?: OrderKind
+  orderTerm?: CashOrderTerm
+  orderDate?: string
+}) => {
   if (options.kind === 's') return ''
   const term = options.orderTerm ?? 'day'
-  if (term === 'date') return normalizeOrderDate(options.orderDate)
+  return orderTermCode(term, options.orderDate)
+}
+
+const orderTermCode = (term: CashOrderTerm, date?: string) => {
+  if (term === 'date') return normalizeOrderDate(date)
   return CASH_ORDER_TERM_CODES[term]
 }
 
@@ -2393,7 +3573,11 @@ const CASH_ORDER_METHOD_CODES = {
   oco: 'OCO',
 } as const satisfies Record<CashOrderMethod, string>
 
-const cashOrderMethod = (options: CashOrderOptions): CashOrderMethod => {
+const cashOrderMethod = (options: {
+  kind?: OrderKind
+  price?: number
+  orderMethod?: CashOrderMethod
+}): CashOrderMethod => {
   if (options.kind === 's') return 'normal'
   if (options.orderMethod) return options.orderMethod
   if (options.kind === 'stop') return 'stop'
@@ -2423,54 +3607,454 @@ const secondaryPriceConditionRequiresPrice = (options: CashOrderOptions) =>
   options.secondaryPriceCondition != null &&
   cashOrderPriceConditionRequiresPrice(options.secondaryPriceCondition)
 
-const sorLastMarketCode = (session: SbiSession, options: CashOrderOptions) => {
+const ifdOrderPriceCondition = (options: IfdOrderOptions): CashOrderPriceCondition => {
+  if (options.ifdPriceCondition) return options.ifdPriceCondition
+  if (options.ifdPrice != null) return 'limit'
+  return 'market'
+}
+
+const ifdOrderTermCode = (options: IfdOrderOptions) =>
+  orderTermCode(options.ifdOrderTerm ?? 'day', options.ifdOrderDate)
+
+const ifdOrderMethod = (options: IfdOrderOptions): CashOrderMethod => {
+  if (options.ifdOrderMethod) return options.ifdOrderMethod
+  if (options.kind === 'ifdo') return 'oco'
+  return 'normal'
+}
+
+const ifdSecondaryPriceConditionCode = (options: IfdOrderOptions) =>
+  options.ifdSecondaryPriceCondition
+    ? cashOrderPriceConditionCode(options.ifdSecondaryPriceCondition)
+    : ''
+
+const ifdSecondaryPriceConditionRequiresPrice = (options: IfdOrderOptions) =>
+  options.ifdSecondaryPriceCondition != null &&
+  cashOrderPriceConditionRequiresPrice(options.ifdSecondaryPriceCondition)
+
+const sorLastMarketCode = (
+  session: SbiSession,
+  options: {
+    market: MarketCode
+    sorLastMarket?: MarketCode
+    depositType?: DepositType
+    accountType?: AccountType
+  },
+) => {
   if (options.market !== 'SOR') return ''
   if (options.sorLastMarket) return options.sorLastMarket
-  if (options.accountType === 'juniorNisa') return session.profile.sor?.juniorNisaLastMarket ?? ''
+  if (cashOrderDepositType(options) === 'juniorNisa') {
+    return session.profile.sor?.juniorNisaLastMarket ?? ''
+  }
   return session.profile.sor?.lastMarket ?? ''
 }
 
-type StockOrderTrinOptions = {
-  issueCode: string
-  market: string
-  side: TradeSide
-  quantity?: number
-  price?: number
-  confirmationId?: string
-  positionId?: string
+const marginOpenOrderTrin = (
+  session: SbiSession,
+  options: MarginOpenOrderOptions & OmitConfirmationOption,
+) => {
+  const depositType = orderDepositType(session, options, 'orders.margin.open')
+  assertMarginOrderDepositType(depositType, 'orders.margin.open')
+  const priceCondition = cashOrderPriceCondition(options)
+  return appStockOrderTrin(session, {
+    issueCode: options.issueCode,
+    market: orderMarketCode(options),
+    quantity: options.quantity,
+    price: options.price,
+    priceCondition,
+    depositType,
+    marginTradeTypeCode: marginOpenTradeTypeCode(options.marginTradeType),
+    orderTermCode: cashOrderTermCode(options),
+    orderMethod: cashOrderMethod(options),
+    triggerZone: options.triggerZone,
+    triggerPrice: options.triggerPrice,
+    ippanMarginPaymentLimit: options.ippanMarginPaymentLimit,
+    secondaryPriceCondition: options.secondaryPriceCondition,
+    secondaryPrice: options.secondaryPrice,
+    sorLastMarket: sorLastMarketCode(session, options),
+    omitConfirmation: options.omitConfirmation,
+    methodName: 'orders.margin.open',
+  })
 }
 
-const orderConfirmTrin = (session: SbiSession, options: StockOrderTrinOptions) =>
-  orderPreviewTrin(session, options) +
-  fixedTrin([
-    { width: 16, value: options.quantity, align: 'right', pad: '0' },
-    { width: 11, value: options.price ?? '', align: 'right', pad: '0' },
-    { width: 20, value: mtsTradePassword(session.tradePassword) },
-    { width: 32, value: (options as PlaceCashOrderOptions).confirmationId ?? '' },
-    { width: 32, value: (options as MarginCloseOrderOptions).positionId ?? '' },
-  ])
-
-const marginOpenOrderTrin = (session: SbiSession, options: MarginOpenOrderOptions) =>
-  orderConfirmTrin(session, options)
-
-const marginSummaryOrderTrin = (session: SbiSession, options: MarginCloseOrderOptions) =>
-  orderConfirmTrin(session, options)
-
-const actualDeliveryOrderTrin = (session: SbiSession, options: ActualDeliveryOrderOptions) =>
-  orderConfirmTrin(session, { ...options, side: actualDeliverySide(options) })
-
-const ifdOrderTrin = (session: SbiSession, options: IfdOrderOptions) =>
-  orderConfirmTrin(session, options)
-
-const orderCorrectionTrin = (session: SbiSession, options: OrderCorrectionOptions) =>
-  fixedTrin([
+const marginCloseOrderTrin = (
+  session: SbiSession,
+  options: MarginCloseOrderOptions & OmitConfirmationOption,
+) => {
+  const depositType = orderDepositType(session, options, 'orders.margin.close')
+  assertMarginOrderDepositType(depositType, 'orders.margin.close')
+  const priceCondition = cashOrderPriceCondition(options)
+  const secondaryRequiresPrice = secondaryPriceConditionRequiresPrice(options)
+  return fixedTrin([
+    { width: 32, value: mtsTradePassword(session.tradePassword) },
     { width: 3, value: session.profile.butenCode ?? session.profile.branchCode },
     { width: 7, value: session.profile.accountNumber },
-    { width: 20, value: options.orderId },
-    { width: 16, value: options.quantity ?? '', align: 'right', pad: '0' },
-    { width: 11, value: options.price ?? '', align: 'right', pad: '0' },
-    { width: 20, value: mtsTradePassword(session.tradePassword) },
+    { width: 5, value: options.issueCode },
+    { width: 3, value: orderMarketCode(options) },
+    { width: 8, value: options.quantity },
+    { width: 1, value: cashOrderPriceConditionCode(priceCondition) },
+    {
+      width: 10,
+      value: cashOrderPriceConditionRequiresPrice(priceCondition) ? options.price : '',
+    },
+    { width: 1, value: orderDepositTypeCode(depositType) },
+    { width: 1, value: marginCloseTradeTypeCode(options.marginCloseTradeType) },
+    { width: 8, value: cashOrderTermCode(options) },
+    ...stockOrderMarginPositionFields(options.marginPositions, 4),
+    { width: 3, value: cashOrderMethodCode(cashOrderMethod(options)) },
+    { width: 1, value: triggerZoneCode(options.triggerZone) },
+    { width: 10, value: options.triggerPrice ?? '' },
+    { width: 1, value: options.omitConfirmation ? '1' : '2' },
+    { width: 1, value: secondaryPriceConditionCode(options) },
+    {
+      width: 10,
+      value: secondaryRequiresPrice ? options.secondaryPrice : '',
+      align: 'right',
+      pad: secondaryRequiresPrice ? '0' : ' ',
+    },
+    { width: 3, value: sorLastMarketCode(session, options) },
   ])
+}
+
+const marginCloseSummaryOrderTrin = (
+  session: SbiSession,
+  options: MarginCloseSummaryOrderOptions & OmitConfirmationOption,
+) => {
+  const depositType = orderDepositType(session, options, 'orders.margin.placeSummary')
+  assertMarginOrderDepositType(depositType, 'orders.margin.placeSummary')
+  const priceCondition = cashOrderPriceCondition(options)
+  const secondaryRequiresPrice = secondaryPriceConditionRequiresPrice(options)
+  return fixedTrin([
+    { width: 32, value: mtsTradePassword(session.tradePassword) },
+    { width: 3, value: session.profile.butenCode ?? session.profile.branchCode },
+    { width: 7, value: session.profile.accountNumber },
+    { width: 1, value: sideCode(options.side) },
+    { width: 5, value: options.issueCode },
+    { width: 3, value: orderMarketCode(options) },
+    { width: 8, value: options.quantity },
+    { width: 1, value: cashOrderPriceConditionCode(priceCondition) },
+    {
+      width: 10,
+      value: cashOrderPriceConditionRequiresPrice(priceCondition) ? options.price : '',
+    },
+    { width: 1, value: orderDepositTypeCode(depositType) },
+    { width: 1, value: marginCloseTradeTypeCode(options.marginCloseTradeType) },
+    { width: 8, value: cashOrderTermCode(options) },
+    { width: 3, value: cashOrderMethodCode(cashOrderMethod(options)) },
+    { width: 1, value: triggerZoneCode(options.triggerZone) },
+    { width: 10, value: options.triggerPrice ?? '' },
+    { width: 2, value: marginClosePositionOrderCode(options.marginClosePositionOrder) },
+    { width: 1, value: options.omitConfirmation ? '1' : '2' },
+    { width: 1, value: secondaryPriceConditionCode(options) },
+    {
+      width: 10,
+      value: secondaryRequiresPrice ? options.secondaryPrice : '',
+      align: 'right',
+      pad: secondaryRequiresPrice ? '0' : ' ',
+    },
+    { width: 3, value: sorLastMarketCode(session, options) },
+  ])
+}
+
+const actualDeliveryOrderTrin = (
+  session: SbiSession,
+  options: ActualDeliveryOrderOptions & OmitConfirmationOption,
+) => {
+  const depositType = orderDepositType(session, options, 'orders.margin.actualDelivery')
+  assertActualDeliveryDepositType(depositType, 'orders.margin.actualDelivery')
+  return appStockOrderTrin(session, {
+    issueCode: options.issueCode,
+    market: orderMarketCode(options),
+    quantity: options.quantity,
+    priceCondition: 'market',
+    depositType,
+    marginTradeTypeCode: '0',
+    orderTermCode: '',
+    orderMethod: 'normal',
+    marginPositions: options.marginPositions,
+    ippanMarginPaymentLimit: options.ippanMarginPaymentLimit,
+    omitConfirmation: options.omitConfirmation,
+    methodName: 'orders.margin.actualDelivery',
+  })
+}
+
+const MARGIN_OPEN_TRADE_TYPE_CODES = {
+  standard: '6',
+  generalBuy: '9',
+  generalSellShort: 'A',
+  generalSellInventoryLimited: 'B',
+  generalSellInventoryUnlimited: 'C',
+  day: 'D',
+  hyper: 'E',
+} as const satisfies Record<MarginOpenTradeType, string>
+
+const marginOpenTradeTypeCode = (value: MarginOpenTradeType | undefined) => {
+  const code = value ? MARGIN_OPEN_TRADE_TYPE_CODES[value] : undefined
+  if (!code) throw new Error(`orders.margin.open unsupported marginTradeType: ${String(value)}`)
+  return code
+}
+
+const MARGIN_CLOSE_TRADE_TYPE_CODES = {
+  sixMonth: '6',
+  noLimit: '9',
+  oneDay: 'A',
+  fifteenDay: 'D',
+} as const satisfies Record<MarginCloseTradeType, string>
+
+const marginCloseTradeTypeCode = (value: MarginCloseTradeType) => {
+  const code = MARGIN_CLOSE_TRADE_TYPE_CODES[value]
+  if (!code)
+    throw new Error(`orders.margin.close unsupported marginCloseTradeType: ${String(value)}`)
+  return code
+}
+
+const MARGIN_CLOSE_POSITION_ORDER_CODES = {
+  profitFirst: '61',
+  lossFirst: '51',
+  newestFirst: '26',
+  oldestFirst: '16',
+  specify: '0',
+} as const satisfies Record<MarginClosePositionOrder, string>
+
+const marginClosePositionOrderCode = (value: MarginClosePositionOrder | undefined) => {
+  const code = value ? MARGIN_CLOSE_POSITION_ORDER_CODES[value] : undefined
+  if (!code) {
+    throw new Error(
+      `orders.margin.placeSummary unsupported marginClosePositionOrder: ${String(value)}`,
+    )
+  }
+  return code
+}
+
+const ifdOrderTrin = (session: SbiSession, options: IfdOrderOptions & OmitConfirmationOption) => {
+  if (!session.tradePassword) {
+    throw new Error('orders.ifd requires tradePassword in loginWithPasskey options')
+  }
+  const depositType = orderDepositType(session, options, 'orders.ifd')
+  const priceCondition = cashOrderPriceCondition(options)
+  const ifdPriceCondition = ifdOrderPriceCondition(options)
+  return fixedTrin([
+    { width: 32, value: mtsTradePassword(session.tradePassword) },
+    { width: 3, value: session.profile.butenCode ?? session.profile.branchCode },
+    { width: 7, value: session.profile.accountNumber },
+    { width: 5, value: options.issueCode },
+    { width: 3, value: options.market },
+    { width: 8, value: options.quantity },
+    { width: 1, value: cashOrderPriceConditionCode(priceCondition) },
+    {
+      width: 10,
+      value: cashOrderPriceConditionRequiresPrice(priceCondition) ? options.price : '',
+    },
+    { width: 1, value: orderDepositTypeCode(depositType) },
+    { width: 1, value: ifdPrimaryMarginTradeTypeCode(options) },
+    { width: 8, value: cashOrderTermCode(options) },
+    { width: 3, value: cashOrderMethodCode(cashOrderMethod(options)) },
+    { width: 1, value: triggerZoneCode(options.triggerZone) },
+    { width: 10, value: options.triggerPrice ?? '' },
+    { width: 1, value: options.omitConfirmation ? '1' : '2' },
+    { width: 1, value: '' },
+    { width: 2, value: options.ippanMarginPaymentLimit ?? '' },
+    { width: 1, value: secondaryPriceConditionCode(options) },
+    {
+      width: 10,
+      value: secondaryPriceConditionRequiresPrice(options) ? options.secondaryPrice : '',
+      align: 'right',
+      pad: secondaryPriceConditionRequiresPrice(options) ? '0' : ' ',
+    },
+    { width: 4, value: 'IF' },
+    { width: 1, value: cashOrderPriceConditionCode(ifdPriceCondition) },
+    {
+      width: 10,
+      value: cashOrderPriceConditionRequiresPrice(ifdPriceCondition) ? options.ifdPrice : '',
+      align: 'right',
+      pad: '0',
+    },
+    { width: 8, value: ifdOrderTermCode(options) },
+    { width: 3, value: cashOrderMethodCode(ifdOrderMethod(options)) },
+    { width: 1, value: triggerZoneCode(options.ifdTriggerZone) },
+    {
+      width: 10,
+      value: options.ifdTriggerPrice ?? '',
+      align: 'right',
+      pad: options.ifdTriggerPrice != null ? '0' : ' ',
+    },
+    { width: 1, value: ifdSecondaryPriceConditionCode(options) },
+    {
+      width: 10,
+      value: ifdSecondaryPriceConditionRequiresPrice(options) ? options.ifdSecondaryPrice : '',
+      align: 'right',
+      pad: options.ifdSecondaryPriceCondition ? '0' : ' ',
+    },
+  ])
+}
+
+const ifdPrimaryMarginTradeTypeCode = (options: IfdOrderOptions) =>
+  options.tradeType === 'marginOpen' ? marginOpenTradeTypeCode(options.marginTradeType) : '0'
+
+const orderCorrectionSubmitTrin = (session: SbiSession, options: OrderCorrectionOptions) => {
+  if (!session.tradePassword) {
+    throw new Error('orders correction submit requires tradePassword in loginWithPasskey options')
+  }
+  const required = {
+    orderNumber: options.orderNumber,
+    orderId: options.orderId,
+    issueCode: options.issueCode,
+    market: options.market,
+    tradeId: options.tradeId,
+    quantity: options.quantity,
+  }
+  const missing = Object.entries(required)
+    .filter(([, value]) => value == null || value === '')
+    .map(([key]) => key)
+  if (missing.length) {
+    throw new Error(`orders correction submit requires ${missing.join(', ')}`)
+  }
+  const priceCondition = orderCorrectionPriceCondition(options)
+  if (cashOrderPriceConditionRequiresPrice(priceCondition) && options.price == null) {
+    throw new Error(`orders correction priceCondition: "${priceCondition}" requires price`)
+  }
+  if (!cashOrderPriceConditionRequiresPrice(priceCondition) && options.price != null) {
+    throw new Error(`orders correction priceCondition: "${priceCondition}" cannot specify price`)
+  }
+  const secondaryRequiresPrice =
+    options.secondaryPriceCondition != null &&
+    cashOrderPriceConditionRequiresPrice(options.secondaryPriceCondition)
+  if (secondaryRequiresPrice && options.secondaryPrice == null) {
+    throw new Error('orders correction secondaryPriceCondition requires secondaryPrice')
+  }
+  if (
+    options.secondaryPriceCondition != null &&
+    !secondaryRequiresPrice &&
+    options.secondaryPrice != null
+  ) {
+    throw new Error('orders correction secondaryPriceCondition cannot specify secondaryPrice')
+  }
+  return fixedTrin([
+    { width: 32, value: mtsTradePassword(session.tradePassword) },
+    { width: 3, value: session.profile.butenCode ?? session.profile.branchCode },
+    { width: 7, value: session.profile.accountNumber },
+    { width: 1, value: 'P' },
+    { width: 6, value: options.orderNumber },
+    { width: 7, value: options.orderId },
+    { width: 5, value: options.issueCode },
+    { width: 3, value: options.market },
+    { width: 1, value: options.tradeId },
+    { width: 8, value: options.quantity },
+    { width: 1, value: cashOrderPriceConditionCode(priceCondition) },
+    { width: 10, value: cashOrderPriceConditionRequiresPrice(priceCondition) ? options.price : '' },
+    { width: 12, value: options.depositTypeText ?? '' },
+    { width: 1, value: options.status ?? '' },
+    { width: 3, value: cashOrderMethodCode(options.orderMethod ?? 'normal') },
+    { width: 1, value: triggerZoneCode(options.triggerZone) },
+    { width: 10, value: options.triggerPrice ?? '' },
+    { width: 1, value: options.rbeOrderStatus ?? '' },
+    { width: 1, value: options.correctionControlFlag ?? '2' },
+    { width: 1, value: orderCorrectionSecondaryPriceConditionCode(options) },
+    {
+      width: 10,
+      value: secondaryRequiresPrice ? options.secondaryPrice : '',
+      align: 'right',
+      pad: secondaryRequiresPrice ? '0' : ' ',
+    },
+  ])
+}
+
+const orderIfdCorrectionSubmitTrin = (session: SbiSession, options: OrderCorrectionOptions) => {
+  const primary = orderCorrectionSubmitTrin(session, options)
+  const ifdPriceCondition = orderCorrectionIfdPriceCondition(options)
+  if (cashOrderPriceConditionRequiresPrice(ifdPriceCondition) && options.ifdPrice == null) {
+    throw new Error(
+      `orders ifd correction ifdPriceCondition: "${ifdPriceCondition}" requires ifdPrice`,
+    )
+  }
+  if (!cashOrderPriceConditionRequiresPrice(ifdPriceCondition) && options.ifdPrice != null) {
+    throw new Error(
+      `orders ifd correction ifdPriceCondition: "${ifdPriceCondition}" cannot specify ifdPrice`,
+    )
+  }
+  const ifdSecondaryRequiresPrice =
+    options.ifdSecondaryPriceCondition != null &&
+    cashOrderPriceConditionRequiresPrice(options.ifdSecondaryPriceCondition)
+  if (ifdSecondaryRequiresPrice && options.ifdSecondaryPrice == null) {
+    throw new Error('orders ifd correction ifdSecondaryPriceCondition requires ifdSecondaryPrice')
+  }
+  if (
+    options.ifdSecondaryPriceCondition != null &&
+    !ifdSecondaryRequiresPrice &&
+    options.ifdSecondaryPrice != null
+  ) {
+    throw new Error(
+      'orders ifd correction ifdSecondaryPriceCondition cannot specify ifdSecondaryPrice',
+    )
+  }
+  return (
+    primary +
+    fixedTrin([
+      { width: 4, value: 'IF' },
+      { width: 1, value: cashOrderPriceConditionCode(ifdPriceCondition) },
+      {
+        width: 10,
+        value: cashOrderPriceConditionRequiresPrice(ifdPriceCondition) ? options.ifdPrice : '',
+        align: 'right',
+        pad: '0',
+      },
+      { width: 3, value: cashOrderMethodCode(options.ifdOrderMethod ?? 'normal') },
+      { width: 1, value: triggerZoneCode(options.ifdTriggerZone) },
+      {
+        width: 10,
+        value: options.ifdTriggerPrice ?? '',
+        align: 'right',
+        pad: options.ifdTriggerPrice != null ? '0' : ' ',
+      },
+      {
+        width: 1,
+        value: options.ifdSecondaryPriceCondition
+          ? cashOrderPriceConditionCode(options.ifdSecondaryPriceCondition)
+          : '',
+      },
+      {
+        width: 10,
+        value: ifdSecondaryRequiresPrice ? options.ifdSecondaryPrice : '',
+        align: 'right',
+        pad: ifdSecondaryRequiresPrice ? '0' : ' ',
+      },
+    ])
+  )
+}
+
+const orderCorrectionPreOrderTrin = (session: SbiSession, options: OrderCorrectionOptions) => {
+  if (!options.orderNumber) {
+    throw new Error('orders correction pre-order requires orderNumber')
+  }
+  return fixedTrin([
+    { width: 3, value: session.profile.butenCode ?? session.profile.branchCode },
+    { width: 7, value: session.profile.accountNumber },
+    { width: 6, value: options.orderNumber },
+    { width: 1, value: options.tradeId ?? '' },
+    { width: 1, value: session.profile.marginAccount ?? '' },
+    { width: 1, value: options.correctionType ?? '' },
+  ])
+}
+
+const orderCorrectionPriceCondition = (
+  options: OrderCorrectionOptions,
+): CashOrderPriceCondition => {
+  if (options.priceCondition) return options.priceCondition
+  if (options.price != null) return 'limit'
+  return 'market'
+}
+
+const orderCorrectionSecondaryPriceConditionCode = (options: OrderCorrectionOptions) =>
+  options.secondaryPriceCondition
+    ? cashOrderPriceConditionCode(options.secondaryPriceCondition)
+    : ''
+
+const orderCorrectionIfdPriceCondition = (
+  options: OrderCorrectionOptions,
+): CashOrderPriceCondition => {
+  if (options.ifdPriceCondition) return options.ifdPriceCondition
+  if (options.ifdPrice != null) return 'limit'
+  return 'market'
+}
 
 const orderCancelPreOrderTrin = (session: SbiSession, options: OrderCancelOptions) =>
   fixedTrin([
@@ -2487,9 +4071,9 @@ const orderCancelSubmitTrin = (session: SbiSession, options: PlaceOrderCancelOpt
     { width: 32, value: mtsTradePassword(options.tradePassword ?? session.tradePassword) },
     { width: 3, value: session.profile.butenCode ?? session.profile.branchCode },
     { width: 7, value: session.profile.accountNumber },
-    { width: 1, value: 'P' },
+    { width: 1, value: '' },
     { width: 6, value: options.orderNumber },
-    { width: 7, value: options.orderId ?? '' },
+    { width: 7, value: '' },
     { width: 5, value: '' },
     { width: 3, value: '' },
     { width: 1, value: options.tradeId ?? '' },
@@ -2502,21 +4086,55 @@ const orderCancelSubmitTrin = (session: SbiSession, options: PlaceOrderCancelOpt
     { width: 1, value: '' },
     { width: 10, value: '' },
     { width: 1, value: '' },
-    { width: 1, value: '2' },
+    { width: 1, value: '' },
+    { width: 1, value: '' },
     { width: 1, value: '' },
     { width: 10, value: '', align: 'right', pad: ' ' },
   ])
 
-const themeOrderTrin = (session: SbiSession, options: ThemeInvestmentOrderOptions) =>
+const themePreOrderTrin = (session: SbiSession, options: ThemeInvestmentPreOrderOptions) =>
   fixedTrin([
-    { width: 20, value: options.themeId },
-    { width: 1, value: sideCode(options.side) },
-    { width: 16, value: options.amount ?? '', align: 'right', pad: '0' },
-    { width: 20, value: mtsTradePassword(session.tradePassword) },
+    { width: 3, value: session.profile.butenCode ?? session.profile.branchCode },
+    { width: 7, value: session.profile.accountNumber },
+    { width: 1, value: session.profile.marginAccount ?? '' },
+    { width: 4, value: options.components.length },
+    ...options.components.flatMap((component) => [
+      { width: 5, value: component.issueCode },
+      { width: 3, value: options.exchangeCode },
+    ]),
   ])
 
-const cashPreOrderTrCode = (options: CashOrderOptions) =>
+const themeOrderTrin = (session: SbiSession, options: ThemeInvestmentOrderOptions) => {
+  const depositType = orderDepositType(session, options, 'orders.themeInvestment')
+  return fixedTrin([
+    { width: 32, value: mtsTradePassword(session.tradePassword) },
+    { width: 3, value: session.profile.butenCode ?? session.profile.branchCode },
+    { width: 7, value: session.profile.accountNumber },
+    { width: 10, value: options.themeId },
+    { width: 6, value: options.themeSetYyyymm },
+    { width: 2, value: options.themeCourse },
+    { width: 1, value: orderDepositTypeCode(depositType) },
+    { width: 1, value: '0' },
+    { width: 8, value: null },
+    { width: 2, value: String(options.components.length).padStart(2, '0') },
+    ...options.components.flatMap((component) => [
+      { width: 5, value: component.issueCode },
+      { width: 1, value: 'N' },
+      { width: 10, value: '' },
+      { width: 8, value: component.quantity },
+    ]),
+  ])
+}
+
+const cashPreOrderTrCode = (options: CashOrderOptions | CashOrderPreOrderOptions) =>
   options.side === 'sell' ? 'F2102' : 'F2101'
+
+const stockPreOrderTrCode = (tradeType: StockPreOrderTradeType, side: TradeSide) => {
+  if (tradeType === 'cash') return side === 'sell' ? 'F2102' : 'F2101'
+  if (tradeType === 'marginOpen') return side === 'sell' ? 'F2113' : 'F2103'
+  if (tradeType === 'marginClose') return side === 'sell' ? 'F2211' : 'F2201'
+  return tradeType === 'genwatashi' ? 'F2214' : 'F2204'
+}
 
 const cashConfirmTrCode = (options: CashOrderOptions) => {
   if (options.kind === 'ifd') return 'F2151'
@@ -2552,7 +4170,7 @@ const actualDeliveryConfirmTrCode = (options: ActualDeliveryOrderOptions) =>
 const actualDeliveryReceptionTrCode = (options: ActualDeliveryOrderOptions) =>
   options.kind === 'genwatashi' ? 'F2236' : 'F2206'
 
-const actualDeliverySide = (options: ActualDeliveryOrderOptions): TradeSide =>
+const actualDeliverySide = (options: Pick<ActualDeliveryOrderOptions, 'kind'>): TradeSide =>
   options.kind === 'genwatashi' ? 'sell' : 'buy'
 
 const ifdConfirmTrCode = (options: IfdOrderOptions) => {
@@ -2775,6 +4393,11 @@ const emptyToUndefined = (value: string | undefined) => {
   return trimmed ? trimmed : undefined
 }
 
+const emptyControlFieldToUndefined = (value: string | undefined) => {
+  const trimmed = value?.replaceAll('\0', '').trim()
+  return trimmed ? trimmed : undefined
+}
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const extractIssueName = (value: string) => {
@@ -2817,10 +4440,11 @@ const joinDateTime = (date: string, time: string) => {
 }
 
 const mapAccountType = (value: string | undefined) => {
-  if (value === '1') return 'specific'
-  if (value === '2') return 'nisa'
-  if (value === '3') return 'juniorNisa'
-  if (value === '0') return 'general'
+  if (value === '0') return 'specific'
+  if (value === '1' || value === '-') return 'general'
+  if (value === 'H') return 'growthInvestment'
+  if (value === '4') return 'nisa'
+  if (['5', '6', '7', 'J'].includes(value ?? '')) return 'juniorNisa'
   return 'unknown'
 }
 
@@ -2837,6 +4461,7 @@ const depositTypeCode = (value: BoardOptions['accountType']) => {
 const orderDepositTypeCode = (value: AccountType | undefined) => {
   if (value === 'specific') return '0'
   if (value === 'general') return '1'
+  if (value === 'growthInvestment') return 'H'
   if (value === 'nisa') return '4'
   if (value === 'juniorNisa') return '5'
   return ''

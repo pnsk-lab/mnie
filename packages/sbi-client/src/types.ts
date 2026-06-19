@@ -150,8 +150,20 @@ export type SignedTextValue = {
   sign?: 'positive' | 'negative' | 'zero'
 }
 
-export type AccountType = 'general' | 'specific' | 'nisa' | 'juniorNisa' | 'unknown'
-export type DepositType = 'general' | 'specific' | 'nisa' | 'juniorNisa' | 'unknown'
+export type AccountType =
+  | 'general'
+  | 'specific'
+  | 'growthInvestment'
+  | 'nisa'
+  | 'juniorNisa'
+  | 'unknown'
+export type DepositType =
+  | 'general'
+  | 'specific'
+  | 'growthInvestment'
+  | 'nisa'
+  | 'juniorNisa'
+  | 'unknown'
 export type TradeSide = 'buy' | 'sell'
 export type MarginTradeSide = 'buy' | 'sell'
 export type OrderStatus = 'open' | 'executed' | 'cancelled' | 'expired' | 'rejected' | 'unknown'
@@ -561,6 +573,75 @@ export type OrderList = {
   error?: SbiMethodError
 }
 
+export type OrderCorrectionPreOrderDetail = {
+  exchangeName?: string
+  marketLoanKbn?: string
+  marketIppanLoanKbn?: string
+  currentPrice?: CurrencyAmount
+  tradeColorFlag?: string
+  priceTick?: string
+  priceTickText?: string
+  tradeTime?: string
+  changeText?: string
+  volumeText?: string
+}
+
+export type OrderCorrectionPreOrder = {
+  issue: IssueRef
+  tradeTitle?: string
+  buyingPowerTotal?: CurrencyAmount
+  controlledStockCode?: string
+  hasTradeWarning?: boolean
+  deficitMessageFlag?: string
+  deficitMessage?: string
+  details: OrderCorrectionPreOrderDetail[]
+  orderNumber?: string
+  orderId?: string
+  primaryOrderMethod?: string
+  primaryTriggerZone?: string
+  primaryTriggerPrice?: number | null
+  status?: string
+  statusText?: string
+  tradeId?: string
+  tradeName?: string
+  quantity?: number | null
+  quantityText?: string
+  orderLimit?: string
+  orderLimitText?: string
+  priceSteps: StockOrderPreOrderPriceStep[]
+  sessionRange?: string
+  inputDateText?: string
+  primaryOrderTerm?: string
+  nonSpecificTradeText?: string
+  marketName?: string
+  rbeOrderStatus?: string
+  priceCondition?: string
+  price?: number | null
+  priceAmount?: CurrencyAmount
+  exchangeName?: string
+  transId?: string
+  ptsDayNightFlag?: string
+  smallTickFlag?: string
+  juniorBuyingPowerTotal?: CurrencyAmount
+  secondaryPriceCondition?: string
+  secondaryPrice?: number | null
+  secondaryPriceAmount?: CurrencyAmount
+  autoOrderKind?: string
+  autoOrderNumber?: string
+  autoOrderInputDate?: string
+  secondaryOrderMethod?: string
+  secondaryTriggerZone?: string
+  secondaryTriggerPrice?: number | null
+  secondaryOrderCondition?: string
+  secondaryLimitPrice?: number | null
+  secondaryLimitPriceAmount?: CurrencyAmount
+  secondaryOrderTerm?: string
+  secondaryOcoPriceCondition?: string
+  secondaryOcoPrice?: number | null
+  secondaryOcoPriceAmount?: CurrencyAmount
+  exchangeList?: string
+}
+
 export type OrderPreview = {
   issue: IssueRef
   side: TradeSide
@@ -572,6 +653,89 @@ export type OrderPreview = {
   warnings: string[]
   confirmationId?: string
   message?: string
+  correction?: OrderCorrectionPreOrder
+  error?: SbiMethodError
+}
+
+export type StockOrderPreOrderPriceStep = {
+  from?: CurrencyAmount
+  to?: CurrencyAmount
+}
+
+export type StockOrderPreOrderPaymentLimit = {
+  text?: string
+  code?: string
+}
+
+export type StockOrderPreOrderMarginTradeType =
+  | 'standard'
+  | 'generalBuy'
+  | 'generalSellShort'
+  | 'generalSellInventoryLimited'
+  | 'generalSellInventoryUnlimited'
+  | 'day'
+  | 'hyper'
+
+export type StockOrderPreOrder = {
+  issue: IssueRef
+  tradeTitle?: string
+  buyingPowerTotal?: CurrencyAmount
+  controlledStockCode?: string
+  hasTradeWarning?: boolean
+  market?: MarketCode
+  exchangeList?: string
+  exchangeListName?: string
+  exchangeListIndexFlag?: string
+  marketLoanKbn?: string
+  marketIppanLoanKbn?: string
+  currentPrice?: CurrencyAmount
+  tradeColorFlag?: string
+  priceTick?: string
+  priceTickText?: string
+  tradeTime?: string
+  changeText?: string
+  volume?: number | null
+  lotSize?: number | null
+  priceSteps: StockOrderPreOrderPriceStep[]
+  sessionRange?: string
+  basePrice?: CurrencyAmount
+  orderTerms: string[]
+  orderTermDates: string[]
+  paymentLimits: StockOrderPreOrderPaymentLimit[]
+  nonSpecificTradeText?: string
+  paymentLimitText?: string
+  acquisitionPrice?: CurrencyAmount
+  position?: number | null
+  unexecutedQuantity?: number | null
+  lotSize2?: number | null
+  ptsDayNightFlag?: string
+  sorServiceType?: string
+  nisa?: {
+    serviceKbn?: string
+    buyLimit?: CurrencyAmount
+    growthServiceKbn?: string
+    juniorServiceKbn?: string
+    juniorBuyLimit?: CurrencyAmount
+    juniorBuyingPowerTotal?: CurrencyAmount
+  }
+  smallTickFlag?: string
+  margin?: {
+    tradeTypes?: StockOrderPreOrderMarginTradeType[]
+    ippanShort?: string
+    ippanLong?: string
+    dayBuy?: string
+    daySell?: string
+    premiumShortSelling?: string
+    premiumFee?: CurrencyAmount
+    ippanPaymentLimit?: string
+    positionStatus?: string
+  }
+  sKabu?: {
+    code?: string
+    available?: boolean
+  }
+  deficitMessageFlag?: string
+  deficitMessage?: string
   error?: SbiMethodError
 }
 
@@ -586,12 +750,34 @@ export type OrderReceipt = {
 export type ThemeInvestment = {
   id: ThemeId
   name: string
-  issues: IssueRef[]
+  issues: ThemeInvestmentIssue[]
   minimumAmount?: CurrencyAmount
+}
+
+export type ThemeInvestmentIssue = IssueRef & {
+  controlledStockCode?: string
+  hasTradeWarning?: boolean
+  nisaServiceKbn?: string
+  juniorNisaServiceKbn?: string
+  growthNisaServiceKbn?: string
+  sKabuCode?: string
+  sKabuAvailable?: boolean
+  lotSize?: number | null
+  currentPrice?: CurrencyAmount
+  tradeColorFlag?: string
+  priceTick?: string
+  priceTickText?: string
+  tradeTime?: string
 }
 
 export type ThemeInvestmentList = {
   themes: ThemeInvestment[]
+  buyingPowerTotal?: CurrencyAmount
+  isaBuyLimit?: CurrencyAmount
+  juniorNisaBuyLimit?: CurrencyAmount
+  buyingPowerTotalJuniorNisa?: CurrencyAmount
+  deficitMessage?: string
+  deficitMessageFlag?: string
   error?: SbiMethodError
 }
 

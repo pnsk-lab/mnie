@@ -103,8 +103,8 @@ const methodAllowed = (method: string) => {
 
 const ui = {
   root: 'grid gap-3',
-  limitGrid: 'grid grid-cols-3 gap-3',
-  limitGridCompact: 'grid-cols-5',
+  limitGrid: 'grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3',
+  limitGridCompact: 'xl:grid-cols-5',
   label: 'grid gap-2 text-xs font-extrabold text-[#9aa0a9]',
   input:
     'min-h-12 w-full rounded-[16px] border border-[#4a5058] bg-[#111418] px-4 text-[#e3e3e9] outline-none transition focus:border-[#a8c7fa]',
@@ -113,7 +113,7 @@ const ui = {
   actions: 'mt-3 flex flex-wrap gap-2',
   button:
     'min-h-9 rounded-full bg-[#263141] px-4 text-sm font-extrabold text-[#d3e3fd] transition hover:bg-[#303b4d]',
-  methodGrid: 'mt-3 grid grid-cols-2 gap-2',
+  methodGrid: 'mt-3 grid grid-cols-1 gap-2 xl:grid-cols-2',
   methodToggle:
     'flex min-h-10 items-center gap-2 rounded-[16px] bg-[#111418] p-3 text-xs text-[#c3c7cf]',
   checkbox: 'h-4 min-h-4 w-4',
@@ -128,7 +128,7 @@ const ui = {
         <input v-model.number="settings.maxTradesPerHour" :class="ui.input" type="number" min="0" />
       </label>
       <label :class="ui.label">
-        3時間 取引上限
+        6時間 取引上限
         <input
           v-model.number="settings.maxTradesPer6Hours"
           :class="ui.input"

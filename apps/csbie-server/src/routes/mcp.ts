@@ -99,8 +99,22 @@ const confirmationIdFromPreview = (value: unknown) => {
   return typeof confirmationId === 'string' && confirmationId ? confirmationId : undefined
 }
 
-const accountTypeSchema = z.enum(['general', 'specific', 'nisa', 'juniorNisa', 'unknown'])
-const depositTypeSchema = z.enum(['general', 'specific', 'nisa', 'juniorNisa', 'unknown'])
+const accountTypeSchema = z.enum([
+  'general',
+  'specific',
+  'growthInvestment',
+  'nisa',
+  'juniorNisa',
+  'unknown',
+])
+const depositTypeSchema = z.enum([
+  'general',
+  'specific',
+  'growthInvestment',
+  'nisa',
+  'juniorNisa',
+  'unknown',
+])
 const tradeSideSchema = z.enum(['buy', 'sell'])
 const marketCodeSchema = z.string().min(1).describe('SBI market code')
 const issueCodeSchema = z.string().min(1).describe('Issue code')
@@ -202,6 +216,9 @@ const cashOrderPriceConditionSchema = z.enum([
 ])
 
 const cashOrderSchema = stockOrderBaseSchema.extend({
+  preOrderMarket: marketCodeSchema
+    .optional()
+    .describe('APK pre-order market for S-kabu; live S-kabu orders still send STK'),
   price: z.number().positive().optional().describe('Order price for price-based orders'),
   kind: z.enum(['market', 'limit', 'stop', 'oco', 'ifd', 'ifdo', 's', 'unknown']).optional(),
   priceCondition: cashOrderPriceConditionSchema
@@ -219,9 +236,39 @@ const cashOrderSchema = stockOrderBaseSchema.extend({
     .optional()
     .describe('Secondary execution condition for OCO orders'),
   secondaryPrice: z.number().positive().optional().describe('Secondary price for OCO orders'),
+  ippanMarginPaymentLimit: z
+    .string()
+    .optional()
+    .describe('APK ippan margin payment-limit code from board/pre-order information'),
   sorLastMarket: marketCodeSchema
     .optional()
     .describe('Previous market code sent with SOR orders; defaults to login profile'),
+})
+
+const cashOrderPreOrderSchema = z.object({
+  issueCode: issueCodeSchema,
+  market: marketCodeSchema,
+  side: tradeSideSchema,
+  accountType: accountTypeSchema.optional(),
+  depositType: depositTypeSchema.optional(),
+  kind: z.enum(['s']).optional().describe('Requests APK S-kabu pre-order constraints'),
+  preOrderMarket: marketCodeSchema.optional().describe('APK pre-order market for S-kabu checks'),
+})
+
+const stockOrderMarginPositionSchema = z.object({
+  openTradeDate: z
+    .string()
+    .describe('Open trade date from the margin position record, in yyyyMMdd or yyyy-MM-dd format'),
+  openPrice: z
+    .union([z.number().positive(), z.string().min(1)])
+    .describe('Open price from the margin position record'),
+  quantity: z
+    .union([z.number().positive(), z.string().min(1)])
+    .describe('Selected quantity from the margin position record'),
+  orgNewTradeDate: z.string().describe('Original new-trade date from the margin position record'),
+  bargainMarketCode: marketCodeSchema.describe(
+    'Bargain market code from the margin position record',
+  ),
 })
 
 const placeCashOrderSchema = cashOrderSchema.extend({
@@ -229,11 +276,52 @@ const placeCashOrderSchema = cashOrderSchema.extend({
     .string()
     .optional()
     .describe('Confirmation ID returned by the confirmation step'),
+  omitConfirmation: z
+    .boolean()
+    .optional()
+    .describe('APK confirmation-screen omission flag for live submit calls'),
   allowTrading: z.literal(true).optional().describe('Explicitly allows sending a live order'),
 })
 
 const orderCorrectionSchema = z.object({
+  orderNumber: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Order number shown in order inquiry; required by the mobile pre-correction route'),
   orderId: orderIdSchema,
+  issueCode: issueCodeSchema.optional().describe('Issue code from the pre-correction response'),
+  market: marketCodeSchema.optional().describe('Market code from the pre-correction response'),
+  tradeId: z.string().min(1).optional().describe('Original trade id code'),
+  correctionType: z.string().min(1).optional().describe('Additional correction flag'),
+  status: z.string().min(1).optional().describe('Original order status code'),
+  rbeOrderStatus: z.string().min(1).optional().describe('Original RBE order status code'),
+  depositTypeText: z.string().min(1).optional().describe('Display deposit type text'),
+  orderMethod: z.enum(['normal', 'stop', 'oco']).optional().describe('Primary order method'),
+  priceCondition: cashOrderPriceConditionSchema
+    .optional()
+    .describe('Corrected primary execution condition'),
+  triggerZone: z.enum(['above', 'below']).optional().describe('Stop trigger direction'),
+  triggerPrice: z.number().positive().optional().describe('Stop trigger price'),
+  secondaryPriceCondition: cashOrderPriceConditionSchema
+    .optional()
+    .describe('Secondary/OCO execution condition'),
+  secondaryPrice: z.number().positive().optional().describe('Secondary/OCO price'),
+  ifdPriceCondition: cashOrderPriceConditionSchema
+    .optional()
+    .describe('IFD follow-up execution condition for IF/IFDOCO correction'),
+  ifdPrice: z.number().positive().optional().describe('IFD follow-up price'),
+  ifdOrderMethod: z
+    .enum(['normal', 'stop', 'oco'])
+    .optional()
+    .describe('IFD follow-up special order method'),
+  ifdTriggerZone: z.enum(['above', 'below']).optional().describe('IFD stop trigger direction'),
+  ifdTriggerPrice: z.number().positive().optional().describe('IFD stop trigger price'),
+  ifdSecondaryPriceCondition: cashOrderPriceConditionSchema
+    .optional()
+    .describe('IFD secondary/OCO execution condition'),
+  ifdSecondaryPrice: z.number().positive().optional().describe('IFD secondary/OCO price'),
+  correctionControlFlag: z.enum(['1', '2']).optional().describe('Mobile correction control flag'),
   quantity: z.number().positive().optional().describe('Corrected order quantity'),
   price: z.number().positive().optional().describe('Corrected order price'),
 })
@@ -260,13 +348,40 @@ const placeOrderCancelSchema = orderCancelSchema.extend({
     .describe('Explicitly allows sending a live cancellation request'),
 })
 
-const marginOpenOrderSchema = cashOrderSchema
+const marginOpenTradeTypeSchema = z.enum([
+  'standard',
+  'generalBuy',
+  'generalSellShort',
+  'generalSellInventoryLimited',
+  'generalSellInventoryUnlimited',
+  'day',
+  'hyper',
+])
+
+const marginOpenOrderSchema = cashOrderSchema.extend({
+  kind: z.enum(['market', 'limit', 'stop', 'oco', 'ifd', 'ifdo', 'unknown']).optional(),
+  marginTradeType: marginOpenTradeTypeSchema.describe('APK margin-open trade type'),
+  ippanMarginPaymentLimit: z
+    .string()
+    .optional()
+    .describe('APK ippan margin payment-limit code from board/pre-order information'),
+})
+
+const marginOpenOrderPreOrderSchema = stockOrderBaseSchema.omit({ quantity: true }).extend({
+  marginTradeType: marginOpenTradeTypeSchema
+    .optional()
+    .describe('APK margin-open trade type used by the mobile pre-order request'),
+})
 
 const placeMarginOpenOrderSchema = marginOpenOrderSchema.extend({
   confirmationId: z
     .string()
     .optional()
     .describe('Confirmation ID returned by the confirmation step'),
+  omitConfirmation: z
+    .boolean()
+    .optional()
+    .describe('APK confirmation-screen omission flag for live submit calls'),
   allowTrading: z
     .literal(true)
     .optional()
@@ -275,9 +390,31 @@ const placeMarginOpenOrderSchema = marginOpenOrderSchema.extend({
 
 const marginCloseOrderSchema = cashOrderSchema.extend({
   positionId: positionIdSchema.optional().describe('Position ID to close'),
+  marginCloseTradeType: z
+    .enum(['sixMonth', 'noLimit', 'oneDay', 'fifteenDay'])
+    .describe('APK margin-close trade type'),
+  marginPositions: z
+    .array(stockOrderMarginPositionSchema)
+    .optional()
+    .describe('Margin position records selected for specified close orders'),
+  marginClosePositionOrder: z
+    .enum(['profitFirst', 'lossFirst', 'newestFirst', 'oldestFirst', 'specify'])
+    .optional()
+    .describe('APK close-position ordering used by summary close orders'),
+})
+
+const marginCloseOrderPreOrderSchema = stockOrderBaseSchema.omit({ quantity: true }).extend({
+  marginCloseTradeType: z
+    .enum(['sixMonth', 'noLimit', 'oneDay', 'fifteenDay'])
+    .optional()
+    .describe('APK margin-close trade type used by the mobile pre-order request'),
 })
 
 const placeMarginCloseOrderSchema = marginCloseOrderSchema.extend({
+  omitConfirmation: z
+    .boolean()
+    .optional()
+    .describe('APK confirmation-screen omission flag for live submit calls'),
   allowTrading: z
     .literal(true)
     .optional()
@@ -293,6 +430,22 @@ const actualDeliveryOrderSchema = z.object({
   price: z.number().positive().optional().describe('Order price for price-based requests'),
   kind: z.enum(['genbiki', 'genwatashi']),
   positionId: positionIdSchema.optional().describe('Position ID to deliver'),
+  marginPositions: z
+    .array(stockOrderMarginPositionSchema)
+    .optional()
+    .describe('Margin position records selected for genbiki/genwatashi delivery'),
+  ippanMarginPaymentLimit: z
+    .string()
+    .optional()
+    .describe('APK ippan margin payment-limit code from board/pre-order information'),
+})
+
+const actualDeliveryOrderPreOrderSchema = actualDeliveryOrderSchema.omit({
+  quantity: true,
+  price: true,
+  positionId: true,
+  marginPositions: true,
+  ippanMarginPaymentLimit: true,
 })
 
 const placeActualDeliveryOrderSchema = actualDeliveryOrderSchema.extend({
@@ -300,6 +453,10 @@ const placeActualDeliveryOrderSchema = actualDeliveryOrderSchema.extend({
     .string()
     .optional()
     .describe('Confirmation ID returned by the confirmation step'),
+  omitConfirmation: z
+    .boolean()
+    .optional()
+    .describe('APK confirmation-screen omission flag for live submit calls'),
   allowTrading: z
     .literal(true)
     .optional()
@@ -311,6 +468,39 @@ const ifdOrderSchema = cashOrderSchema.extend({
     .enum(['cash', 'marginOpen'])
     .optional()
     .describe('Product to use for the first IFD leg'),
+  marginTradeType: marginOpenTradeTypeSchema
+    .optional()
+    .describe('APK margin-open trade type for the first leg when tradeType is marginOpen'),
+  ippanMarginPaymentLimit: z
+    .string()
+    .optional()
+    .describe('APK ippan margin payment-limit code for the first IFD leg'),
+  ifdPriceCondition: cashOrderPriceConditionSchema
+    .optional()
+    .describe('Execution condition for the IFD follow-up leg'),
+  ifdPrice: z.number().positive().optional().describe('Order price for the IFD follow-up leg'),
+  ifdOrderTerm: z.enum(['day', 'week', 'date']).optional().describe('IFD follow-up validity term'),
+  ifdOrderDate: z
+    .string()
+    .optional()
+    .describe('IFD follow-up validity date in yyyyMMdd or yyyy-MM-dd format'),
+  ifdOrderMethod: z
+    .enum(['normal', 'stop', 'oco'])
+    .optional()
+    .describe('Special order method for the IFD follow-up leg'),
+  ifdTriggerZone: z
+    .enum(['above', 'below'])
+    .optional()
+    .describe('Stop trigger direction for the IFD follow-up leg'),
+  ifdTriggerPrice: z
+    .number()
+    .positive()
+    .optional()
+    .describe('Stop trigger price for the IFD follow-up leg'),
+  ifdSecondaryPriceCondition: cashOrderPriceConditionSchema
+    .optional()
+    .describe('Secondary OCO execution condition for IFDOCO'),
+  ifdSecondaryPrice: z.number().positive().optional().describe('Secondary OCO price for IFDOCO'),
 })
 
 const placeIfdOrderSchema = ifdOrderSchema.extend({
@@ -318,13 +508,56 @@ const placeIfdOrderSchema = ifdOrderSchema.extend({
     .string()
     .optional()
     .describe('Confirmation ID returned by the confirmation step'),
+  omitConfirmation: z
+    .boolean()
+    .optional()
+    .describe('APK confirmation-screen omission flag for live submit calls'),
   allowTrading: z.literal(true).optional().describe('Explicitly allows sending a live IFD order'),
 })
 
 const themeInvestmentOrderSchema = z.object({
   themeId: z.string().min(1).describe('Theme ID for the theme investment order'),
+  themeSetYyyymm: z
+    .string()
+    .length(6)
+    .describe('Theme set year/month (`theme_set_yyyymm`) from the mobile APK handoff'),
+  themeCourse: z
+    .union([z.number().int().nonnegative(), z.string().min(1).max(2)])
+    .describe('Theme course (`theme_course`) from the mobile APK handoff'),
   side: tradeSideSchema,
+  accountType: accountTypeSchema.optional().describe('Account/deposit type used for the order'),
+  depositType: accountTypeSchema.optional().describe('Deposit type used for the order'),
+  components: z
+    .array(
+      z.object({
+        issueCode: issueCodeSchema,
+        quantity: z.union([z.number().positive(), z.string().min(1)]),
+      }),
+    )
+    .min(1)
+    .max(10)
+    .describe('Component stock orders selected by the mobile theme investment flow'),
   amount: z.number().positive().optional().describe('Order amount for the theme investment order'),
+})
+
+const themeInvestmentPreOrderSchema = z.object({
+  themeId: z.string().min(1).describe('Theme ID from the mobile theme investment handoff'),
+  themeName: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Theme name from the mobile theme investment handoff'),
+  exchangeCode: marketCodeSchema.describe('Exchange code used by the mobile pre-order call'),
+  components: z
+    .array(
+      z.object({
+        issueCode: issueCodeSchema,
+        quantity: z.union([z.number().positive(), z.string().min(1)]).optional(),
+      }),
+    )
+    .min(1)
+    .max(10)
+    .describe('Component stocks selected by the mobile theme investment flow'),
 })
 
 const placeThemeInvestmentOrderSchema = themeInvestmentOrderSchema.extend({
@@ -366,6 +599,7 @@ const methodParamSchemas = {
   'watchlist.list': undefined,
   'orders.inquiry.executionsToday': orderInquiryOptionsSchema.optional(),
   'orders.inquiry.open': orderInquiryOptionsSchema.optional(),
+  'orders.cash.preOrder': cashOrderPreOrderSchema,
   'orders.cash.estimate': cashOrderSchema,
   'orders.cash.place': placeCashOrderSchema,
   'orders.cash.estimateCorrection': orderCorrectionSchema,
@@ -373,23 +607,26 @@ const methodParamSchemas = {
   'orders.cash.placeCorrection': placeOrderCorrectionSchema,
   'orders.cash.estimateCancel': orderCancelSchema,
   'orders.cash.placeCancel': placeOrderCancelSchema,
+  'orders.margin.preOrderOpen': marginOpenOrderPreOrderSchema,
   'orders.margin.estimateOpen': marginOpenOrderSchema,
   'orders.margin.open': placeMarginOpenOrderSchema,
+  'orders.margin.preOrderClose': marginCloseOrderPreOrderSchema,
   'orders.margin.estimateClose': marginCloseOrderSchema,
   'orders.margin.close': placeMarginCloseOrderSchema,
   'orders.margin.estimateCloseSummary': marginCloseOrderSchema,
   'orders.margin.closeSummary': placeMarginCloseOrderSchema,
   'orders.margin.estimateSummary': marginCloseOrderSchema,
   'orders.margin.placeSummary': placeMarginCloseOrderSchema,
+  'orders.margin.preOrderActualDelivery': actualDeliveryOrderPreOrderSchema,
   'orders.margin.estimateActualDelivery': actualDeliveryOrderSchema,
   'orders.margin.actualDelivery': placeActualDeliveryOrderSchema,
   'orders.ifd.estimate': ifdOrderSchema,
   'orders.ifd.place': placeIfdOrderSchema,
   'orders.ifd.estimateCorrection': orderCorrectionSchema,
   'orders.ifd.placeCorrection': placeOrderCorrectionSchema,
-  'orders.ifd.estimateCancel': orderCorrectionSchema,
-  'orders.ifd.placeCancel': placeOrderCorrectionSchema,
-  'orders.themeInvestment.list': undefined,
+  'orders.ifd.estimateCancel': orderCancelSchema,
+  'orders.ifd.placeCancel': placeOrderCancelSchema,
+  'orders.themeInvestment.list': themeInvestmentPreOrderSchema,
   'orders.themeInvestment.estimate': themeInvestmentOrderSchema,
   'orders.themeInvestment.place': placeThemeInvestmentOrderSchema,
 } satisfies Record<RpcMethod, z.ZodType | undefined>

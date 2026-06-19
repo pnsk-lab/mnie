@@ -13,6 +13,7 @@ const props = withDefaults(
     readonly?: boolean
     disabled?: boolean
     min?: string | number
+    step?: string | number
     autofocus?: boolean
   }>(),
   {
@@ -24,6 +25,7 @@ const props = withDefaults(
     readonly: false,
     disabled: false,
     min: undefined,
+    step: undefined,
     autofocus: false,
   },
 )
@@ -77,6 +79,7 @@ const controlClass =
       :value="modelValue"
       :type="type"
       :min="min"
+      :step="step"
       :placeholder="placeholder"
       :autocomplete="autocomplete"
       :spellcheck="spellcheck"

@@ -1,4 +1,5 @@
 import type {
+  ChartNotice,
   OrderPreview,
   OrderRow,
   Position,
@@ -180,7 +181,83 @@ export const stockFromBoard = (
   }
 }
 
-const chartDateTimeToIso = (value: string) => {
+const zonedPartsFormatter = (timeZone: string) =>
+  new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+
+const zonedParts = (date: Date, timeZone: string) => {
+  const parts = Object.fromEntries(
+    zonedPartsFormatter(timeZone)
+      .formatToParts(date)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, Number(part.value)]),
+  ) as Partial<Record<'year' | 'month' | 'day' | 'hour' | 'minute' | 'second', number>>
+
+  const missing = (['year', 'month', 'day', 'hour', 'minute', 'second'] as const).filter(
+    (part) => parts[part] == null,
+  )
+  if (missing.length) {
+    throw new Error(`Failed to read ${missing.join(', ')} from ${timeZone} date parts`)
+  }
+
+  return {
+    year: parts.year as number,
+    month: parts.month as number,
+    day: parts.day as number,
+    hour: parts.hour as number,
+    minute: parts.minute as number,
+    second: parts.second as number,
+  }
+}
+
+const timeZoneOffsetMs = (date: Date, timeZone: string) => {
+  const parts = zonedParts(date, timeZone)
+  return (
+    Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) -
+    date.getTime()
+  )
+}
+
+const zonedDateTimeToUtcMs = (
+  timeZone: string,
+  parts: {
+    year: number
+    month: number
+    day: number
+    hour?: number
+    minute?: number
+    second?: number
+  },
+) => {
+  const utcGuess = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour ?? 0,
+    parts.minute ?? 0,
+    parts.second ?? 0,
+  )
+  return utcGuess - timeZoneOffsetMs(new Date(utcGuess), timeZone)
+}
+
+export const startOfMarketDateUtcMs = (timeZone: string, now = new Date()) => {
+  const parts = zonedParts(now, timeZone)
+  return zonedDateTimeToUtcMs(timeZone, {
+    year: parts.year,
+    month: parts.month,
+    day: parts.day,
+  })
+}
+
+const chartDateTimeToIso = (value: string, timeZone = 'Asia/Tokyo') => {
   const digits = value.replace(/\D/g, '')
   if (digits.length < 8) return ''
   const year = Number(digits.slice(0, 4))
@@ -188,18 +265,71 @@ const chartDateTimeToIso = (value: string) => {
   const day = Number(digits.slice(6, 8))
   const hour = Number(digits.slice(8, 10) || '0')
   const minute = Number(digits.slice(10, 12) || '0')
-  const date = new Date(year, month - 1, day, hour, minute)
-  return Number.isNaN(date.getTime()) ? '' : date.toISOString()
+  const time = zonedDateTimeToUtcMs(timeZone, { year, month, day, hour, minute })
+  return Number.isNaN(time) ? '' : new Date(time).toISOString()
 }
 
-export const pricePointsFromIssueChart = (value: unknown): RealtimePricePoint[] =>
+export const pricePointsFromIssueChart = (
+  value: unknown,
+  timeZone = 'Asia/Tokyo',
+): RealtimePricePoint[] =>
   asArray(asRecord(value).prices)
     .map((entry) => {
       const price = asRecord(entry)
-      const at = chartDateTimeToIso(textValue(price.dateTime))
-      return { at, price: numberValue(price.close) }
+      const at = chartDateTimeToIso(textValue(price.dateTime), timeZone)
+      const close = numberValue(price.close)
+      return {
+        at,
+        price: close,
+        open: numberValue(price.open),
+        high: numberValue(price.high),
+        low: numberValue(price.low),
+        close,
+        volume: numberValue(price.volume, 0),
+      }
     })
     .filter((point) => point.at && point.price > 0)
+
+const japanDateFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Tokyo',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+const chartDateTimeToLocalDate = (value: string) => {
+  const digits = value.replace(/\D/g, '')
+  if (digits.length < 8) return ''
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`
+}
+
+const japanToday = () => japanDateFormatter.format(new Date())
+
+const isWeekendInJapan = () => {
+  const weekday = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Tokyo',
+    weekday: 'short',
+  }).format(new Date())
+  return weekday === 'Sat' || weekday === 'Sun'
+}
+
+export const chartNoticeFromIssueChart = (value: unknown): ChartNotice | null => {
+  const chart = asRecord(value)
+  const latestDate = chartDateTimeToLocalDate(textValue(chart.latestDateTime))
+  const today = japanToday()
+  if (!latestDate || latestDate >= today) return null
+
+  const formattedLatestDate = new Intl.DateTimeFormat('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    month: 'numeric',
+    day: 'numeric',
+  }).format(new Date(`${latestDate}T00:00:00+09:00`))
+
+  return {
+    title: isWeekendInJapan() ? '本日は休場日です' : '本日の取引データはまだありません',
+    detail: `最新のチャートは${formattedLatestDate}です`,
+  }
+}
 
 export const positionFromApi = (value: unknown): Position | null => {
   const item = asRecord(value)
@@ -243,7 +373,7 @@ export const orderFromApi = (value: unknown): OrderRow | null => {
   const quantity =
     status === '約定済'
       ? (executedQuantity ?? orderedQuantity ?? unexecutedQuantity)
-      : (orderedQuantity ?? unexecutedQuantity ?? executedQuantity)
+      : (unexecutedQuantity ?? orderedQuantity ?? executedQuantity)
   const price =
     status === '約定済'
       ? (nullableNumberValue(item.executedPrice) ?? nullableNumberValue(item.price))

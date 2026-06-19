@@ -1,0 +1,9 @@
+services:
+  csbie:
+    image: git.yutakobayashi.com/nakasyou/csbi:latest
+    ports:
+      - '18787:8787'
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data

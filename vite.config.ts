@@ -40,6 +40,13 @@ export default defineConfig({
       verify: {
         command: ['vp check', 'vp run typecheck:all', 'vp run app:build'],
       },
+      'docker:build':
+        'docker build --no-cache -f apps/csbie/Dockerfile -t git.yutakobayashi.com/nakasyou/csbi:latest .',
+      'docker:run':
+        'docker run --rm -p 8787:8787 --env-file .env -v "$PWD/data:/app/data" git.yutakobayashi.com/nakasyou/csbi:latest',
+      'docker:tag':
+        'docker tag git.yutakobayashi.com/nakasyou/csbi:latest git.yutakobayashi.com/nakasyou/csbi:latest',
+      'docker:push': 'docker push git.yutakobayashi.com/nakasyou/csbi:latest',
     },
   },
 })

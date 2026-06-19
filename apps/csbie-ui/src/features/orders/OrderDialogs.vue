@@ -65,6 +65,14 @@ const orderMethodLabel = (method: CashOrderMethod) =>
   method === 'normal' ? '通常' : method === 'stop' ? '逆指値' : 'OCO'
 
 const triggerZoneLabel = (zone: CashOrderTriggerZone) => (zone === 'above' ? '以上' : '以下')
+
+const accountTypeLabel = (type: CashOrderAccountType) =>
+  ({
+    specific: '特定',
+    general: '一般',
+    growthInvestment: 'NISA成長投資枠',
+    nisa: 'NISA',
+  })[type]
 </script>
 
 <template>
@@ -80,7 +88,7 @@ const triggerZoneLabel = (zone: CashOrderTriggerZone) => (zone === 'above' ? '�
       </div>
       <div :class="ui.confirmRow">
         <dt>預り区分</dt>
-        <dd>{{ accountType === 'specific' ? '特定' : '一般' }}</dd>
+        <dd>{{ accountTypeLabel(accountType) }}</dd>
       </div>
       <div :class="ui.confirmRow">
         <dt>注文市場</dt>
@@ -151,7 +159,7 @@ const triggerZoneLabel = (zone: CashOrderTriggerZone) => (zone === 'above' ? '�
       </div>
       <div :class="ui.confirmRow">
         <dt>預り区分</dt>
-        <dd>{{ accountType === 'specific' ? '特定' : '一般' }}</dd>
+        <dd>{{ accountTypeLabel(accountType) }}</dd>
       </div>
       <div :class="ui.confirmRow">
         <dt>注文市場</dt>

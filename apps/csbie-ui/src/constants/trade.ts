@@ -3,7 +3,6 @@ import type {
   CashOrderMarket,
   CashOrderMethod,
   CashOrderPriceCondition,
-  CashOrderTerm,
   CashOrderTriggerZone,
   OrderKind,
   TradeSide,
@@ -25,6 +24,8 @@ export const cashOrderAccountTypeOptions: Array<{
 }> = [
   { label: '特定', value: 'specific' },
   { label: '一般', value: 'general' },
+  { label: 'NISA成長投資枠', value: 'growthInvestment' },
+  { label: 'NISA', value: 'nisa' },
 ]
 
 export const cashOrderMarketOptions: Array<{
@@ -33,6 +34,9 @@ export const cashOrderMarketOptions: Array<{
 }> = [
   { label: '自動', value: 'auto' },
   { label: '東証', value: 'TKY' },
+  { label: '名証', value: 'NGY' },
+  { label: '福証', value: 'FKO' },
+  { label: '札証', value: 'SPR' },
   { label: 'SOR', value: 'SOR' },
   { label: 'PTS', value: 'PTS' },
   { label: 'PTS(X)', value: 'PTX' },
@@ -56,15 +60,6 @@ export const cashOrderPriceConditionOptions: Array<{
   { label: 'IOC成', value: 'marketIoc' },
   { label: 'IOC指', value: 'limitIoc' },
   { label: '不成', value: 'funari' },
-]
-
-export const cashOrderTermOptions: Array<{
-  label: string
-  value: CashOrderTerm
-}> = [
-  { label: '当日中', value: 'day' },
-  { label: '今週中', value: 'week' },
-  { label: '日付指定', value: 'date' },
 ]
 
 export const cashOrderMethodOptions: Array<{
