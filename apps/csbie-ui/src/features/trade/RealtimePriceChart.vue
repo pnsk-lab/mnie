@@ -2,7 +2,9 @@
 import * as d3 from 'd3'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Spinner from '../../components/ui/Spinner.vue'
+import { marketTimeZones } from '../../constants/market'
 import type { ChartMode, ChartNotice, ChartRange, RealtimePricePoint } from '../../types/trading'
+import { currencyForMarket } from '../../utils/format'
 
 const props = defineProps<{
   points: RealtimePricePoint[]
@@ -10,6 +12,7 @@ const props = defineProps<{
   active: boolean
   mode: ChartMode
   range: ChartRange
+  market?: string
   previousClose?: number
   notice?: ChartNotice | null
 }>()
@@ -40,7 +43,8 @@ const tooltip = ref({
   x: 0,
   y: 0,
   price: '',
-  date: '',
+  jstDate: '',
+  localDate: '',
   detail: '',
 })
 
@@ -62,7 +66,6 @@ const dayMs = 24 * 60 * 60 * 1000
 const tolerancePx = 10
 const offscreenPointBuffer = 4
 const minXAxisTickSpacing = 72
-
 const chartPoints = computed<ChartPoint[]>(() =>
   props.points
     .map((point, index) => ({ ...point, index, date: new Date(point.at) }))
@@ -77,6 +80,31 @@ const labelFor = (point: ChartPoint) => {
     return new Intl.DateTimeFormat('ja-JP', {
       hour: '2-digit',
       minute: '2-digit',
+    }).format(point.date)
+  }
+
+  if (props.range === '3D') {
+    if (
+      point.date.getHours() === 0 &&
+      point.date.getMinutes() === 0 &&
+      point.date.getSeconds() === 0
+    ) {
+      return new Intl.DateTimeFormat('ja-JP', {
+        month: 'numeric',
+        day: 'numeric',
+      }).format(point.date)
+    }
+
+    return new Intl.DateTimeFormat('ja-JP', {
+      month: 'numeric',
+      day: 'numeric',
+      hour: '2-digit',
+    }).format(point.date)
+  }
+
+  if (props.range === 'ALL') {
+    return new Intl.DateTimeFormat('ja-JP', {
+      year: 'numeric',
     }).format(point.date)
   }
 
@@ -97,6 +125,9 @@ const labelFor = (point: ChartPoint) => {
 }
 
 const closePrice = (point: ChartPoint) => point.close ?? point.price
+const marketTimeZone = computed(
+  () => marketTimeZones[props.market?.toUpperCase() ?? ''] ?? 'Asia/Tokyo',
+)
 
 const previousCloseValue = computed(() =>
   props.range === '1D' && Number.isFinite(props.previousClose) && props.previousClose
@@ -112,10 +143,31 @@ const ohlcFor = (point: ChartPoint) => {
   return { open, high, low, close }
 }
 
-const tooltipDateFor = (point: ChartPoint) => {
-  const hasTime =
-    point.date.getHours() !== 0 || point.date.getMinutes() !== 0 || point.date.getSeconds() !== 0
+const zonedClockParts = (date: Date, timeZone: string) => {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hourCycle: 'h23',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+      .formatToParts(date)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, Number(part.value)]),
+  ) as Partial<Record<'hour' | 'minute' | 'second', number>>
+  return {
+    hour: parts.hour ?? 0,
+    minute: parts.minute ?? 0,
+    second: parts.second ?? 0,
+  }
+}
+
+const tooltipDateFor = (point: ChartPoint, timeZone: string) => {
+  const parts = zonedClockParts(point.date, timeZone)
+  const hasTime = parts.hour !== 0 || parts.minute !== 0 || parts.second !== 0
   return new Intl.DateTimeFormat('ja-JP', {
+    timeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -124,22 +176,24 @@ const tooltipDateFor = (point: ChartPoint) => {
           hour: '2-digit',
           minute: '2-digit',
           second: '2-digit',
+          timeZoneName: 'short',
         }
       : {}),
   }).format(point.date)
 }
 
 const tooltipStyle = computed(() => {
-  const width = 152
+  const width = 220
+  const height = 92
   const pad = 8
   const left = Math.min(
     Math.max(pad, tooltip.value.x + 12),
     Math.max(pad, size.value.width - width - pad),
   )
   const top =
-    tooltip.value.y > 76
-      ? Math.max(pad, tooltip.value.y - 70)
-      : Math.min(size.value.height - 64, tooltip.value.y + 14)
+    tooltip.value.y > height + pad
+      ? Math.max(pad, tooltip.value.y - height)
+      : Math.min(size.value.height - height - pad, tooltip.value.y + 14)
   return {
     left: `${left}px`,
     top: `${top}px`,
@@ -487,11 +541,12 @@ const showHover = (point: ChartPoint) => {
     visible: true,
     x,
     y,
-    price: `${closePrice(point).toLocaleString('ja-JP')}円`,
-    date: tooltipDateFor(point),
+    price: currencyForMarket(closePrice(point), props.market),
+    jstDate: tooltipDateFor(point, 'Asia/Tokyo'),
+    localDate: tooltipDateFor(point, marketTimeZone.value),
     detail:
       props.mode === 'box'
-        ? `始 ${ohlc.open.toLocaleString('ja-JP')} / 高 ${ohlc.high.toLocaleString('ja-JP')} / 安 ${ohlc.low.toLocaleString('ja-JP')}`
+        ? `始 ${currencyForMarket(ohlc.open, props.market)} / 高 ${currencyForMarket(ohlc.high, props.market)} / 安 ${currencyForMarket(ohlc.low, props.market)}`
         : '',
   }
 
@@ -697,20 +752,15 @@ onBeforeUnmount(() => {
     </span>
 
     <div
-      v-if="notice"
-      class="pointer-events-none absolute left-3 top-3 max-w-[min(22rem,calc(100%-1.5rem))] rounded-md border border-[#3a424f] bg-[#111418]/90 px-3 py-2 text-xs text-[#d3e3fd] shadow-lg shadow-black/20"
-    >
-      <div class="font-black text-[#ffcf6e]">{{ notice.title }}</div>
-      <div v-if="notice.detail" class="mt-0.5 text-[#8f949d]">{{ notice.detail }}</div>
-    </div>
-
-    <div
-      class="pointer-events-none absolute w-[152px] translate-y-1 rounded-md border border-[#2d3440] bg-[#111418]/95 px-3 py-2 text-xs text-[#d3e3fd] opacity-0 shadow-lg shadow-black/30 transition-all duration-150 ease-out"
+      class="pointer-events-none absolute w-[220px] translate-y-1 rounded-md border border-[#2d3440] bg-[#111418]/95 px-3 py-2 text-xs text-[#d3e3fd] opacity-0 shadow-lg shadow-black/30 transition-all duration-150 ease-out"
       :class="tooltip.visible && 'translate-y-0 opacity-100'"
       :style="tooltipStyle"
     >
       <div class="font-black text-[#40dba2]">{{ tooltip.price }}</div>
-      <div class="mt-1 text-[#8f949d]">{{ tooltip.date }}</div>
+      <div class="mt-1 grid gap-0.5 text-[#8f949d]">
+        <div>JST {{ tooltip.jstDate }}</div>
+        <div>現地 {{ tooltip.localDate }}</div>
+      </div>
       <div v-if="tooltip.detail" class="mt-1 leading-relaxed text-[#8f949d]">
         {{ tooltip.detail }}
       </div>

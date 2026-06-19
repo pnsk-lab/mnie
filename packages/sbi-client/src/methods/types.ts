@@ -1,11 +1,19 @@
 import type {
   AccountProfile,
+  AccountAssetsValuations,
   AccountType,
   Board,
   BuyingPower,
   CashPositionList,
   ChartPeriod,
   DepositType,
+  ExchangeAccountKind,
+  ExchangeOrderPreview,
+  ExchangeOrderReceipt,
+  ExchangeOrderSide,
+  ExchangeRateInfo,
+  ExchangeSellMethod,
+  ExchangeSpecificMethod,
   DomesticMarket,
   IssueCode,
   IssueChart,
@@ -50,7 +58,7 @@ export type IssueOptions = {
   /** Issue code to request. */
   issueCode: IssueCode
   /** Market code to request. */
-  market?: MarketCode
+  market: MarketCode
 }
 
 export type MarketIssueBoardPollingOptions = IssueOptions & {
@@ -72,8 +80,8 @@ export type IssueChartOptions = IssueOptions & {
 export type IssueSearchOptions = {
   /** Search text, such as an issue code, name, or keyword. */
   query: string
-  /** Filters returned issues by market code on the client side. */
-  market?: MarketCode
+  /** Market code to search. */
+  market: MarketCode
   /** Maximum number of returned issues after client-side filtering. */
   limit?: number
 }
@@ -138,6 +146,8 @@ export type StockOrderBaseOptions = {
   quantity: number
   /** Deposit type used for the order. */
   depositType?: DepositType
+  /** US stock settlement method. Defaults to yen settlement for foreign stock orders. */
+  foreignStockSettlementMethod?: 'yen' | 'foreign'
 }
 
 export type CashOrderPriceCondition =
@@ -387,6 +397,37 @@ export type PlaceOrderCancelOptions = OrderCancelOptions & {
   allowTrading?: true
 }
 
+export type ExchangeOrderOptions = {
+  /** Currency code, such as USD. */
+  currencyCode: string
+  /** Buy or sell the foreign currency. */
+  side: ExchangeOrderSide
+  /** Quantity entered on the SBI exchange order screen. */
+  tradeQuantity: number | string
+  /** `foreign` means foreign-currency quantity; `domestic` means yen amount. */
+  specificMethod?: ExchangeSpecificMethod
+  /** SBI account kind. Defaults to GENERAL. */
+  accountKind?: ExchangeAccountKind
+  /** Required for sell orders when using the exchange web flow. */
+  sellMethod?: ExchangeSellMethod
+  /** Hidden order amount posted to SBI. Defaults to tradeQuantity for foreign quantity orders. */
+  orderAmount?: number | string
+  /** Trading password used by SBI. Defaults to session tradePassword. */
+  tradePassword?: string
+}
+
+export type ExchangeRateOptions = {
+  /** Currency code, such as USD. */
+  currencyCode: string
+  /** Buy or sell the foreign currency. */
+  side: ExchangeOrderSide
+}
+
+export type PlaceExchangeOrderOptions = ExchangeOrderOptions & {
+  /** Explicitly allows sending a live exchange order. */
+  allowTrading?: true
+}
+
 export type MarginCloseOrderOptions = StandardCashOrderOptions & {
   /** Position ID to close. */
   positionId?: PositionId
@@ -504,6 +545,11 @@ export type AccountPowerOptions = {
   includeMarginAccount?: boolean
 }
 
+export type ProfitLossOptions = {
+  /** Market to fetch profit/loss for. Omit for domestic cash/margin summary. */
+  market?: MarketCode
+}
+
 export interface SbiClientMethodSession {
   /** Returns the current authenticated session profile. */
   profile(): Promise<AccountProfile>
@@ -541,12 +587,19 @@ export interface SbiClientMethodAccountPositions {
 
 export interface SbiClientMethodAccountProfitLoss {
   /** Fetches the unrealized profit and loss summary for cash and margin positions. */
-  unrealized(): Promise<ProfitLossSummary>
+  unrealized(options?: ProfitLossOptions): Promise<ProfitLossSummary>
+}
+
+export interface SbiClientMethodAccountAssets {
+  /** Fetches current My Assets valuations from the SBI main site. */
+  current(): Promise<AccountAssetsValuations>
 }
 
 export interface SbiClientMethodAccount {
   /** Returns the current account profile. */
   profile(): Promise<AccountProfile>
+  /** Methods for fetching My Assets values from the SBI main site. */
+  assets: SbiClientMethodAccountAssets
   /** Methods for fetching buying power and collateral information. */
   power: SbiClientMethodAccountPower
   /** Methods for fetching cash and margin positions. */
@@ -688,6 +741,15 @@ export interface SbiClientMethodThemeInvestmentOrder {
   place(options: PlaceThemeInvestmentOrderOptions): Promise<OrderReceipt>
 }
 
+export interface SbiClientMethodExchangeOrder {
+  /** Fetches the current exchange-order input rate and limits. */
+  rate(options: ExchangeRateOptions): Promise<ExchangeRateInfo>
+  /** Estimates an exchange order without submitting a live order. */
+  estimate(options: ExchangeOrderOptions): Promise<ExchangeOrderPreview>
+  /** Places a live exchange order. Requires `allowTrading: true`. */
+  place(options: PlaceExchangeOrderOptions): Promise<ExchangeOrderReceipt>
+}
+
 export interface SbiClientMethodOrders {
   /** Methods for order inquiries. */
   inquiry: SbiClientMethodOrderInquiry
@@ -699,6 +761,8 @@ export interface SbiClientMethodOrders {
   ifd: SbiClientMethodIfdOrder
   /** Methods for estimating and placing theme investment orders. */
   themeInvestment: SbiClientMethodThemeInvestmentOrder
+  /** Methods for estimating and placing exchange orders. */
+  exchange: SbiClientMethodExchangeOrder
 }
 
 export interface SbiClientMethods {

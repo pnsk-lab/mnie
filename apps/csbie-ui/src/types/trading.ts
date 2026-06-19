@@ -1,7 +1,7 @@
 export type TradeSide = 'buy' | 'sell'
 export type OrderKind = 'standard' | 's'
 export type CashOrderAccountType = 'specific' | 'general' | 'growthInvestment' | 'nisa'
-export type CashOrderMarket = 'auto' | 'TKY' | 'NGY' | 'FKO' | 'SPR' | 'SOR' | 'PTS' | 'PTX' | 'STK'
+export type CashOrderMarket = 'auto' | 'XTKS' | 'XNAS' | 'XNYS' | 'ARCX' | 'STK'
 export type CashOrderPriceCondition =
   | 'limit'
   | 'limitAtOpen'
@@ -16,7 +16,7 @@ export type CashOrderTerm = 'day' | 'week' | 'date'
 export type CashOrderMethod = 'normal' | 'stop' | 'oco'
 export type CashOrderTriggerZone = 'above' | 'below'
 export type ChartMode = 'line' | 'box'
-export type ChartRange = '1D' | '7D' | '1M' | '3M' | '1Y' | 'ALL'
+export type ChartRange = '1D' | '3D' | '3M' | '1Y' | 'ALL'
 
 export type RpcMessage = {
   id: number
@@ -91,6 +91,7 @@ export type OrderRow = {
   id: string
   date: string
   stock: string
+  market: string
   side: TradeSide
   kind: OrderKind
   quantity: number | null

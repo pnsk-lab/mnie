@@ -3,6 +3,7 @@ import type { SbiClientMethods } from '@repo/sbi-client'
 export const RPC_METHODS = [
   'session.profile',
   'account.profile',
+  'account.assets.current',
   'account.power.buyingPower',
   'account.power.collateralRatio',
   'account.positions.cash',
@@ -62,6 +63,9 @@ export const RPC_METHODS = [
   'orders.themeInvestment.list',
   'orders.themeInvestment.estimate',
   'orders.themeInvestment.place',
+  'orders.exchange.rate',
+  'orders.exchange.estimate',
+  'orders.exchange.place',
 ] as const
 
 export type RpcMethod = (typeof RPC_METHODS)[number]
@@ -80,6 +84,7 @@ const tradingMethods = new Set<string>([
   'orders.ifd.placeCorrection',
   'orders.ifd.placeCancel',
   'orders.themeInvestment.place',
+  'orders.exchange.place',
 ])
 
 const cashOrderMethods = new Set<string>([

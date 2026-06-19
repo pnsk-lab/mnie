@@ -5,16 +5,19 @@ import {
   KeyRound,
   Pencil,
   Plug,
+  Plus,
   RefreshCw,
   Save,
   ShieldCheck,
   Trash2,
   UserRoundCog,
 } from 'lucide-vue-next'
+import { AnimatePresence } from 'motion-v'
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { ApiKey, ApiKeySettings, SbiPasskey } from '../../api'
 import ApiKeyPolicyEditor from '../../components/ApiKeyPolicyEditor.vue'
+import UiModal from '../../components/ui/UiModal.vue'
 import { ui } from '../../styles/ui'
 
 defineProps<{
@@ -51,6 +54,10 @@ const activeSection = computed<SettingsSection>(() => {
   return route.params.section === 'passkeys' ? 'passkeys' : 'api-keys'
 })
 
+const isNewApiKey = computed(
+  () => activeSection.value === 'api-keys' && route.params.mode === 'new',
+)
+
 const settingsGroups = [
   {
     label: 'アクセス',
@@ -80,8 +87,16 @@ const openSection = (section: SettingsSection) => {
   router.push(`/settings/${section}`)
 }
 
+const openNewApiKey = () => {
+  router.push('/settings/api-keys/new')
+}
+
 const sectionTitle = computed(() =>
-  activeSection.value === 'api-keys' ? 'API キー' : 'SBI パスキー',
+  isNewApiKey.value
+    ? 'API Key 発行'
+    : activeSection.value === 'api-keys'
+      ? 'API キー'
+      : 'SBI パスキー',
 )
 
 const openApiKeyEditor = (key: ApiKey) => {
@@ -103,19 +118,12 @@ const saveEditingApiKey = () => {
 </script>
 
 <template>
-  <section
-    class="grid min-h-[calc(100dvh-9rem)] min-w-0 max-w-full gap-0 lg:grid-cols-[18rem_minmax(0,1fr)]"
-  >
+  <section class="grid min-h-[calc(100dvh-9rem)] min-w-0 max-w-full gap-0 lg:block">
     <aside
-      class="min-w-0 border-b border-[#30343a] pb-4 lg:sticky lg:top-0 lg:h-fit lg:border-r lg:border-b-0 lg:pr-5 lg:pb-0"
+      class="min-w-0 border-b border-[#30343a] pb-4 lg:fixed lg:top-8 lg:left-[9rem] lg:z-10 lg:h-fit lg:max-h-[calc(100dvh-4rem)] lg:w-72 lg:overflow-y-auto lg:border-r lg:border-b-0 lg:pr-5 lg:pb-0"
       aria-label="Settings"
     >
       <div class="grid gap-5">
-        <div class="grid gap-1">
-          <h2 class="text-xl font-black text-[#e3e3e9]">設定</h2>
-          <p class="text-sm font-semibold text-[#9aa0a9]">用途ごとに管理項目を分けています。</p>
-        </div>
-
         <nav class="grid gap-5">
           <section v-for="group in settingsGroups" :key="group.label" class="grid gap-2">
             <p class="px-2 text-xs font-black text-[#747982]">{{ group.label }}</p>
@@ -153,32 +161,43 @@ const saveEditingApiKey = () => {
       </div>
     </aside>
 
-    <div class="grid min-w-0 content-start gap-5 pt-5 lg:pl-7 lg:pt-0">
+    <div class="grid min-w-0 content-start gap-8 pt-5 lg:ml-72 lg:pl-7 lg:pt-0">
       <header
         class="flex flex-wrap items-center justify-between gap-3 border-b border-[#30343a] pb-5"
       >
         <div class="grid gap-1">
-          <p :class="ui.eyebrow">Settings</p>
           <h2 class="text-2xl font-black text-[#e3e3e9]">{{ sectionTitle }}</h2>
         </div>
-        <button :class="ui.ghostButton" type="button" @click="emit('refresh')">
-          <RefreshCw class="h-4 w-4" aria-hidden="true" />
-          更新
-        </button>
+        <div class="flex flex-wrap items-center gap-2">
+          <button
+            v-if="isNewApiKey"
+            :class="ui.primaryButton"
+            type="button"
+            @click="emit('addApiKey')"
+          >
+            <KeyRound class="h-4 w-4" aria-hidden="true" />
+            発行
+          </button>
+          <template v-else>
+            <button :class="ui.ghostButton" type="button" @click="emit('refresh')">
+              <RefreshCw class="h-4 w-4" aria-hidden="true" />
+              更新
+            </button>
+            <button
+              v-if="activeSection === 'api-keys'"
+              class="inline-grid h-10 w-10 place-items-center rounded-full bg-[#a8c7fa] text-[#102033] shadow-sm shadow-black/20 transition hover:bg-[#d3e3fd] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d3e3fd]"
+              type="button"
+              title="API Key 発行"
+              @click="openNewApiKey"
+            >
+              <Plus class="h-4 w-4" aria-hidden="true" />
+            </button>
+          </template>
+        </div>
       </header>
 
-      <template v-if="activeSection === 'api-keys'">
-        <article :class="[ui.panel, 'min-w-0 overflow-hidden']">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p :class="ui.eyebrow">Create</p>
-              <h3 class="text-lg font-black">API Key 発行</h3>
-            </div>
-            <button :class="ui.primaryButton" type="button" @click="emit('addApiKey')">
-              <KeyRound class="h-4 w-4" aria-hidden="true" />
-              発行
-            </button>
-          </div>
+      <template v-if="isNewApiKey">
+        <article class="grid min-w-0 content-start gap-4 overflow-hidden bg-transparent">
           <label :class="ui.label">
             名前
             <input v-model="apiKeyLabel" :class="ui.input" placeholder="例: trade-bot-readonly" />
@@ -193,18 +212,14 @@ const saveEditingApiKey = () => {
             ></textarea>
           </label>
         </article>
+      </template>
 
-        <article :class="[ui.panel, 'min-w-0 overflow-hidden']">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p :class="ui.eyebrow">Active keys</p>
-              <h3 class="text-lg font-black">発行済みキー</h3>
-            </div>
-          </div>
+      <template v-else-if="activeSection === 'api-keys'">
+        <article class="grid min-w-0 content-start gap-4 overflow-hidden bg-transparent">
           <div v-if="apiKeys.length" :class="ui.list">
             <div v-for="key in apiKeys" :key="key.id" :class="ui.keyRow">
               <div :class="ui.row">
-                <span class="min-w-0 truncate font-black">{{ key.label }}</span>
+                <span class="min-w-0 truncate font-bold text-slate-100">{{ key.label }}</span>
                 <div class="flex flex-wrap gap-2">
                   <button
                     :class="ui.ghostButton"
@@ -238,10 +253,9 @@ const saveEditingApiKey = () => {
       </template>
 
       <template v-else>
-        <article :class="[ui.panel, 'min-w-0 overflow-hidden']">
+        <article class="grid min-w-0 content-start gap-4 overflow-hidden bg-transparent">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p :class="ui.eyebrow">Profiles</p>
               <h3 class="text-lg font-black">パスキー追加</h3>
             </div>
             <button :class="ui.primaryButton" type="button" @click="emit('addSbiPasskey')">
@@ -279,10 +293,9 @@ const saveEditingApiKey = () => {
           </div>
         </article>
 
-        <article :class="[ui.panel, 'min-w-0 overflow-hidden']">
+        <article class="grid min-w-0 content-start gap-4 overflow-hidden bg-transparent">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p :class="ui.eyebrow">Connection</p>
               <h3 class="text-lg font-black">プロフィール切り替え</h3>
             </div>
             <button :class="ui.ghostButton" type="button" @click="emit('connect')">
@@ -328,38 +341,24 @@ const saveEditingApiKey = () => {
       </template>
     </div>
 
-    <div
-      v-if="editingApiKey"
-      class="fixed inset-0 z-30 grid place-items-center overflow-y-auto bg-[#101418]/75 p-4 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      @click.self="closeApiKeyEditor"
-    >
-      <section
-        class="grid max-h-[calc(100dvh-2rem)] w-full max-w-5xl gap-5 overflow-y-auto rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-6 shadow-2xl shadow-black/35"
+    <AnimatePresence>
+      <UiModal
+        v-if="editingApiKey"
+        :title="editingApiKey.label"
+        size="lg"
+        @close="closeApiKeyEditor"
       >
-        <header
-          class="flex flex-wrap items-center justify-between gap-3 border-b border-[#33383f] pb-4"
-        >
-          <div class="grid min-w-0 gap-1">
-            <p :class="ui.eyebrow">Edit API key</p>
-            <h3 class="truncate text-xl font-black text-[#e3e3e9]">
-              {{ editingApiKey.label }}
-            </h3>
-          </div>
-          <div class="flex flex-wrap gap-2">
-            <button :class="ui.ghostButton" type="button" @click="closeApiKeyEditor">
-              キャンセル
-            </button>
-            <button :class="ui.primaryButton" type="button" @click="saveEditingApiKey">
-              <Save class="h-4 w-4" aria-hidden="true" />
-              保存
-            </button>
-          </div>
-        </header>
-
+        <template #actions>
+          <button :class="ui.ghostButton" type="button" @click="closeApiKeyEditor">
+            キャンセル
+          </button>
+          <button :class="ui.primaryButton" type="button" @click="saveEditingApiKey">
+            <Save class="h-4 w-4" aria-hidden="true" />
+            保存
+          </button>
+        </template>
         <ApiKeyPolicyEditor v-model="editingApiKey" permissions-open />
-      </section>
-    </div>
+      </UiModal>
+    </AnimatePresence>
   </section>
 </template>

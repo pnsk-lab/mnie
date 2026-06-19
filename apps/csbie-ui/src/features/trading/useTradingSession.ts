@@ -3,8 +3,9 @@ import { createRpcSocket } from '../../api'
 import {
   cashOrderAccountTypeOptions as defaultCashOrderAccountTypeOptions,
   cashOrderMarketOptions as defaultCashOrderMarketOptions,
-  sKabuOrderMarketOptions,
+  searchableMarkets,
 } from '../../constants/trade'
+import { countryTimeZones, marketSessions, marketTimeZones } from '../../constants/market'
 import type {
   ChartMode,
   ChartRange,
@@ -32,6 +33,7 @@ import {
   fulfilledValues,
   isOrderPreview,
   issueFrom,
+  marketDateKey,
   numberValue,
   orderFromApi,
   orderHistoryKey,
@@ -39,7 +41,6 @@ import {
   chartNoticeFromIssueChart,
   pricePointsFromIssueChart,
   positionFromApi,
-  startOfMarketDateUtcMs,
   stockFromBoard,
   stockFromIssue,
   stockFromPosition,
@@ -85,8 +86,7 @@ const cashOrderPriceConditionRequiresPrice = (condition: CashOrderPriceCondition
 
 const chartRangeOptions = {
   '1D': { period: 'minute', unit: 5, count: 120 },
-  '7D': { period: 'day', unit: 1, count: 7 },
-  '1M': { period: 'day', unit: 1, count: 31 },
+  '3D': { period: 'minute', unit: 15, count: 9999 },
   '3M': { period: 'day', unit: 1, count: 93 },
   '1Y': { period: 'day', unit: 1, count: 365 },
   ALL: { period: 'month', unit: 1, count: 9999 },
@@ -95,35 +95,53 @@ const chartRangeOptions = {
   { period: 'minute' | 'day' | 'week' | 'month'; unit: number; count: number }
 >
 
-const marketTimeZones: Record<string, string> = {
-  FKO: 'Asia/Tokyo',
-  NGY: 'Asia/Tokyo',
-  PTS: 'Asia/Tokyo',
-  PTX: 'Asia/Tokyo',
-  SOR: 'Asia/Tokyo',
-  SPR: 'Asia/Tokyo',
-  STK: 'Asia/Tokyo',
-  TKY: 'Asia/Tokyo',
-  AMEX: 'America/New_York',
-  ARCX: 'America/New_York',
-  NAS: 'America/New_York',
-  NASDAQ: 'America/New_York',
-  NYS: 'America/New_York',
-  NYSE: 'America/New_York',
-  XNAS: 'America/New_York',
-  XNYS: 'America/New_York',
-}
-
-const countryTimeZones: Record<string, string> = {
-  アメリカ: 'America/New_York',
-  日本: 'Asia/Tokyo',
-  米国: 'America/New_York',
-  US: 'America/New_York',
-  USA: 'America/New_York',
-}
-
 const timeZoneForStock = (stock: Stock) =>
   marketTimeZones[stock.market.toUpperCase()] ?? countryTimeZones[stock.country] ?? null
+
+const marketClockFormatter = (timeZone: string) =>
+  new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+const marketClockParts = (timeZone: string, now = new Date()) => {
+  const parts = Object.fromEntries(
+    marketClockFormatter(timeZone)
+      .formatToParts(now)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value]),
+  ) as Partial<Record<'weekday' | 'hour' | 'minute', string>>
+
+  return {
+    weekday: parts.weekday ?? '',
+    hour: Number(parts.hour ?? 0),
+    minute: Number(parts.minute ?? 0),
+  }
+}
+
+const hasMarketOpenedToday = (market: string, timeZone: string) => {
+  const sessions = marketSessions[market.toUpperCase()]
+  const openMinutes = sessions?.[0]?.[0]
+  if (openMinutes == null) return true
+
+  const parts = marketClockParts(timeZone)
+  if (parts.weekday === 'Sat' || parts.weekday === 'Sun') return false
+  return parts.hour * 60 + parts.minute >= openMinutes
+}
+
+const isMarketSessionOpen = (market: string, timeZone: string) => {
+  const sessions = marketSessions[market.toUpperCase()]
+  if (!sessions?.length) return true
+
+  const parts = marketClockParts(timeZone)
+  if (parts.weekday === 'Sat' || parts.weekday === 'Sun') return false
+
+  const minutes = parts.hour * 60 + parts.minute
+  return sessions.some(([open, close]) => minutes >= open && minutes < close)
+}
 
 const normalizeApkOrderTermDate = (value: string) => {
   const digits = value.replace(/\D/g, '')
@@ -138,13 +156,13 @@ const displayApkOrderTermDate = (value: string) => {
   return `${normalized.slice(0, 4)}/${normalized.slice(4, 6)}/${normalized.slice(6, 8)}`
 }
 
-const apkExchangeMarketCodes: CashOrderMarket[] = ['SOR', 'TKY', 'NGY', 'FKO', 'SPR', 'PTS', 'PTX']
+const usMarkets = new Set(['XNAS', 'XNYS', 'ARCX'])
 
 const parseApkExchangeMarkets = (value: string) => {
   const markets: CashOrderMarket[] = []
   for (let index = 0; index < value.length; index += 3) {
     const code = value.slice(index, index + 3) as CashOrderMarket
-    if (apkExchangeMarketCodes.includes(code) && !markets.includes(code)) markets.push(code)
+    if (searchableMarkets.includes(code) && !markets.includes(code)) markets.push(code)
   }
   return markets
 }
@@ -156,11 +174,12 @@ const priceMatchesStep = (price: number, step: number) => {
 
 export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
   const selectedStockCode = ref('')
+  const selectedStockId = ref('')
   const viewedStockCodes = ref<string[]>([])
   const tradeSide = ref<TradeSide>('buy')
-  const orderKind = ref<OrderKind>('s')
+  const orderKind = ref<OrderKind>('standard')
   const cashOrderAccountType = ref<CashOrderAccountType>('specific')
-  const cashOrderMarket = ref<CashOrderMarket>('STK')
+  const cashOrderMarket = ref<CashOrderMarket>('auto')
   const cashOrderPriceCondition = ref<CashOrderPriceCondition>('market')
   const cashOrderTerm = ref<CashOrderTerm>('day')
   const cashOrderDateInput = ref('')
@@ -188,11 +207,13 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
   const sbiConnected = ref(false)
   const dataLoading = ref(false)
   const searchLoading = ref(false)
+  const totalAssetValueFromAssets = ref<number | null>(null)
   const buyingPower = ref(0)
   const holdingsMarketValue = ref(0)
   const totalProfitLoss = ref(0)
   const totalProfitLossRate = ref(0)
   const orders = ref<OrderRow[]>([])
+  const cancelingOrderKey = ref('')
   const orderHistoryLoaded = ref(false)
   const orderHistoryNotice = ref('')
   const positions = ref<Position[]>([])
@@ -211,6 +232,24 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
   const errorMessage = (cause: unknown, fallback: string) =>
     cause instanceof Error ? cause.message : fallback
 
+  const stockId = (stock: Pick<Stock, 'code' | 'market'>) =>
+    stock.market ? `${stock.market}:${stock.code}` : stock.code
+
+  const stockRefFromId = (id: string) => {
+    const normalized = id.trim()
+    const separator = normalized.indexOf(':')
+    if (separator <= 0) return { code: normalized, market: '' }
+
+    const market = normalized.slice(0, separator).toUpperCase()
+    const code = normalized.slice(separator + 1)
+    if (!searchableMarkets.includes(market as CashOrderMarket)) {
+      return { code: normalized, market: '' }
+    }
+    return { code, market }
+  }
+
+  const codeFromStockId = (id: string) => stockRefFromId(id).code
+
   const reportDataError = (message: string, cause?: unknown) => {
     if (cause) {
       console.error(`[csbie-ui] データ取得エラー: ${message}`, cause)
@@ -219,12 +258,28 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
     console.error(`[csbie-ui] データ取得エラー: ${message}`)
   }
 
-  const selectedStock = computed(
-    () =>
-      stocks.value.find((stock) => stock.code === selectedStockCode.value) ??
-      stocks.value[0] ??
-      emptyStock,
-  )
+  const selectedStock = computed(() => {
+    const selectedRef = stockRefFromId(selectedStockId.value)
+    const exact =
+      stockById.value.get(selectedStockId.value) ??
+      stocks.value.find((stock) => stock.symbol === selectedStockId.value)
+    if (exact) return exact
+
+    if (!selectedRef.market) {
+      const codeMatch = stockByCode.value.get(selectedStockCode.value)
+      if (codeMatch) return codeMatch
+    }
+
+    if (selectedStockCode.value) {
+      return stockFromIssue({
+        code: selectedStockCode.value,
+        market: selectedRef.market,
+        name: selectedStockCode.value,
+      })
+    }
+
+    return stocks.value[0] ?? emptyStock
+  })
   const socketReady = computed(() => ws.value?.readyState === WebSocket.OPEN)
   const connected = computed(() => sbiConnected.value && socketReady.value)
   const orderQuantity = computed(() => Number(quantityInput.value || 0))
@@ -237,14 +292,21 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
   )
   const cashOrderTriggerPrice = computed(() => Number(cashOrderTriggerPriceInput.value || 0))
   const cashOrderSecondaryPrice = computed(() => Number(cashOrderSecondaryPriceInput.value || 0))
+  const selectedStockIsUs = computed(() => usMarkets.has(selectedStock.value.market))
   const resolvedCashOrderMarket = computed(() => {
-    if (orderKind.value === 's') return 'STK'
     return cashOrderMarket.value === 'auto' ? selectedStock.value.market : cashOrderMarket.value
   })
+  const cashOrderKind = computed(() =>
+    orderKind.value === 'standard' ? undefined : orderKind.value,
+  )
+  const cashOrderPreOrderMarket = computed(() =>
+    cashOrderKind.value === 's' ? resolvedCashOrderMarket.value : undefined,
+  )
+  const cashOrderRequestMarket = computed(() =>
+    cashOrderKind.value === 's' ? 'STK' : resolvedCashOrderMarket.value,
+  )
   const sKabuAvailable = computed(() => {
-    if (orderKind.value !== 's') return true
-    const sKabu = cashPreOrder.value ? asRecord(cashPreOrder.value.sKabu) : null
-    return sKabu?.available !== false
+    return true
   })
   const cashOrderIppanMarginPaymentLimit = computed(() => {
     const margin = cashPreOrder.value ? asRecord(cashPreOrder.value.margin) : {}
@@ -270,9 +332,17 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
     return options
   })
   const cashOrderMarketOptions = computed<CashOrderMarketOption[]>(() => {
-    if (orderKind.value === 's') return sKabuOrderMarketOptions
+    if (selectedStockIsUs.value) {
+      return defaultCashOrderMarketOptions.filter(
+        (option) => option.value === 'auto' || option.value === selectedStock.value.market,
+      )
+    }
     const exchangeList = textValue(cashPreOrder.value?.exchangeList)
-    if (!exchangeList) return defaultCashOrderMarketOptions
+    if (!exchangeList) {
+      return defaultCashOrderMarketOptions.filter(
+        (option) => option.value === 'auto' || option.value === 'XTKS',
+      )
+    }
     const markets = parseApkExchangeMarkets(exchangeList)
     const options = markets
       .map((market) => defaultCashOrderMarketOptions.find((option) => option.value === market))
@@ -280,7 +350,7 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
     return options.length ? options : defaultCashOrderMarketOptions
   })
   const preferredCashOrderMarket = computed(() => {
-    if (orderKind.value === 's') return 'STK'
+    if (selectedStockIsUs.value) return 'auto'
     const index = Number(textValue(cashPreOrder.value?.exchangeListIndexFlag))
     const indexedOption =
       Number.isInteger(index) && index > 0 ? cashOrderMarketOptions.value[index - 1] : undefined
@@ -303,7 +373,7 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
       .filter(Boolean),
   )
   const cashOrderTermOptions = computed<CashOrderTermOption[]>(() => {
-    if (orderKind.value === 's') return [{ label: '当日中', value: 'day' }]
+    if (selectedStockIsUs.value) return [{ label: '当日中', value: 'day' }]
     const terms = apkOrderTerms.value
     if (!terms.length) {
       return [
@@ -360,52 +430,36 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
   const cashOrderKey = computed(() =>
     JSON.stringify({
       issueCode: selectedStock.value.code,
-      market: resolvedCashOrderMarket.value,
-      preOrderMarket: orderKind.value === 's' ? selectedStock.value.market : undefined,
+      market: cashOrderRequestMarket.value,
       side: tradeSide.value,
       quantity: orderQuantity.value,
-      kind: orderKind.value,
+      kind: cashOrderKind.value,
+      preOrderMarket: cashOrderPreOrderMarket.value,
       accountType: cashOrderAccountType.value,
       depositType: cashOrderAccountType.value,
-      priceCondition: orderKind.value === 's' ? undefined : cashOrderPriceCondition.value,
-      price:
-        orderKind.value !== 's' && cashOrderPrimaryRequiresPrice.value
-          ? orderPrice.value
-          : undefined,
-      orderTerm: orderKind.value === 's' ? undefined : cashOrderTerm.value,
-      orderDate:
-        orderKind.value !== 's' && cashOrderTerm.value === 'date'
-          ? cashOrderDateInput.value
-          : undefined,
-      orderMethod: orderKind.value === 's' ? undefined : cashOrderMethod.value,
-      triggerZone:
-        orderKind.value !== 's' && cashOrderMethod.value !== 'normal'
-          ? cashOrderTriggerZone.value
-          : undefined,
-      triggerPrice:
-        orderKind.value !== 's' && cashOrderMethod.value !== 'normal'
-          ? cashOrderTriggerPrice.value
-          : undefined,
+      priceCondition: cashOrderPriceCondition.value,
+      price: cashOrderPrimaryRequiresPrice.value ? orderPrice.value : undefined,
+      orderTerm: cashOrderTerm.value,
+      orderDate: cashOrderTerm.value === 'date' ? cashOrderDateInput.value : undefined,
+      orderMethod: cashOrderMethod.value,
+      triggerZone: cashOrderMethod.value !== 'normal' ? cashOrderTriggerZone.value : undefined,
+      triggerPrice: cashOrderMethod.value !== 'normal' ? cashOrderTriggerPrice.value : undefined,
       secondaryPriceCondition:
-        orderKind.value !== 's' && cashOrderMethod.value === 'oco'
-          ? cashOrderSecondaryPriceCondition.value
-          : undefined,
+        cashOrderMethod.value === 'oco' ? cashOrderSecondaryPriceCondition.value : undefined,
       secondaryPrice:
-        orderKind.value !== 's' &&
-        cashOrderMethod.value === 'oco' &&
-        cashOrderSecondaryRequiresPrice.value
+        cashOrderMethod.value === 'oco' && cashOrderSecondaryRequiresPrice.value
           ? cashOrderSecondaryPrice.value
           : undefined,
-      ippanMarginPaymentLimit:
-        orderKind.value !== 's' ? cashOrderIppanMarginPaymentLimit.value : undefined,
+      ippanMarginPaymentLimit: cashOrderIppanMarginPaymentLimit.value,
     }),
   )
   const canRequestCashEstimate = computed(() => {
     if (!connected.value || !selectedStock.value.code || orderQuantity.value <= 0) return false
-    if (orderKind.value === 's' && !selectedStock.value.market) return false
+    if (!resolvedCashOrderMarket.value) return false
+    if (cashOrderKind.value === 's' && selectedStockIsUs.value) return false
     if (!sKabuAvailable.value) return false
-    if (orderKind.value === 's') return true
     if (cashOrderPrimaryRequiresPrice.value && orderPrice.value <= 0) return false
+    if (selectedStockIsUs.value && cashOrderMethod.value !== 'normal') return false
     if (
       cashOrderPrimaryRequiresPrice.value &&
       !priceMatchesStep(orderPrice.value, cashOrderPriceStep.value)
@@ -444,12 +498,16 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
   )
   const countries = computed(() => [...new Set(stocks.value.map((stock) => stock.country))])
   const markets = computed(() => [
-    ...new Set(stocks.value.map((stock) => stock.market).filter(Boolean)),
+    ...new Set([
+      ...searchableMarkets.filter((market) => market !== 'auto'),
+      ...stocks.value.map((stock) => stock.market).filter(Boolean),
+    ]),
   ])
+  const stockById = computed(() => new Map(stocks.value.map((stock) => [stockId(stock), stock])))
   const stockByCode = computed(() => new Map(stocks.value.map((stock) => [stock.code, stock])))
   const viewedStocks = computed(() =>
     viewedStockCodes.value
-      .map((code) => stockByCode.value.get(code))
+      .map((code) => stockById.value.get(code) ?? stockByCode.value.get(code))
       .filter((stock): stock is Stock => Boolean(stock)),
   )
   const filteredStocks = computed(() => {
@@ -459,22 +517,37 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
       const matchesMarket = marketFilter.value === 'all' || stock.market === marketFilter.value
       return matchesCountry && matchesMarket
     }
+    const baseStocks = query
+      ? stocks.value.filter((stock) => {
+          const matchesQuery =
+            stock.name.toLowerCase().includes(query) ||
+            stock.code.includes(query) ||
+            stock.symbol.toLowerCase().includes(query)
+          return matchesQuery && matchesFilters(stock)
+        })
+      : viewedStocks.value.filter(matchesFilters)
 
-    if (!query) return viewedStocks.value.filter(matchesFilters)
+    if (!selectedStockCode.value) return baseStocks
 
-    return stocks.value.filter((stock) => {
-      const matchesQuery =
-        stock.name.toLowerCase().includes(query) ||
-        stock.code.includes(query) ||
-        stock.symbol.toLowerCase().includes(query)
-      return matchesQuery && matchesFilters(stock)
-    })
+    const exists = baseStocks.some((stock) => stockId(stock) === selectedStockId.value)
+    const selected =
+      stockById.value.get(selectedStockId.value) ?? stockByCode.value.get(selectedStockCode.value)
+    if (!exists && selected && matchesFilters(selected)) {
+      return [selected, ...baseStocks]
+    }
+    return baseStocks
   })
   const selectedPosition = computed(() =>
-    positions.value.find((position) => position.code === selectedStock.value.code),
+    positions.value.find(
+      (position) =>
+        position.code === selectedStock.value.code &&
+        position.market === selectedStock.value.market,
+    ),
   )
   const recentOrders = computed(() => orders.value.slice(0, 2))
-  const totalAssetValue = computed(() => holdingsMarketValue.value + buyingPower.value)
+  const totalAssetValue = computed(
+    () => totalAssetValueFromAssets.value ?? holdingsMarketValue.value + buyingPower.value,
+  )
   const stockAssetRatio = computed(() => {
     if (!totalAssetValue.value) return 0
     return (holdingsMarketValue.value / totalAssetValue.value) * 100
@@ -486,15 +559,41 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
   const selectedStockTimeZone = computed(() => timeZoneForStock(selectedStock.value))
   const chartPricePoints = computed(() => {
     const points = [...historicalPricePoints.value, ...realtimePricePoints.value]
-    if (chartRange.value !== '1D') return points
-
     const timeZone = selectedStockTimeZone.value
+
+    if (chartRange.value !== '1D') {
+      return points
+    }
+
     if (!timeZone) return points
 
-    const start = startOfMarketDateUtcMs(timeZone)
-    return points.filter((point) => {
+    const keyForPoint = (point: RealtimePricePoint) => {
       const time = Date.parse(point.at)
-      return Number.isFinite(time) && time >= start
+      return Number.isFinite(time) ? marketDateKey(timeZone, new Date(time)) : ''
+    }
+    const todayKey = marketDateKey(timeZone)
+    const latestHistorical = historicalPricePoints.value.reduce<{
+      key: string
+      time: number
+    } | null>((latest, point) => {
+      const time = Date.parse(point.at)
+      if (!Number.isFinite(time) || (latest && time <= latest.time)) return latest
+      return { key: marketDateKey(timeZone, new Date(time)), time }
+    }, null)
+    const hasHistoricalToday = historicalPricePoints.value.some(
+      (point) => keyForPoint(point) === todayKey,
+    )
+    const targetKey =
+      hasHistoricalToday || hasMarketOpenedToday(selectedStock.value.market, timeZone)
+        ? todayKey
+        : (latestHistorical?.key ?? todayKey)
+    const targetPoints =
+      targetKey === todayKey
+        ? [...historicalPricePoints.value, ...realtimePricePoints.value]
+        : historicalPricePoints.value
+
+    return targetPoints.filter((point) => {
+      return keyForPoint(point) === targetKey
     })
   })
   const recordViewedStock = (code: string) => {
@@ -504,7 +603,19 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
 
   const selectStock = (stock: Stock) => {
     selectedStockCode.value = stock.code
-    recordViewedStock(stock.code)
+    selectedStockId.value = stockId(stock)
+    recordViewedStock(stockId(stock))
+    showSearch.value = false
+    lastCashEstimate.value = null
+    lastCashEstimateKey.value = ''
+  }
+
+  const selectStockByCode = (id: string) => {
+    if (!id) return
+    const code = codeFromStockId(id)
+    selectedStockCode.value = code
+    selectedStockId.value = id
+    recordViewedStock(id)
     showSearch.value = false
     lastCashEstimate.value = null
     lastCashEstimateKey.value = ''
@@ -546,6 +657,11 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
     if (stock.code && stock.code !== selectedStock.value.code) return
 
     mergeStocks([stock])
+    const timeZone = selectedStockTimeZone.value
+    if (!timeZone || !isMarketSessionOpen(stock.market, timeZone)) {
+      stopBoardPolling()
+      return
+    }
     appendRealtimePricePoint(stock.price)
   }
 
@@ -617,18 +733,20 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
         },
         reject: (reason) => {
           window.clearTimeout(timeout)
-          reject(reason)
+          const message = reason instanceof Error ? reason.message : 'RPC request failed'
+          reject(new Error(`${method}: ${message}`))
         },
       })
     })
   }
 
   const mergeStocks = (nextStocks: Stock[]) => {
-    const merged = new Map(stocks.value.map((stock) => [stock.code, stock]))
+    const merged = new Map(stocks.value.map((stock) => [stockId(stock), stock]))
     for (const stock of nextStocks) {
       if (!stock.code) continue
-      const current = merged.get(stock.code)
-      merged.set(stock.code, {
+      const id = stockId(stock)
+      const current = merged.get(id)
+      merged.set(id, {
         ...current,
         ...stock,
         name: stock.name || current?.name || stock.code,
@@ -644,7 +762,8 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
       const nextCode = stocks.value[0]?.code ?? ''
       if (nextCode) {
         selectedStockCode.value = nextCode
-        recordViewedStock(nextCode)
+        selectedStockId.value = stockId(stocks.value[0] ?? { code: nextCode, market: '' })
+        recordViewedStock(selectedStockId.value)
       }
     }
   }
@@ -655,6 +774,8 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
     const [openOrdersResult, executionsTodayResult] = await Promise.allSettled([
       rpcCallOptional<RecordLike>('orders.inquiry.open'),
       rpcCallOptional<RecordLike>('orders.inquiry.executionsToday'),
+      rpcCallOptional<RecordLike>('orders.inquiry.open', { market: 'XNAS' }),
+      rpcCallOptional<RecordLike>('orders.inquiry.executionsToday', { market: 'XNAS' }),
     ])
     if (openOrdersResult.status === 'rejected' && executionsTodayResult.status === 'rejected') {
       throw openOrdersResult.reason
@@ -676,15 +797,40 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
     }
   }
 
+  const optionalNumber = (value: unknown) => {
+    const parsed = numberValue(value, Number.NaN)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+
+  const applyAccountAssets = (value: RecordLike) => {
+    const summary = asRecord(value.summary)
+    const summaryWithoutDeposit = asRecord(value.summaryWithoutDeposit)
+    const valuation = optionalNumber(summary.valuation)
+    const valuationWithoutDeposit = optionalNumber(summaryWithoutDeposit.valuation)
+    const profitLoss = optionalNumber(summary.profitLoss)
+    const profitLossRate = optionalNumber(summary.profitLossRate)
+
+    if (valuation !== null) totalAssetValueFromAssets.value = valuation
+    if (valuationWithoutDeposit !== null) holdingsMarketValue.value = valuationWithoutDeposit
+    if (valuation !== null && valuationWithoutDeposit !== null) {
+      buyingPower.value = Math.max(valuation - valuationWithoutDeposit, 0)
+    }
+    if (profitLoss !== null) totalProfitLoss.value = profitLoss
+    if (profitLossRate !== null) totalProfitLossRate.value = profitLossRate
+  }
+
   const loadTradingData = async () => {
     dataLoading.value = true
     try {
-      const cashPositions = await rpcCallOptional<RecordLike>(
-        'account.positions.cash',
-        undefined,
-        15_000,
-      )
-      const nextPositions = asArray(cashPositions.positions)
+      const [assetsResult, ...positionResults] = await Promise.allSettled([
+        rpcCallOptional<RecordLike>('account.assets.current', undefined, 20_000),
+        rpcCallOptional<RecordLike>('account.positions.cash', undefined, 15_000),
+        rpcCallOptional<RecordLike>('account.positions.cash', { market: 'XNAS' }, 15_000),
+      ])
+      const cashPositionLists = fulfilledValues(positionResults)
+      const cashPositions = cashPositionLists[0] ?? {}
+      const nextPositions = cashPositionLists
+        .flatMap((list) => asArray(list.positions))
         .map(positionFromApi)
         .filter((position): position is Position => Boolean(position))
       positions.value = nextPositions
@@ -697,12 +843,23 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
       totalProfitLoss.value = numberValue(cashPositions.totalProfitLoss)
       totalProfitLossRate.value = numberValue(cashPositions.totalProfitLossRate)
 
+      const hasAccountAssets = assetsResult.status === 'fulfilled'
+      if (hasAccountAssets) {
+        applyAccountAssets(assetsResult.value)
+      } else {
+        totalAssetValueFromAssets.value = null
+        reportDataError(
+          errorMessage(assetsResult.reason, 'My資産の取得に失敗しました'),
+          assetsResult.reason,
+        )
+      }
+
       const [orderHistoryResult, powerResult] = await Promise.allSettled([
         loadOrderHistoryFromSdk(),
         rpcCallOptional<RecordLike>('account.power.buyingPower'),
       ])
 
-      if (powerResult.status === 'fulfilled') {
+      if (!hasAccountAssets && powerResult.status === 'fulfilled') {
         buyingPower.value = numberValue(
           powerResult.value.cashBuyingPower ?? powerResult.value.withdrawableAmount,
         )
@@ -720,6 +877,7 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
             'market.issue.board',
             {
               issueCode: position.code,
+              market: position.market,
             },
             8_000,
           ),
@@ -795,13 +953,16 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
 
     const stock = selectedStock.value
     if (!connected.value || !stock.code) return
+    const timeZone = selectedStockTimeZone.value
+    if (!timeZone || !isMarketSessionOpen(stock.market, timeZone)) return
+
     appendRealtimePricePoint(stock.price)
 
     const requestId = ++boardPollingRequestId
     try {
       const subscribed = await rpcCall<RecordLike>('market.issue.pollBoard.subscribe', {
         issueCode: stock.code,
-        market: stock.market || undefined,
+        market: stock.market,
       })
       if (requestId !== boardPollingRequestId) {
         const staleSubscriptionId = textValue(subscribed.subscriptionId)
@@ -835,7 +996,7 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
       }
       const chart = await rpcCall<RecordLike>('market.issue.chart', {
         issueCode: stock.code,
-        market: stock.market || undefined,
+        market: stock.market,
         period: chartOptions.period,
         unit: chartOptions.unit,
         count: chartOptions.count,
@@ -852,8 +1013,17 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
 
   const searchIssues = async (query: string) => {
     if (!connected.value || query.trim().length < 2) return
-    const result = await rpcCall<RecordLike>('market.issue.search', { query, limit: 12 })
-    const issues = asArray(result.issues)
+    const marketsToSearch =
+      marketFilter.value !== 'all'
+        ? [marketFilter.value as CashOrderMarket]
+        : searchableMarkets.filter((market) => market !== 'auto')
+    const results = await Promise.allSettled(
+      marketsToSearch.map((market) =>
+        rpcCall<RecordLike>('market.issue.search', { query, market, limit: 12 }),
+      ),
+    )
+    const issues = fulfilledValues(results)
+      .flatMap((result) => asArray(result.issues))
       .map(issueFrom)
       .filter((issue) => issue.code)
     mergeStocks(issues.map(stockFromIssue))
@@ -861,7 +1031,7 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
       issues.map((issue) =>
         rpcCall<RecordLike>('market.issue.board', {
           issueCode: issue.code,
-          market: issue.market || undefined,
+          market: issue.market,
         }).then((board) => stockFromBoard(board, issue)),
       ),
     )
@@ -887,42 +1057,27 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
 
   const cashOrderParams = () => ({
     issueCode: selectedStock.value.code,
-    market: resolvedCashOrderMarket.value || undefined,
-    preOrderMarket: orderKind.value === 's' ? selectedStock.value.market || undefined : undefined,
+    market: cashOrderRequestMarket.value,
     side: tradeSide.value,
     quantity: orderQuantity.value,
-    kind: orderKind.value === 's' ? 's' : undefined,
+    kind: cashOrderKind.value,
+    preOrderMarket: cashOrderPreOrderMarket.value,
     accountType: cashOrderAccountType.value,
     depositType: cashOrderAccountType.value,
-    price:
-      orderKind.value !== 's' && cashOrderPrimaryRequiresPrice.value ? orderPrice.value : undefined,
-    priceCondition: orderKind.value !== 's' ? cashOrderPriceCondition.value : undefined,
-    orderTerm: orderKind.value !== 's' ? cashOrderTerm.value : undefined,
-    orderDate:
-      orderKind.value !== 's' && cashOrderTerm.value === 'date'
-        ? cashOrderDateInput.value
-        : undefined,
-    orderMethod: orderKind.value !== 's' ? cashOrderMethod.value : undefined,
-    triggerZone:
-      orderKind.value !== 's' && cashOrderMethod.value !== 'normal'
-        ? cashOrderTriggerZone.value
-        : undefined,
-    triggerPrice:
-      orderKind.value !== 's' && cashOrderMethod.value !== 'normal'
-        ? cashOrderTriggerPrice.value
-        : undefined,
+    price: cashOrderPrimaryRequiresPrice.value ? orderPrice.value : undefined,
+    priceCondition: cashOrderPriceCondition.value,
+    orderTerm: cashOrderTerm.value,
+    orderDate: cashOrderTerm.value === 'date' ? cashOrderDateInput.value : undefined,
+    orderMethod: cashOrderMethod.value,
+    triggerZone: cashOrderMethod.value !== 'normal' ? cashOrderTriggerZone.value : undefined,
+    triggerPrice: cashOrderMethod.value !== 'normal' ? cashOrderTriggerPrice.value : undefined,
     secondaryPriceCondition:
-      orderKind.value !== 's' && cashOrderMethod.value === 'oco'
-        ? cashOrderSecondaryPriceCondition.value
-        : undefined,
+      cashOrderMethod.value === 'oco' ? cashOrderSecondaryPriceCondition.value : undefined,
     secondaryPrice:
-      orderKind.value !== 's' &&
-      cashOrderMethod.value === 'oco' &&
-      cashOrderSecondaryRequiresPrice.value
+      cashOrderMethod.value === 'oco' && cashOrderSecondaryRequiresPrice.value
         ? cashOrderSecondaryPrice.value
         : undefined,
-    ippanMarginPaymentLimit:
-      orderKind.value !== 's' ? cashOrderIppanMarginPaymentLimit.value : undefined,
+    ippanMarginPaymentLimit: cashOrderIppanMarginPaymentLimit.value,
   })
 
   const refreshCashPreOrder = async () => {
@@ -934,11 +1089,10 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
     try {
       const preOrder = await rpcCall<RecordLike>('orders.cash.preOrder', {
         issueCode: selectedStock.value.code,
-        market: resolvedCashOrderMarket.value,
-        preOrderMarket:
-          orderKind.value === 's' ? selectedStock.value.market || undefined : undefined,
+        market: cashOrderRequestMarket.value,
         side: tradeSide.value,
-        kind: orderKind.value === 's' ? 's' : undefined,
+        kind: cashOrderKind.value,
+        preOrderMarket: cashOrderPreOrderMarket.value,
         accountType: cashOrderAccountType.value,
         depositType: cashOrderAccountType.value,
       })
@@ -969,6 +1123,7 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
         id: textValue(receipt.orderId, `ord-${Date.now()}`),
         date: textValue(receipt.acceptedAt, new Date().toLocaleString('ja-JP')),
         stock: selectedStock.value.name,
+        market: selectedStock.value.market,
         side: tradeSide.value,
         kind: orderKind.value,
         quantity: orderQuantity.value,
@@ -982,14 +1137,30 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
   }
 
   const cancelOrder = async (order: OrderRow) => {
-    await rpcCall('orders.cash.placeCancel', {
-      orderNumber: order.orderNumber || order.id,
-      orderId: order.id,
-      tradeId: order.tradeId || undefined,
-      allowTrading: true,
-    })
-    order.status = '取消済'
-    await loadTradingData()
+    if (!order.orderNumber) {
+      reportDataError('注文番号を取得できないため取消できません')
+      return
+    }
+    const key = orderHistoryKey(order)
+    if (cancelingOrderKey.value) return
+    cancelingOrderKey.value = key
+    try {
+      const params = {
+        orderNumber: order.orderNumber,
+        orderId: order.id,
+        tradeId: order.tradeId || undefined,
+      }
+      await rpcCall('orders.cash.placeCancel', {
+        ...params,
+        allowTrading: true,
+      })
+      order.status = '取消済'
+      await loadTradingData()
+    } catch (cause) {
+      reportDataError(errorMessage(cause, '注文取消に失敗しました'), cause)
+    } finally {
+      cancelingOrderKey.value = ''
+    }
   }
 
   const downloadCsv = () => {
@@ -1026,21 +1197,15 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
 
   let searchTimer: ReturnType<typeof setTimeout> | undefined
   let searchRequestId = 0
-  watch(orderKind, (kind) => {
-    if (kind === 's') {
-      cashOrderMarket.value = 'STK'
-      cashOrderPriceCondition.value = 'market'
-      cashOrderTerm.value = 'day'
-      cashOrderDateInput.value = ''
-      cashOrderMethod.value = 'normal'
-      cashOrderTriggerPriceInput.value = ''
-      cashOrderSecondaryPriceInput.value = ''
-      priceInput.value = ''
-      return
-    }
-    if (cashOrderMarket.value === 'STK') {
-      cashOrderMarket.value = 'auto'
-    }
+  watch(orderKind, () => {
+    cashOrderMarket.value = 'auto'
+    cashOrderPriceCondition.value = 'market'
+    cashOrderTerm.value = 'day'
+    cashOrderDateInput.value = ''
+    cashOrderMethod.value = 'normal'
+    cashOrderTriggerPriceInput.value = ''
+    cashOrderSecondaryPriceInput.value = ''
+    priceInput.value = ''
   })
 
   watch(cashOrderPriceCondition, (condition) => {
@@ -1141,6 +1306,7 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
 
   return {
     selectedStockCode,
+    selectedStockId,
     tradeSide,
     orderKind,
     cashOrderAccountType,
@@ -1172,6 +1338,7 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
     totalProfitLoss,
     totalProfitLossRate,
     orders,
+    cancelingOrderKey,
     orderHistoryLoaded,
     orderHistoryNotice,
     positions,
@@ -1205,6 +1372,7 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
     cashAssetRatio,
     hasQuote,
     selectStock,
+    selectStockByCode,
     connect,
     loadTradingData,
     estimateCashOrder,

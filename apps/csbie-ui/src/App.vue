@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { AnimatePresence } from 'motion-v'
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { revokeApiKey } from './api'
 import AppHeader from './components/layout/AppHeader.vue'
@@ -16,6 +16,7 @@ import PortfolioView from './features/portfolio/PortfolioView.vue'
 import SettingsView from './features/settings/SettingsView.vue'
 import TradeView from './features/trade/TradeView.vue'
 import { useTradingSession } from './features/trading/useTradingSession'
+import { stockIdFromTradeRouteId, tradeRouteIdFromStockId } from './constants/trade'
 import { routeNames, type RouteName } from './router'
 import { ui } from './styles/ui'
 
@@ -25,8 +26,26 @@ const activeTab = computed<RouteName>(() => {
   return routeNames.includes(route.name as RouteName) ? (route.name as RouteName) : 'portfolio'
 })
 const showAuthGate = computed(() => true)
+const decodedRouteParam = (value: string) => {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+const tradePath = (id: string) => `/trade/${encodeURIComponent(id)}`
+const tradeId = computed(() =>
+  typeof route.params.id === 'string'
+    ? stockIdFromTradeRouteId(decodedRouteParam(route.params.id))
+    : '',
+)
+const navigateTrade = (id = selectedStock.value.symbol || selectedStockCode.value) => {
+  if (!id) return
+  void router.push(tradePath(tradeRouteIdFromStockId(id)))
+}
 const navigate = (name: RouteName) => {
   if (name === 'settings') return router.push('/settings/api-keys')
+  if (name === 'trade') return navigateTrade()
   return router.push({ name })
 }
 
@@ -55,6 +74,7 @@ const {
 
 const {
   selectedStockCode,
+  selectedStockId,
   tradeSide,
   orderKind,
   cashOrderAccountType,
@@ -86,6 +106,7 @@ const {
   totalProfitLoss,
   totalProfitLossRate,
   orders,
+  cancelingOrderKey,
   orderHistoryLoaded,
   orderHistoryNotice,
   positions,
@@ -118,6 +139,7 @@ const {
   cashAssetRatio,
   hasQuote,
   selectStock,
+  selectStockByCode,
   connect,
   loadTradingData,
   estimateCashOrder,
@@ -149,6 +171,25 @@ const revokeAndRefresh = async (id: string) => {
   await refresh()
 }
 
+watch(
+  tradeId,
+  (id) => {
+    if (activeTab.value !== 'trade' || !id) return
+    selectStockByCode(id)
+  },
+  { immediate: true },
+)
+
+watch(
+  [activeTab, () => selectedStock.value.symbol, selectedStockId, selectedStockCode],
+  ([tab]) => {
+    const id = selectedStock.value.symbol || selectedStockId.value || selectedStockCode.value
+    if (tab !== 'trade' || !id || tradeId.value === id) return
+    void router.replace(tradePath(tradeRouteIdFromStockId(id)))
+  },
+  { immediate: true },
+)
+
 onMounted(async () => {
   try {
     await refreshAndMaybeConnect()
@@ -164,7 +205,7 @@ onMounted(async () => {
     <AppSidebar :active-tab="activeTab" @navigate="navigate" />
 
     <section :class="ui.workspace">
-      <AppHeader :active-tab="activeTab" />
+      <AppHeader v-if="activeTab !== 'settings'" :active-tab="activeTab" />
 
       <OAuthApprovalPanel
         v-if="oauthApproval.active && status.authenticated"
@@ -195,12 +236,17 @@ onMounted(async () => {
           :cash-asset-ratio="cashAssetRatio"
           :positions="positions"
           :recent-orders="recentOrders"
+          :canceling-order-key="cancelingOrderKey"
           :data-loading="dataLoading"
           :connected="connected"
           :order-history-loaded="orderHistoryLoaded"
           :order-history-notice="orderHistoryNotice"
           @connect="connect"
-          @open-position="(code) => openTradeForPosition(code, () => void navigate('trade'))"
+          @open-position="
+            (code) =>
+              openTradeForPosition(code, () => void navigateTrade(selectedStock.symbol || code))
+          "
+          @cancel-order="cancelOrder"
         />
 
         <TradeView
@@ -239,7 +285,12 @@ onMounted(async () => {
           :price-polling="pricePolling"
           :has-quote="hasQuote"
           @open-search="showSearch = true"
-          @select-stock="selectStock"
+          @select-stock="
+            (stock) => {
+              selectStock(stock)
+              navigateTrade(stock.symbol || stock.code)
+            }
+          "
           @download-csv="downloadCsv"
           @estimate="estimateCashOrder"
           @confirm-order="askPlaceOrder"
@@ -250,6 +301,7 @@ onMounted(async () => {
           :orders="orders"
           :connected="connected"
           :data-loading="dataLoading"
+          :canceling-order-key="cancelingOrderKey"
           :order-history-loaded="orderHistoryLoaded"
           :order-history-notice="orderHistoryNotice"
           @refresh="loadTradingData"
@@ -292,7 +344,9 @@ onMounted(async () => {
         :markets="markets"
         :loading="searchLoading"
         @close="showSearch = false"
-        @select="(stock) => openTradeForStock(stock, () => void navigate('trade'))"
+        @select="
+          (stock) => openTradeForStock(stock, () => void navigateTrade(stock.symbol || stock.code))
+        "
       />
     </AnimatePresence>
 
@@ -301,6 +355,7 @@ onMounted(async () => {
       :show-estimate="showEstimateDialog"
       :show-order="showOrderDialog"
       :stock-name="selectedStock.name"
+      :stock-market="selectedStock.market"
       :side="tradeSide"
       :kind="orderKind"
       :account-type="cashOrderAccountType"

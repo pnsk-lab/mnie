@@ -10,11 +10,15 @@ export const router = createRouter({
   routes: [
     { path: '/', redirect: '/portfolio' },
     { path: '/portfolio', name: 'portfolio', component: RouteStub },
-    { path: '/trade', name: 'trade', component: RouteStub },
+    { path: '/trade/:id', name: 'trade', component: RouteStub },
     { path: '/history', name: 'history', component: RouteStub },
     { path: '/api-keys', redirect: '/settings/api-keys' },
     { path: '/settings', redirect: '/settings/api-keys' },
-    { path: '/settings/:section(api-keys|passkeys)', name: 'settings', component: RouteStub },
+    {
+      path: '/settings/:section(api-keys|passkeys)/:mode(new)?',
+      name: 'settings',
+      component: RouteStub,
+    },
     { path: '/oauth/authorize', name: 'oauthAuthorize', component: RouteStub },
     { path: '/:pathMatch(.*)*', redirect: '/portfolio' },
   ],

@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto'
 import * as iconv from 'iconv-lite'
 import type {
   AccountType,
+  AccountAssetsValuationDetail,
+  AccountAssetsValuations,
+  AccountAssetsValuationSummary,
   Board,
   BoardPriceLevel,
   BuyingPower,
@@ -12,6 +15,10 @@ import type {
   CurrencyAmount,
   DepositType,
   DomesticMarket,
+  ExchangeOrderPreview,
+  ExchangeOrderReceipt,
+  ExchangeOrderSide,
+  ExchangeRateInfo,
   IssueChart,
   IssueRef,
   IssueSearchItem,
@@ -35,6 +42,7 @@ import type {
   Ranking,
   RankingItem,
   SbiMethodError,
+  MainSiteAuthCache,
   SbiSession,
   SbiTradeAuthenticationRequest,
   SignedTextValue,
@@ -60,6 +68,8 @@ import type {
   IssueChartOptions,
   IssueSearchOptions,
   IssueOptions,
+  ExchangeOrderOptions,
+  ExchangeRateOptions,
   MarginClosePositionOrder,
   MarginCloseOrderPreOrderOptions,
   MarginCloseOrderOptions,
@@ -74,6 +84,7 @@ import type {
   OrderCorrectionOptions,
   OrderInquiryOptions,
   PlaceCashOrderOptions,
+  PlaceExchangeOrderOptions,
   PlaceOrderCancelOptions,
   SbiClientMethods,
   StandardCashOrderOptions,
@@ -82,8 +93,11 @@ import type {
   ThemeInvestmentPreOrderOptions,
 } from './types'
 import { SbiServerError } from './error-map'
+import { domesticMarketToMts, isUsMarket, mtsMarketToDomestic } from '../markets'
+import { createUsStockAdapter } from './us-stock'
 
 const COMM_GATE_PATH = '/mtsmobile/commgate'
+const MAIN_SITE_AUTH_CACHE_TTL_MS = 20 * 60 * 1000
 const ISSUE_SEARCH_PATH = '/api/jStockSearchGP.jsp'
 const ISSUE_SUGGEST_PATH = '/api/jStockSuggestGP.jsp'
 const IZANAGI_HASH_SEEDS = [
@@ -137,7 +151,7 @@ type FixedField = {
 
 type OrderPreviewInput = {
   issueCode: string
-  market?: string
+  market?: MarketCode
   side: TradeSide
   quantity?: number
   price?: number
@@ -151,7 +165,6 @@ type CashPreOrderInfo = {
 
 const cashCorrectionPreviewInput = {
   issueCode: '',
-  market: '',
   side: 'buy',
 } satisfies OrderPreviewInput
 
@@ -230,6 +243,21 @@ const debugMts = (label: string, value: unknown) => {
   console.error(`[sbi-client:mts] ${label}`, JSON.stringify(value, null, 2))
 }
 
+const rejectUsMarket = (options: { market: MarketCode }, methodName: string) => {
+  if (isUsMarket(options.market)) {
+    throw new Error(`${methodName} is not implemented for US stock markets`)
+  }
+  return undefined
+}
+
+const publicDomesticMarket = (market: string | undefined, methodName: string) => {
+  if (!market) return undefined
+  const publicMarket = mtsMarketToDomestic(market)
+  if (!publicMarket)
+    throw new Error(`${methodName} received unsupported domestic market: ${market}`)
+  return publicMarket
+}
+
 type IzanagiIssueSearchItem = {
   stockName?: string | null
   stockCode?: string | null
@@ -251,12 +279,16 @@ export const registerDeviceId = async (session: SbiSession, deviceId: string) =>
 }
 
 export const createMethodsFromSession = (session: SbiSession): SbiClientMethods => {
+  const usStock = createUsStockAdapter(session)
   const client: SbiClientMethods = {
     session: {
       profile: async () => session.profile,
     },
     account: {
       profile: async () => session.profile,
+      assets: {
+        current: async () => fetchCurrentAccountAssets(session),
+      },
       power: {
         buyingPower: async (options) => fetchAccountPower(session, options),
         collateralRatio: async (options) =>
@@ -264,21 +296,27 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
       },
       positions: {
         cash: async (options) =>
-          parseCashPositions(
-            await callMts(session, 'F2631', listAccountTrin(session, options)),
-            options,
-          ),
+          options?.market && isUsMarket(options.market)
+            ? usStock.positions()
+            : parseCashPositions(
+                await callMts(session, 'F2631', listAccountTrin(session, options)),
+                options,
+              ),
         cashDetail: async (options) =>
           parseCashPositions(
             await callMts(session, 'F2632', listAccountTrin(session, options)),
             options,
           ),
         cashForIssue: async (options) => {
-          const list = parseCashPositions(
-            await callMts(session, 'F2602', issuePositionTrin(session, options)),
-            options,
-          )
-          return filterCashPositions(list, options)
+          return isUsMarket(options.market)
+            ? usStock.positions()
+            : filterCashPositions(
+                parseCashPositions(
+                  await callMts(session, 'F2602', issuePositionTrin(session, options)),
+                  options,
+                ),
+                options,
+              )
         },
         margin: async (options) =>
           parseMarginPositions(
@@ -331,7 +369,8 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
           ),
       },
       profitLoss: {
-        unrealized: async () => {
+        unrealized: async (options) => {
+          if (options?.market && isUsMarket(options.market)) return usStock.unrealized()
           const cash = await client.account.positions.cash()
           const margin = await client.account.positions.margin()
           return {
@@ -345,33 +384,57 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
     market: {
       issue: {
         search: async (options) =>
-          callIssueSearch(session, ISSUE_SEARCH_PATH, 'inputWord', options),
-        suggest: async (options) => callIssueSearch(session, ISSUE_SUGGEST_PATH, 'term', options),
+          isUsMarket(options.market)
+            ? usStock.search(options)
+            : callIssueSearch(session, ISSUE_SEARCH_PATH, 'inputWord', options),
+        suggest: async (options) =>
+          isUsMarket(options.market)
+            ? usStock.search(options)
+            : callIssueSearch(session, ISSUE_SUGGEST_PATH, 'term', options),
         allowedPrices: async (options) =>
+          rejectUsMarket(options, 'market.issue.allowedPrices') ??
           parseAllowedPrices(await callMts(session, 'F1112', issueTrin(options)), options),
         board: async (options) =>
-          parseBoardLike(await callMts(session, 'F1207', issueTrin(options)), options),
+          isUsMarket(options.market)
+            ? usStock.board(options)
+            : parseBoardLike(await callMts(session, 'F1207', issueTrin(options)), options),
         pollBoard: (options) =>
           pollMarketIssueBoard(
             async () =>
-              parseBoardLike(await callMts(session, 'F1207', issueTrin(options)), options),
+              isUsMarket(options.market)
+                ? usStock.board(options)
+                : parseBoardLike(await callMts(session, 'F1207', issueTrin(options)), options),
             options,
           ),
         chart: async (options) =>
-          parseIssueChart(
-            await callMtsReturningHeaderError(session, 'F1851', issueChartTrin(options)),
-            options,
-          ),
+          isUsMarket(options.market)
+            ? usStock.chart(options)
+            : parseIssueChart(
+                await callMtsReturningHeaderError(session, 'F1851', issueChartTrin(options)),
+                options,
+              ),
         openOrders: async (options) =>
-          parseOrdersLoose(
-            await callMtsReturningHeaderError(session, 'F2504', openOrdersTrin(session, options)),
-            options,
-          ),
+          isUsMarket(options.market)
+            ? usStock.openOrders(options)
+            : parseOrdersLoose(
+                await callMtsReturningHeaderError(
+                  session,
+                  'F2504',
+                  openOrdersTrin(session, options),
+                ),
+                options,
+              ),
         tradingInfo: async (options) =>
-          parseBoardLike(
-            await callMts(session, tradingInfoTrCode(options), tradingInfoTrin(session, options)),
-            options,
-          ),
+          isUsMarket(options.market)
+            ? usStock.tradingInfo(options)
+            : parseBoardLike(
+                await callMts(
+                  session,
+                  tradingInfoTrCode(options),
+                  tradingInfoTrin(session, options),
+                ),
+                options,
+              ),
       },
       index: {
         major: async () => parseMajorIndexes(await callMts(session, 'F1414')),
@@ -403,23 +466,42 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
     orders: {
       inquiry: {
         executionsToday: async (options) =>
-          parseOrdersLoose(
-            await callMtsReturningHeaderError(session, 'F2503', orderInquiryTrin(session, options)),
-            options,
-          ),
+          options?.market && isUsMarket(options.market)
+            ? usStock.orders(options)
+            : parseOrdersLoose(
+                await callMtsReturningHeaderError(
+                  session,
+                  'F2503',
+                  orderInquiryTrin(session, options),
+                ),
+                options,
+              ),
         open: async (options) =>
-          parseOrdersLoose(
-            await callMtsReturningHeaderError(session, 'F2511', recentOrdersTrin(session, options)),
-            options,
-          ),
+          options?.market && isUsMarket(options.market)
+            ? usStock.orders(options)
+            : parseOrdersLoose(
+                await callMtsReturningHeaderError(
+                  session,
+                  'F2511',
+                  recentOrdersTrin(session, options),
+                ),
+                options,
+              ),
       },
       cash: {
         preOrder: async (options) =>
-          parseStockOrderPreOrder(
-            await callMts(session, cashPreOrderTrCode(options), cashPreOrderTrin(session, options)),
-            options,
-          ),
+          isUsMarket(options.market)
+            ? usStock.preOrder(options)
+            : parseStockOrderPreOrder(
+                await callMts(
+                  session,
+                  cashPreOrderTrCode(options),
+                  cashPreOrderTrin(session, options),
+                ),
+                options,
+              ),
         estimate: async (options) => {
+          if (isUsMarket(options.market)) return usStock.estimate(options)
           assertNoOmitConfirmation(options, 'orders.cash.estimate')
           assertCashOrderOptions(options)
           await prepareCashOrder(session, options)
@@ -433,6 +515,7 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
           )
         },
         place: async (options) => {
+          if (isUsMarket(options.market)) return usStock.place(options)
           assertTradingAllowed(options, 'orders.cash.place')
           assertCashOrderOptions(options)
           await prepareCashOrder(session, options)
@@ -468,10 +551,25 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
           )
         },
         placeCancel: async (options) => {
+          if ('market' in options && isUsMarket(options.market as MarketCode | undefined)) {
+            return usStock.placeCancel(options)
+          }
           assertTradingAllowed(options, 'orders.cash.placeCancel')
           assertPlaceOrderCancelOptions(session, options, 'orders.cash.placeCancel')
+          const preview = parseOrderCorrectionPreOrder(
+            await callMts(session, 'F2311', orderCancelPreOrderTrin(session, options)),
+            cashCorrectionPreviewInput,
+          )
           return parseOrderReceipt(
-            await callMts(session, 'F2304', orderCancelSubmitTrin(session, options)),
+            await callMts(
+              session,
+              'F2304',
+              orderCancelSubmitTrin(session, {
+                ...options,
+                orderNumber: preview.correction?.orderNumber ?? options.orderNumber,
+                tradeId: preview.correction?.tradeId ?? options.tradeId,
+              }),
+            ),
           )
         },
       },
@@ -666,8 +764,20 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
         placeCancel: async (options) => {
           assertTradingAllowed(options, 'orders.ifd.placeCancel')
           assertPlaceOrderCancelOptions(session, options, 'orders.ifd.placeCancel')
+          const preview = parseOrderCorrectionPreOrder(
+            await callMts(session, 'F2311', orderCancelPreOrderTrin(session, options)),
+            cashCorrectionPreviewInput,
+          )
           return parseOrderReceipt(
-            await callMts(session, 'F2304', orderCancelSubmitTrin(session, options)),
+            await callMts(
+              session,
+              'F2304',
+              orderCancelSubmitTrin(session, {
+                ...options,
+                orderNumber: preview.correction?.orderNumber ?? options.orderNumber,
+                tradeId: preview.correction?.tradeId ?? options.tradeId,
+              }),
+            ),
           )
         },
       },
@@ -692,6 +802,14 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
           return parseOrderReceipt(
             await callMts(session, 'F1905', themeOrderTrin(session, options)),
           )
+        },
+      },
+      exchange: {
+        rate: async (options) => fetchExchangeRate(session, options),
+        estimate: async (options) => estimateExchangeOrder(session, options),
+        place: async (options) => {
+          assertTradingAllowed(options, 'orders.exchange.place')
+          return placeExchangeOrder(session, options)
         },
       },
     },
@@ -779,7 +897,7 @@ const toIssueSearchItem = (item: IzanagiIssueSearchItem): IssueSearchItem | unde
 
   return {
     code,
-    market: emptyJsonString(item.mkt),
+    market: publicDomesticMarket(emptyJsonString(item.mkt), 'market.issue.search'),
     name: emptyJsonString(item.stockName),
     extract: emptyJsonString(item.extract),
     extractWord: emptyJsonString(item.extractWord),
@@ -810,6 +928,633 @@ const fetchAccountPower = async (
   return parseAccountPower(
     await callMtsReturningHeaderError(session, 'F2609', accountPowerTrin(session)),
   )
+}
+
+const fetchExchangeRate = async (
+  session: SbiSession,
+  options: ExchangeRateOptions,
+): Promise<ExchangeRateInfo> => {
+  assertExchangeRateOptions(options)
+  const auth = await ensureMainSiteAuth(session)
+  const requestUrl = new URL('/exchange/api/order/input/rate', auth.assetsUrl)
+  requestUrl.searchParams.set('currencyCode', options.currencyCode)
+  requestUrl.searchParams.set('buySellCode', exchangeBuySellCode(options.side))
+  const response = await fetch(requestUrl, {
+    headers: {
+      accept: 'application/json, text/plain, */*',
+      cookie: auth.cookieHeader,
+      referer: new URL('/exchange/order/input', auth.assetsUrl).toString(),
+    },
+  })
+  const text = await response.text()
+  if (!response.ok) {
+    throw new Error(`exchange rate request failed with HTTP ${response.status}: ${text}`)
+  }
+  const contentType = response.headers.get('content-type') ?? ''
+  if (!contentType.includes('application/json')) {
+    throw new Error('exchange rate request returned non-JSON response')
+  }
+  let body: unknown
+  try {
+    body = JSON.parse(text)
+  } catch {
+    throw new Error('exchange rate response was not valid JSON')
+  }
+  return parseExchangeRateInfo(body, options)
+}
+
+const estimateExchangeOrder = async (
+  session: SbiSession,
+  options: ExchangeOrderOptions,
+): Promise<ExchangeOrderPreview> => {
+  return prepareExchangeOrder(session, options)
+}
+
+const placeExchangeOrder = async (
+  session: SbiSession,
+  options: PlaceExchangeOrderOptions,
+): Promise<ExchangeOrderReceipt> => {
+  const preview = await prepareExchangeOrder(session, options)
+  const auth = await ensureMainSiteAuth(session)
+  const completePath = requiredMainSitePath(session, 'exchangeOrderCompletePath')
+  const response = await fetch(new URL(completePath, auth.assetsUrl), {
+    method: 'POST',
+    headers: {
+      accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'content-type': 'application/x-www-form-urlencoded',
+      cookie: auth.cookieHeader,
+      referer: new URL(
+        requiredMainSitePath(session, 'exchangeOrderConfirmPath'),
+        auth.assetsUrl,
+      ).toString(),
+    },
+    body: new URLSearchParams(exchangeCompleteForm(preview)),
+    redirect: 'manual',
+  })
+  const html = await response.text()
+  if (!response.ok) {
+    throw new Error(`exchange order complete request failed with HTTP ${response.status}: ${html}`)
+  }
+  return parseExchangeOrderReceipt(html, preview)
+}
+
+const prepareExchangeOrder = async (
+  session: SbiSession,
+  options: ExchangeOrderOptions,
+): Promise<ExchangeOrderPreview> => {
+  assertExchangeOrderOptions(session, options)
+  const auth = await ensureMainSiteAuth(session)
+  const inputPath = requiredMainSitePath(session, 'exchangeOrderInputPath')
+  const inputUrl = new URL(inputPath, auth.assetsUrl)
+  inputUrl.searchParams.set('currencyCode', options.currencyCode)
+  inputUrl.searchParams.set('buySellCode', exchangeBuySellCode(options.side))
+
+  const inputResponse = await fetch(inputUrl, {
+    headers: {
+      accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      cookie: auth.cookieHeader,
+      referer: auth.assetsUrl,
+    },
+  })
+  const inputHtml = await inputResponse.text()
+  if (!inputResponse.ok) {
+    throw new Error(`exchange order input request failed with HTTP ${inputResponse.status}`)
+  }
+  const csrfToken = csrfTokenFromHtml(inputHtml)
+  const tradePassword = options.tradePassword ?? session.tradePassword
+  if (!tradePassword)
+    throw new Error('orders.exchange requires tradePassword in options or session')
+
+  const passwordPath = requiredMainSitePath(session, 'exchangeOrderPasswordPath')
+  const passwordResponse = await fetch(new URL(passwordPath, auth.assetsUrl), {
+    method: 'POST',
+    headers: {
+      accept: 'application/json, text/plain, */*',
+      'content-type': 'application/json',
+      cookie: auth.cookieHeader,
+      origin: new URL(auth.assetsUrl).origin,
+      referer: inputUrl.toString(),
+      'x-csrf-token': csrfToken,
+    },
+    body: JSON.stringify({ tradePassword }),
+  })
+  const passwordText = await passwordResponse.text()
+  if (!passwordResponse.ok) {
+    throw new Error(
+      `exchange trade password check failed with HTTP ${passwordResponse.status}: ${passwordText}`,
+    )
+  }
+
+  const confirmPath = requiredMainSitePath(session, 'exchangeOrderConfirmPath')
+  const confirmResponse = await fetch(new URL(confirmPath, auth.assetsUrl), {
+    method: 'POST',
+    headers: {
+      accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'content-type': 'application/x-www-form-urlencoded',
+      cookie: auth.cookieHeader,
+      origin: new URL(auth.assetsUrl).origin,
+      referer: inputUrl.toString(),
+    },
+    body: new URLSearchParams(exchangeConfirmForm(options, tradePassword, csrfToken)),
+  })
+  const confirmHtml = await confirmResponse.text()
+  if (!confirmResponse.ok) {
+    throw new Error(`exchange order confirm request failed with HTTP ${confirmResponse.status}`)
+  }
+  return parseExchangeOrderPreview(confirmHtml, csrfToken)
+}
+
+type MainSitePathKey =
+  | 'exchangeOrderInputPath'
+  | 'exchangeOrderPasswordPath'
+  | 'exchangeOrderConfirmPath'
+  | 'exchangeOrderCompletePath'
+  | 'etGatePath'
+  | 'assetsValuationsPath'
+
+const requiredMainSitePath = (session: SbiSession, key: MainSitePathKey) => {
+  const value = session.mainSite?.[key]
+  if (typeof value === 'string' && value) return value
+  const envName =
+    {
+      exchangeOrderInputPath: 'SBI_MAIN_SITE_EXCHANGE_ORDER_INPUT_PATH',
+      exchangeOrderPasswordPath: 'SBI_MAIN_SITE_EXCHANGE_ORDER_PASSWORD_PATH',
+      exchangeOrderConfirmPath: 'SBI_MAIN_SITE_EXCHANGE_ORDER_CONFIRM_PATH',
+      exchangeOrderCompletePath: 'SBI_MAIN_SITE_EXCHANGE_ORDER_COMPLETE_PATH',
+      etGatePath: 'SBI_MAIN_SITE_ET_GATE_PATH',
+      assetsValuationsPath: 'SBI_MAIN_SITE_ASSETS_VALUATIONS_PATH',
+    }[key] ?? `SBI main-site path ${String(key)}`
+  throw new Error(`${envName} is required`)
+}
+
+const assertExchangeOrderOptions = (session: SbiSession, options: ExchangeOrderOptions) => {
+  if (!options.currencyCode.trim()) throw new Error('currencyCode is required')
+  if (options.side !== 'buy' && options.side !== 'sell') throw new Error('side must be buy or sell')
+  if (!String(options.tradeQuantity).trim()) throw new Error('tradeQuantity is required')
+  const specificMethod = options.specificMethod ?? 'foreign'
+  if (specificMethod !== 'foreign' && specificMethod !== 'domestic') {
+    throw new Error('specificMethod must be foreign or domestic')
+  }
+  if (specificMethod === 'domestic' && options.orderAmount == null) {
+    throw new Error('domestic exchange orders require orderAmount')
+  }
+  if (options.side === 'sell' && !options.sellMethod) {
+    throw new Error('sell exchange orders require sellMethod')
+  }
+  if (!options.tradePassword && !session.tradePassword) {
+    throw new Error('orders.exchange requires tradePassword in options or session')
+  }
+}
+
+const assertExchangeRateOptions = (options: ExchangeRateOptions) => {
+  if (!options.currencyCode.trim()) throw new Error('currencyCode is required')
+  if (options.side !== 'buy' && options.side !== 'sell') throw new Error('side must be buy or sell')
+}
+
+const parseExchangeRateInfo = (body: unknown, options: ExchangeRateOptions): ExchangeRateInfo => {
+  const raw = record(body, 'exchange rate response')
+  return {
+    currencyCode: stringValue(raw.currencyCode) || options.currencyCode,
+    side: raw.buySellCode ? exchangeSide(stringValue(raw.buySellCode)) : options.side,
+    referenceExchangeRate: emptyToUndefined(stringValue(raw.referenceExchangeRate)),
+    computeExchangeRate: emptyToUndefined(stringValue(raw.computeExchangeRate)),
+    basePrice: emptyToUndefined(stringValue(raw.basePrice)),
+    exchangeTradeType: emptyToUndefined(stringValue(raw.exchangeTradeType)),
+    updateTime: emptyToUndefined(stringValue(raw.updateTime)),
+    buyPossibleAmount: emptyToUndefined(stringValue(raw.buyPossibleAmount)),
+    sellPossibleAmount: emptyToUndefined(stringValue(raw.sellPossibleAmount)),
+    buyUnit: emptyToUndefined(stringValue(raw.buyUnit)),
+    sellUnit: emptyToUndefined(stringValue(raw.sellUnit)),
+    buyLimitMin: emptyToUndefined(stringValue(raw.buyLimitMin)),
+    buyLimitMax: emptyToUndefined(stringValue(raw.buyLimitMax)),
+    sellLimitMin: emptyToUndefined(stringValue(raw.sellLimitMin)),
+    sellLimitMax: emptyToUndefined(stringValue(raw.sellLimitMax)),
+    raw,
+  }
+}
+
+const exchangeConfirmForm = (
+  options: ExchangeOrderOptions,
+  tradePassword: string,
+  csrfToken: string,
+) => {
+  const form: Record<string, string> = {
+    specificMethod: options.specificMethod ?? 'foreign',
+    tradeQuantity: String(options.tradeQuantity),
+    tradePassword,
+    currencyCode: options.currencyCode,
+    buySellCode: exchangeBuySellCode(options.side),
+    accountKind: options.accountKind ?? 'GENERAL',
+    orderAmount: String(options.orderAmount ?? options.tradeQuantity),
+    _csrf: csrfToken,
+  }
+  if (options.side === 'sell' && options.sellMethod) form.sellMethod = options.sellMethod
+  return form
+}
+
+const exchangeCompleteForm = (preview: ExchangeOrderPreview) => {
+  const form: Record<string, string> = {
+    currencyCode: preview.currencyCode,
+    buySell: exchangeBuySellCode(preview.side),
+    accountKind: preview.accountKind ?? 'GENERAL',
+    orderAmount: preview.orderAmount ?? '',
+    showAccount: 'false',
+    specificMethod: preview.specificMethod ?? 'foreign',
+    tradeQuantity: preview.tradeQuantity ?? '',
+    _csrf: preview.csrfToken,
+  }
+  if (preview.side === 'sell' && preview.sellMethod) form.sellMethod = preview.sellMethod
+  return form
+}
+
+const parseExchangeOrderPreview = (html: string, csrfToken: string): ExchangeOrderPreview => {
+  const data = initDataFromHtml(html)
+  const currencyCode = stringValue(data.currencyCode)
+  const buySellCode = stringValue(data.buySellCode)
+  if (!currencyCode || !buySellCode) {
+    const errorMessage = stringValue(data.errorMessage) || textFromTitle(html)
+    throw new Error(`exchange order confirm response did not include order data: ${errorMessage}`)
+  }
+  return {
+    currencyCode,
+    currencyName: emptyToUndefined(stringValue(data.currencyName)),
+    side: exchangeSide(buySellCode),
+    exchangeType: emptyToUndefined(stringValue(data.exchangeType)),
+    accountKind: exchangeAccountKind(data.accountKind),
+    specificMethod: exchangeSpecificMethod(data.specificMethod),
+    sellMethod: exchangeSellMethod(data.sellMethod),
+    tradeQuantity: emptyToUndefined(stringValue(data.tradeQuantity)),
+    orderAmount: emptyToUndefined(stringValue(data.orderAmount)),
+    exchangeRate: emptyToUndefined(stringValue(data.exchangeRate)),
+    netAmount: emptyToUndefined(stringValue(data.netAmount)),
+    valueDate: emptyToUndefined(stringValue(data.valueDate)),
+    rateDateTime: emptyToUndefined(stringValue(data.rateDateTime)),
+    warningMessage: data.warningMessage == null ? null : stringValue(data.warningMessage),
+    isMaintenance: data.isMaintenance === true,
+    csrfToken,
+  }
+}
+
+const parseExchangeOrderReceipt = (
+  html: string,
+  preview: ExchangeOrderPreview,
+): ExchangeOrderReceipt => {
+  const data = initDataFromHtml(html, false)
+  const errorMessage = stringValue(data.errorMessage)
+  const warningMessage = data.warningMessage == null ? null : stringValue(data.warningMessage)
+  return {
+    accepted: !errorMessage,
+    currencyCode: stringValue(data.currencyCode) || preview.currencyCode,
+    side: data.buySellCode ? exchangeSide(stringValue(data.buySellCode)) : preview.side,
+    message: errorMessage || stringValue(data.message) || textFromTitle(html),
+    warningMessage,
+    rawTitle: textFromTitle(html),
+  }
+}
+
+const initDataFromHtml = (html: string, required = true): Record<string, unknown> => {
+  const match = html.match(/var\s+INIT_DATA\s*=\s*(\{.*?\});/s)
+  if (!match?.[1]) {
+    if (!required) return {}
+    throw new Error('main site exchange response did not include INIT_DATA')
+  }
+  try {
+    const data = JSON.parse(match[1])
+    return data && typeof data === 'object' && !Array.isArray(data)
+      ? (data as Record<string, unknown>)
+      : {}
+  } catch {
+    throw new Error('main site exchange INIT_DATA was not valid JSON')
+  }
+}
+
+const csrfTokenFromHtml = (html: string) => {
+  const token = html.match(/<meta\s+name=["']_csrf["']\s+content=["']([^"']+)/i)?.[1]
+  if (!token) throw new Error('main site exchange input response did not include CSRF token')
+  return decodeHtmlAttribute(token)
+}
+
+const textFromTitle = (html: string) =>
+  html
+    .match(/<title>(.*?)<\/title>/is)?.[1]
+    ?.replace(/\s+/g, ' ')
+    .trim()
+
+const exchangeBuySellCode = (side: ExchangeOrderSide) => (side === 'buy' ? 'BUY' : 'SELL')
+
+const exchangeSide = (buySellCode: string): ExchangeOrderSide => {
+  if (buySellCode === 'BUY') return 'buy'
+  if (buySellCode === 'SELL') return 'sell'
+  throw new Error(`unsupported exchange buySellCode: ${buySellCode}`)
+}
+
+const exchangeAccountKind = (value: unknown) => {
+  if (value === 'GENERAL' || value === 'JR_NISA') return value
+  return undefined
+}
+
+const exchangeSpecificMethod = (value: unknown) => {
+  if (value === 'foreign' || value === 'domestic') return value
+  return undefined
+}
+
+const exchangeSellMethod = (value: unknown) => {
+  if (value === 'SELL_PART' || value === 'SELL_ALL') return value
+  return null
+}
+
+const stringValue = (value: unknown) => (value == null ? '' : String(value))
+
+const fetchCurrentAccountAssets = async (
+  session: SbiSession,
+  retryWithFreshAuth = true,
+): Promise<AccountAssetsValuations> => {
+  const auth = await ensureMainSiteAuth(session)
+  const valuationsPath = session.mainSite?.assetsValuationsPath
+  if (!valuationsPath) throw new Error('SBI_MAIN_SITE_ASSETS_VALUATIONS_PATH is required')
+  const requestUrl = new URL(valuationsPath, auth.assetsUrl)
+  const response = await fetch(requestUrl, {
+    headers: {
+      accept: 'application/json, text/plain, */*',
+      cookie: auth.cookieHeader,
+      referer: auth.assetsUrl,
+    },
+  })
+  const text = await response.text()
+  const contentType = response.headers.get('content-type') ?? ''
+
+  if ((!response.ok || !contentType.includes('application/json')) && retryWithFreshAuth) {
+    if (session.mainSite) session.mainSite.auth = undefined
+    return fetchCurrentAccountAssets(session, false)
+  }
+  if (!response.ok) {
+    throw new Error(
+      `main site assets valuation request failed with HTTP ${response.status}: ${text}`,
+    )
+  }
+  if (!contentType.includes('application/json')) {
+    throw new Error('main site assets valuation request returned non-JSON response')
+  }
+
+  let body: unknown
+  try {
+    body = JSON.parse(text)
+  } catch {
+    throw new Error('main site assets valuation response was not valid JSON')
+  }
+  return parseAccountAssetsValuations(body)
+}
+
+const ensureMainSiteAuth = async (session: SbiSession): Promise<MainSiteAuthCache> => {
+  const mainSite = (session.mainSite ??= {})
+  const cached = mainSite.auth
+  if (cached && Date.now() - Date.parse(cached.authenticatedAt) < MAIN_SITE_AUTH_CACHE_TTL_MS) {
+    return cached
+  }
+  if (mainSite.authPromise) return mainSite.authPromise
+
+  mainSite.authPromise = createMainSiteAuth(session)
+    .then((auth) => {
+      mainSite.auth = auth
+      return auth
+    })
+    .finally(() => {
+      mainSite.authPromise = undefined
+    })
+  return mainSite.authPromise
+}
+
+const createMainSiteAuth = async (session: SbiSession): Promise<MainSiteAuthCache> => {
+  const mainSite = session.mainSite
+  const baseUrl = mainSite?.baseUrl
+  if (!baseUrl) throw new Error('SBI_MAIN_SITE_BASE_URL is required')
+  const etGatePath = mainSite.etGatePath
+  if (!etGatePath) throw new Error('SBI_MAIN_SITE_ET_GATE_PATH is required')
+
+  const jar = new Map<string, string>()
+  const siteLinkParam = await fetchMainSiteLinkParam(session)
+  const etGateUrl = new URL(etGatePath, baseUrl)
+  for (const [key, value] of Object.entries(mainSiteAssetLoginParams(siteLinkParam))) {
+    etGateUrl.searchParams.set(key, value)
+  }
+
+  const etGateResponse = await fetch(etGateUrl, {
+    headers: { accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
+    redirect: 'manual',
+  })
+  updateCookieJar(jar, etGateResponse)
+  const etGateHtml = decodeShiftJis(Buffer.from(await etGateResponse.arrayBuffer()))
+  if (!etGateResponse.ok) {
+    throw new Error(`main site ETGate request failed with HTTP ${etGateResponse.status}`)
+  }
+  const form = parseHtmlForm(etGateHtml, etGateUrl)
+
+  const switchResponse = await fetch(form.action, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      cookie: cookieHeader(jar),
+      referer: etGateUrl.toString(),
+    },
+    body: new URLSearchParams(form.fields),
+    redirect: 'manual',
+  })
+  updateCookieJar(jar, switchResponse)
+  const ssoUrl = responseLocationUrl(switchResponse, form.action)
+
+  const ssoResponse = await fetch(ssoUrl, {
+    headers: { cookie: cookieHeader(jar), referer: form.action.toString() },
+    redirect: 'manual',
+  })
+  updateCookieJar(jar, ssoResponse)
+  const assetsUrl = responseLocationUrl(ssoResponse, ssoUrl)
+
+  const assetsResponse = await fetch(assetsUrl, {
+    headers: { cookie: cookieHeader(jar), referer: ssoUrl.toString() },
+    redirect: 'manual',
+  })
+  updateCookieJar(jar, assetsResponse)
+  if (!assetsResponse.ok) {
+    throw new Error(`main site assets page request failed with HTTP ${assetsResponse.status}`)
+  }
+
+  return {
+    baseUrl,
+    assetsUrl: assetsUrl.toString(),
+    cookieHeader: cookieHeader(jar),
+    authenticatedAt: new Date().toISOString(),
+  }
+}
+
+const fetchMainSiteLinkParam = async (session: SbiSession) => {
+  const response = await callMts(session, 'F1132', accountTrin(session))
+  const urlParam = readShiftJisField(response.buffer, MTS_HEADER_BYTES, 1000)
+  if (!urlParam) throw new Error('F1132 did not return a main site link parameter')
+  return urlParam
+}
+
+const mainSiteAssetLoginParams = (siteLinkParam: string) => ({
+  _ControlID: 'WPLETlgR001Control',
+  _PageID: 'WPLETlgR001Rlgn20',
+  _DataStoreID: 'DSWPLETlgR001Control',
+  _ActionID: 'NoActionID',
+  _ReturnPageInfo: 'WPLETsmR001Control/WPLETsmR001Sdtl18/NoActionID/DSWPLETsmR001Control',
+  getFlg: 'on',
+  sw_param1: 'account',
+  sw_param2: 'assets',
+  OutSide: 'on',
+  page_from: '3',
+  allPrmFlg: 'on',
+  ACT_login: '',
+  RSW: siteLinkParam,
+})
+
+const responseLocationUrl = (response: Response, baseUrl: URL) => {
+  const location = response.headers.get('location')
+  if (!location) {
+    throw new Error(`main site expected redirect but got HTTP ${response.status}`)
+  }
+  return new URL(location, baseUrl)
+}
+
+const parseHtmlForm = (html: string, baseUrl: URL) => {
+  const formMatch = html.match(/<form\b[^>]*>/i)
+  if (!formMatch) throw new Error('main site ETGate response did not include a form')
+  const action = attributeValue(formMatch[0], 'action')
+  if (!action) throw new Error('main site ETGate form did not include an action')
+
+  const fields: Array<[string, string]> = []
+  for (const inputMatch of html.matchAll(/<input\b[^>]*>/gi)) {
+    const name = attributeValue(inputMatch[0], 'name')
+    if (!name) continue
+    fields.push([name, attributeValue(inputMatch[0], 'value') ?? ''])
+  }
+  if (!fields.length) throw new Error('main site ETGate form did not include fields')
+  return { action: new URL(action, baseUrl), fields }
+}
+
+const attributeValue = (tag: string, name: string) => {
+  const pattern = new RegExp(`${name}=(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i')
+  const match = tag.match(pattern)
+  const value = match?.[1] ?? match?.[2] ?? match?.[3]
+  return value === undefined ? undefined : decodeHtmlAttribute(value)
+}
+
+const decodeHtmlAttribute = (value: string) =>
+  value
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+
+const updateCookieJar = (jar: Map<string, string>, response: Response) => {
+  for (const header of setCookieHeaders(response.headers)) {
+    const nameValue = header.split(';', 1)[0]
+    if (!nameValue) continue
+    const separator = nameValue.indexOf('=')
+    if (separator <= 0) continue
+    jar.set(nameValue.slice(0, separator), nameValue.slice(separator + 1))
+  }
+}
+
+const setCookieHeaders = (headers: Headers) => {
+  const withGetSetCookie = headers as Headers & { getSetCookie?: () => string[] }
+  const values = withGetSetCookie.getSetCookie?.()
+  if (values?.length) return values
+  const header = headers.get('set-cookie')
+  if (!header) return []
+  return header.split(/,(?=\s*[^;,]+=)/g)
+}
+
+const cookieHeader = (jar: Map<string, string>) =>
+  [...jar.entries()].map(([name, value]) => `${name}=${value}`).join('; ')
+
+const parseAccountAssetsValuations = (body: unknown): AccountAssetsValuations => {
+  const object = record(body, 'main site assets valuation response')
+  return {
+    fetchedAt: new Date().toISOString(),
+    summary: parseAccountAssetsValuationSummary(object.summary, 'summary'),
+    summaryWithoutDeposit: parseAccountAssetsValuationSummary(
+      object.summaryWithoutDeposit,
+      'summaryWithoutDeposit',
+    ),
+    summaryWithoutIdeco: optionalAccountAssetsValuationSummary(
+      object.summaryWithoutIdeco,
+      'summaryWithoutIdeco',
+    ),
+    summaryWithoutDepositAndIdeco: optionalAccountAssetsValuationSummary(
+      object.summaryWithoutDepositAndIdeco,
+      'summaryWithoutDepositAndIdeco',
+    ),
+    summaryDetails: parseAccountAssetsValuationDetails(object.summaryDetails, 'summaryDetails'),
+    summaryDetailsWithoutDeposit: parseAccountAssetsValuationDetails(
+      object.summaryDetailsWithoutDeposit,
+      'summaryDetailsWithoutDeposit',
+    ),
+    summaryDetailsWithoutIdeco: parseAccountAssetsValuationDetails(
+      object.summaryDetailsWithoutIdeco,
+      'summaryDetailsWithoutIdeco',
+    ),
+    summaryDetailsWithoutDepositAndIdeco: parseAccountAssetsValuationDetails(
+      object.summaryDetailsWithoutDepositAndIdeco,
+      'summaryDetailsWithoutDepositAndIdeco',
+    ),
+  }
+}
+
+const optionalAccountAssetsValuationSummary = (value: unknown, label: string) =>
+  value == null ? undefined : parseAccountAssetsValuationSummary(value, label)
+
+const parseAccountAssetsValuationSummary = (
+  value: unknown,
+  label: string,
+): AccountAssetsValuationSummary => {
+  const object = record(value, label)
+  return {
+    assetsErrorType: object.assetsErrorType ?? null,
+    valuation: nullableJsonNumber(object.valuation, `${label}.valuation`),
+    netChange: nullableJsonNumber(object.netChange, `${label}.netChange`),
+    percentChange: nullableJsonNumber(object.percentChange, `${label}.percentChange`),
+    monthOnMonth: nullableJsonNumber(object.monthOnMonth, `${label}.monthOnMonth`),
+    monthOnMonthRatio: object.monthOnMonthRatio ?? null,
+    profitLoss: nullableJsonNumber(object.profitLoss, `${label}.profitLoss`),
+    profitLossRate: nullableJsonNumber(object.profitLossRate, `${label}.profitLossRate`),
+    acquisitionCost: nullableJsonNumber(object.acquisitionCost, `${label}.acquisitionCost`),
+  }
+}
+
+const parseAccountAssetsValuationDetails = (
+  value: unknown,
+  label: string,
+): AccountAssetsValuationDetail[] => {
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array`)
+  return value.map((item, index) => {
+    const object = record(item, `${label}[${index}]`)
+    return {
+      ...parseAccountAssetsValuationSummary(object, `${label}[${index}]`),
+      category: typeof object.category === 'string' ? object.category : '',
+      compositionRatio: nullableJsonNumber(
+        object.compositionRatio,
+        `${label}[${index}].compositionRatio`,
+      ),
+    }
+  })
+}
+
+const record = (value: unknown, label: string): Record<string, unknown> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`)
+  }
+  return value as Record<string, unknown>
+}
+
+const nullableJsonNumber = (value: unknown, label: string) => {
+  if (value === null || value === undefined) return null
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`${label} must be a finite number`)
+  }
+  return value
 }
 
 const callMtsInternal = async (
@@ -1018,7 +1763,11 @@ const parseCashPositions = (
 
     const marketValue = yen(valuationPriceText)
     const position: CashPosition = {
-      issue: { code, market: emptyToUndefined(market), name: extractIssueName(issueName) },
+      issue: {
+        code,
+        market: publicDomesticMarket(market, 'account.positions.cash'),
+        name: extractIssueName(issueName),
+      },
       accountType: mapAccountType(depositTypeCode),
       depositType: mapDepositType(depositTypeCode),
       depositTypeCode: emptyToUndefined(depositTypeCode),
@@ -1128,7 +1877,11 @@ const parseMarginPositions = (
     const maybeBargainMarket = reader.remaining >= 10 ? reader.text(10) : ''
     positions.push({
       id: `${code}:${market}:${i}`,
-      issue: { code, market: emptyToUndefined(market), name: extractIssueName(issueName) },
+      issue: {
+        code,
+        market: publicDomesticMarket(market, 'account.positions.margin'),
+        name: extractIssueName(issueName),
+      },
       side: mapSide(tradeKind),
       sideText: emptyToUndefined(sideText),
       tradeKind: emptyToUndefined(tradeKind),
@@ -1306,7 +2059,11 @@ const parseRanking = (response: MtsResponse, category: string): Ranking => {
     const colorFlag = reader.remaining >= 1 ? reader.text(1) : ''
     items.push({
       rank: parseNumber(rankText) ?? i + 1,
-      issue: { code, market: emptyToUndefined(market), name: emptyToUndefined(name) },
+      issue: {
+        code,
+        market: publicDomesticMarket(market, 'market.ranking.market'),
+        name: emptyToUndefined(name),
+      },
       value: parseNumber(values[0] ?? '') ?? emptyToUndefined(values[0] ?? ''),
       values: values.map((value) => parseNumber(value) ?? emptyToUndefined(value) ?? null),
       exchangeName: emptyToUndefined(exchangeName),
@@ -1335,7 +2092,11 @@ const parseSbiRanking = (response: MtsResponse): Ranking => {
     const market = reader.text(3)
     items.push({
       rank: parseNumber(rankText) ?? i + 1,
-      issue: { code, market: emptyToUndefined(market), name: emptyToUndefined(name) },
+      issue: {
+        code,
+        market: publicDomesticMarket(market, 'market.ranking.sbi'),
+        name: emptyToUndefined(name),
+      },
       value: parseNumber(valueText) ?? emptyToUndefined(valueText),
       exchangeName: emptyToUndefined(exchangeName),
     })
@@ -1453,7 +2214,7 @@ const parseIssueChart = (response: MtsResponse, options: IssueChartOptions): Iss
   return {
     issue: {
       code: emptyToUndefined(code) ?? options.issueCode,
-      market: emptyToUndefined(market) ?? options.market,
+      market: publicDomesticMarket(market, 'market.issue.chart') ?? options.market,
       name: emptyToUndefined(name),
     },
     period,
@@ -1548,7 +2309,7 @@ const parseBoardResponse = (
 
   const issue = {
     code: emptyToUndefined(code) ?? options.issueCode,
-    market: emptyToUndefined(market) ?? options.market,
+    market: publicDomesticMarket(market, 'market.issue.board') ?? options.market,
     name: emptyToUndefined(name),
   }
 
@@ -1656,7 +2417,7 @@ const parseTodayExecutedOrders = (
     const depositTypeCode = reader.text(1)
     const issue = {
       code,
-      market: emptyToUndefined(market),
+      market: publicDomesticMarket(market, 'orders.inquiry.executionsToday'),
       name: extractIssueName(issueName),
     }
     orders.push({
@@ -1761,7 +2522,7 @@ const parseRecentOrders = (
       id: orderId || orderNumber || `${response.header.trCode}-${i}`,
       issue: {
         code,
-        market: emptyToUndefined(market),
+        market: publicDomesticMarket(market, 'orders.inquiry'),
         name: extractIssueName(issueName),
       },
       side: mapSide(tradeId),
@@ -1991,7 +2752,7 @@ const parseOrderCorrectionPreOrder = (
 
   const issue = {
     code: emptyToUndefined(issueCode) ?? options.issueCode,
-    market: emptyToUndefined(market) ?? options.market,
+    market: publicDomesticMarket(market, 'orders.cash.correction') ?? options.market,
   }
   const parsedPrice = yen(price)
   const parsedQuantity = parseNumber(quantityText)
@@ -2196,14 +2957,14 @@ const parseStockOrderPreOrder = (
   return {
     issue: {
       code: emptyToUndefined(issueCode) ?? options.issueCode,
-      market: emptyToUndefined(market) ?? options.market,
+      market: publicDomesticMarket(market, 'orders.preOrder') ?? options.market,
       name: emptyToUndefined(stripIssueCodePrefix(issueName, issueCode)),
     },
     tradeTitle: emptyToUndefined(tradeTitle),
     buyingPowerTotal: yen(buyingPowerTotal),
     controlledStockCode: emptyToUndefined(controlledStockCode),
     hasTradeWarning: controlledStockCode === '1',
-    market: emptyToUndefined(market) ?? options.market,
+    market: publicDomesticMarket(market, 'orders.preOrder') ?? options.market,
     exchangeList: emptyToUndefined(exchangeList),
     exchangeListName: emptyToUndefined(exchangeListName),
     exchangeListIndexFlag: emptyToUndefined(exchangeListIndexFlag),
@@ -2316,7 +3077,8 @@ const parseThemeInvestmentList = (
     if (!code) continue
     issues.push({
       code,
-      market: emptyToUndefined(exchangeCode) ?? options.exchangeCode,
+      market:
+        publicDomesticMarket(exchangeCode, 'orders.themeInvestment.list') ?? options.exchangeCode,
       name: emptyToUndefined(productName),
       controlledStockCode: emptyToUndefined(controlledStockCode),
       hasTradeWarning: Boolean(emptyToUndefined(controlledStockCode)),
@@ -2378,31 +3140,8 @@ const assertCashOrderOptions = (options: CashOrderOptions) => {
     throw new Error('orders.cash accountType and depositType must match when both are specified')
   }
   if (options.kind === 's') {
-    const optionRecord = options as Record<string, unknown>
-    const unsupportedFields = [
-      'price',
-      'priceCondition',
-      'orderTerm',
-      'orderDate',
-      'orderMethod',
-      'triggerZone',
-      'triggerPrice',
-      'secondaryPriceCondition',
-      'secondaryPrice',
-      'ippanMarginPaymentLimit',
-      'sorLastMarket',
-    ].filter((key) => key in optionRecord && optionRecord[key] != null)
-    if (unsupportedFields.length) {
-      throw new Error(`orders.cash with kind: "s" cannot specify ${unsupportedFields.join(', ')}`)
-    }
     if (options.market !== 'STK') {
       throw new Error('orders.cash with kind: "s" requires market: "STK"')
-    }
-    if (!options.preOrderMarket) {
-      throw new Error('orders.cash with kind: "s" requires preOrderMarket for APK pre-order')
-    }
-    if (!Number.isInteger(options.quantity)) {
-      throw new Error('orders.cash with kind: "s" requires an integer quantity')
     }
     return
   }
@@ -2410,10 +3149,7 @@ const assertCashOrderOptions = (options: CashOrderOptions) => {
   assertStandardStockOrderOptions(options, 'orders.cash')
 }
 
-const assertStandardStockOrderOptions = (
-  options: StandardStockOrderOptions,
-  methodName: string,
-) => {
+const assertStandardStockOrderOptions = (options: StandardCashOrderOptions, methodName: string) => {
   if (options.accountType && options.depositType && options.accountType !== options.depositType) {
     throw new Error(`${methodName} accountType and depositType must match when both are specified`)
   }
@@ -2468,8 +3204,6 @@ const assertStandardStockOrderOptions = (
     }
   }
 }
-
-type StandardStockOrderOptions = StandardCashOrderOptions
 
 const assertMarginOpenOrderOptions = (options: MarginOpenOrderOptions) => {
   assertStandardStockOrderOptions(options, 'orders.margin.open')
@@ -2730,7 +3464,8 @@ const assertStockOrderMarketAvailable = (
 ) => {
   if (options.kind === 's') return
   const markets = stockPreOrderExchangeMarkets(preOrder.exchangeList)
-  if (!markets.length || markets.includes(options.market)) return
+  const market = domesticMarketToMts(options.market, methodName)
+  if (!markets.length || markets.includes(market)) return
   throw new Error(
     `${methodName} market: "${options.market}" is not available according to APK pre-order exchangeList`,
   )
@@ -2829,9 +3564,9 @@ const STOCK_PRE_ORDER_EXCHANGE_MARKET_CODES = new Set([
   'PTX',
 ])
 
-const stockPreOrderExchangeMarkets = (value: string | undefined): MarketCode[] => {
+const stockPreOrderExchangeMarkets = (value: string | undefined): string[] => {
   if (!value) return []
-  const markets: MarketCode[] = []
+  const markets: string[] = []
   for (let index = 0; index < value.length; index += 3) {
     const code = value.slice(index, index + 3)
     if (STOCK_PRE_ORDER_EXCHANGE_MARKET_CODES.has(code) && !markets.includes(code)) {
@@ -3142,14 +3877,14 @@ const issuePositionTrin = (session: SbiSession, options: IssueOptions) =>
     { width: 3, value: session.profile.butenCode ?? session.profile.branchCode },
     { width: 7, value: session.profile.accountNumber },
     { width: 5, value: options.issueCode },
-    { width: 3, value: options.market },
+    { width: 3, value: domesticMarketToMts(options.market, 'account.positions.cashForIssue') },
   ])
 
 const issueTrin = (options: IssueOptions) =>
   fixedTrin([
     { width: 5, value: options.issueCode },
     { width: 80, value: '' },
-    { width: 3, value: options.market },
+    { width: 3, value: domesticMarketToMts(options.market, 'market.issue') },
     { width: 1, value: '' },
   ])
 
@@ -3182,7 +3917,7 @@ const issueChartTrin = (options: IssueChartOptions) => {
   return fixedTrin([
     { width: 5, value: options.issueCode },
     { width: 80, value: '' },
-    { width: 3, value: options.market },
+    { width: 3, value: domesticMarketToMts(options.market, 'market.issue.chart') },
     { width: 1, value: CHART_PERIOD_MTS_CODES[period] },
     { width: 2, value: unit },
     { width: 8, value: '' },
@@ -3223,7 +3958,7 @@ const tradingInfoTrin = (session: SbiSession, options: BoardOptions) =>
   fixedTrin([
     { width: 5, value: options.issueCode },
     { width: 80, value: '' },
-    { width: 3, value: options.market },
+    { width: 3, value: domesticMarketToMts(options.market, 'market.issue.tradingInfo') },
     { width: 3, value: session.profile.butenCode ?? session.profile.branchCode },
     { width: 7, value: session.profile.accountNumber },
     { width: 1, value: session.profile.marginAccount ?? '' },
@@ -3238,7 +3973,7 @@ const openOrdersTrin = (session: SbiSession, options: IssueOptions) =>
     { width: 7, value: session.profile.accountNumber },
     { width: 1, value: '1' },
     { width: 5, value: options.issueCode },
-    { width: 3, value: options.market },
+    { width: 3, value: domesticMarketToMts(options.market, 'market.issue.openOrders') },
     { width: 1, value: '' },
     { width: 1, value: '1' },
   ])
@@ -3323,11 +4058,13 @@ const stockPreOrderMarket = (
   tradeType: StockPreOrderTradeType,
 ) => {
   if (tradeType === 'genbiki' || tradeType === 'genwatashi') return null
-  if (!isCashPreOrderInput(options) || options.kind !== 's') return options.market
+  if (!isCashPreOrderInput(options) || options.kind !== 's') {
+    return domesticMarketToMts(options.market, 'orders preOrder')
+  }
   if (!options.preOrderMarket) {
     throw new Error('orders.cash.preOrder with kind: "s" requires preOrderMarket')
   }
-  return options.preOrderMarket
+  return domesticMarketToMts(options.preOrderMarket, 'orders.cash.preOrder')
 }
 
 const stockPreOrderMarginCloseTradeType = (
@@ -3345,7 +4082,7 @@ const isCashPreOrderInput = (
 
 type AppStockOrderTrinOptions = {
   issueCode: string
-  market: MarketCode
+  market: string
   quantity: number
   price?: number
   priceCondition: CashOrderPriceCondition
@@ -3360,7 +4097,7 @@ type AppStockOrderTrinOptions = {
   ippanMarginPaymentLimit?: string
   secondaryPriceCondition?: CashOrderPriceCondition
   secondaryPrice?: number
-  sorLastMarket?: MarketCode
+  sorLastMarket?: string
   omitConfirmation?: boolean
   methodName: string
 }
@@ -3471,7 +4208,15 @@ const normalizeStockOrderRecordDate = (value: string, fieldName: string) => {
   return date
 }
 
-const orderMarketCode = (options: { market: MarketCode }) => options.market
+const orderMarketCode = (options: { kind?: string; market: MarketCode }) => {
+  if (options.kind === 's') {
+    if (options.market !== 'STK') {
+      throw new Error('orders.cash with kind: "s" requires market: "STK"')
+    }
+    return options.market
+  }
+  return domesticMarketToMts(options.market, 'orders')
+}
 
 const cashOrderDepositType = (options: { depositType?: DepositType; accountType?: AccountType }) =>
   options.depositType ?? options.accountType
@@ -3632,20 +4377,15 @@ const ifdSecondaryPriceConditionRequiresPrice = (options: IfdOrderOptions) =>
   cashOrderPriceConditionRequiresPrice(options.ifdSecondaryPriceCondition)
 
 const sorLastMarketCode = (
-  session: SbiSession,
-  options: {
+  _session: SbiSession,
+  _options: {
     market: MarketCode
     sorLastMarket?: MarketCode
     depositType?: DepositType
     accountType?: AccountType
   },
 ) => {
-  if (options.market !== 'SOR') return ''
-  if (options.sorLastMarket) return options.sorLastMarket
-  if (cashOrderDepositType(options) === 'juniorNisa') {
-    return session.profile.sor?.juniorNisaLastMarket ?? ''
-  }
-  return session.profile.sor?.lastMarket ?? ''
+  return ''
 }
 
 const marginOpenOrderTrin = (
@@ -4085,7 +4825,6 @@ const orderCancelSubmitTrin = (session: SbiSession, options: PlaceOrderCancelOpt
     { width: 3, value: '' },
     { width: 1, value: '' },
     { width: 10, value: '' },
-    { width: 1, value: '' },
     { width: 1, value: '' },
     { width: 1, value: '' },
     { width: 1, value: '' },

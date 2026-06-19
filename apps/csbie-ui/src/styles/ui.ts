@@ -69,12 +69,15 @@ export const ui = {
   watchSearch:
     'm-3 inline-flex min-h-11 items-center gap-2 rounded-full bg-[#111418] px-4 text-left font-medium text-[#9aa0a9] outline outline-1 outline-[#33383f] transition hover:bg-[#22272e] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d3e3fd]',
   watchRow:
-    'grid min-h-18 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-l-2 border-transparent bg-transparent px-4 py-3 text-left text-[#e3e3e9] transition hover:bg-[#242930] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d3e3fd]',
-  watchRowActive: 'border-[#c3c7cf] bg-[#242930]',
-  centerStack: 'order-1 col-span-3 grid content-start gap-5',
+    'grid min-h-18 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border-l-2 border-transparent px-4 py-3 text-left text-[#e3e3e9] transition hover:bg-[#242930] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d3e3fd]',
+  watchRowActive: 'bg-gray-900',
+  centerStack: 'order-1 col-span-3 flex min-h-0 h-full flex-col gap-5',
+  stockMetadataPanel: 'grid min-h-0 gap-4 rounded-[24px] border-0 bg-[#101418] p-6 shadow-none',
+  stockBodyGrid: 'flex-1 min-h-0 grid grid-rows-3 gap-5',
   tradeSeparator: 'order-3 hidden',
   stockPanel:
-    'grid min-h-72 content-start gap-4 rounded-[24px] border-0 bg-[#101418] p-6 shadow-none',
+    'grid min-h-0 h-full grid-rows-[auto_auto_1fr] gap-4 rounded-[24px] border-0 bg-[#101418] p-6 shadow-none',
+  stockPanelSpan: 'row-span-2',
   stockTitle: 'flex items-start justify-between gap-3',
   stockHoldingNote:
     'inline-flex w-fit items-center rounded-full border border-[#2f343b] bg-[#111418] px-4 py-2 text-sm font-semibold text-[#c3c7cf]',
@@ -86,7 +89,7 @@ export const ui = {
   smallTabs: 'grid grid-cols-2 gap-1 rounded-full bg-[#111418] p-1',
   smallTab: 'min-h-8 rounded-full bg-transparent px-3 text-xs font-bold text-[#9aa0a9]',
   smallTabActive: 'bg-[#263141] text-[#d3e3fd]',
-  chartBox: 'mt-1 h-40 overflow-hidden rounded-[20px] bg-[#111418]',
+  chartBox: 'mt-1 min-h-0 h-full min-h-[14rem] overflow-hidden rounded-[20px] bg-[#111418]',
   chartLine: 'fill-none stroke-[#40dba2] stroke-[3]',
   boxplot: 'grid min-h-36 content-center gap-5 rounded-[24px] bg-[#111418] p-7',
   boxplotScale: 'flex justify-between text-xs text-[#8f949d]',
@@ -102,6 +105,7 @@ export const ui = {
   infoTabButtonActive: 'text-[#d3e3fd]',
   infoTabIndicator: 'absolute inset-x-0 bottom-[-1px] block h-0.5 rounded-full bg-[#d3e3fd]',
   infoTabBody: 'overflow-hidden pt-4',
+  infoTabBodyInner: 'relative min-h-[9.5rem]',
   detailGrid: 'grid grid-cols-3 gap-3',
   detailItem: 'grid min-h-16 gap-1 rounded-[14px] bg-[#111418] p-3',
   holdingEmpty:
@@ -161,7 +165,9 @@ export const ui = {
   searchLoading: 'flex min-h-32 flex-col items-center justify-center gap-3 py-8 text-[#9aa0a8]',
   searchResult:
     'flex min-h-16 items-center justify-between gap-4 rounded-[20px] border border-transparent bg-[#111418] p-4 text-left text-[#e3e3e9] transition hover:bg-[#242930] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d3e3fd]',
-  searchResultActive: 'border-[#5f666f] bg-[#242930]',
+  searchResultActive: 'border-l-4 border-[#d3e3fd] bg-[#242930]',
+  searchResultFocus:
+    'bg-[#2a323a] outline outline-2 outline-[#d3e3fd] outline-offset-[-2px] shadow-[0_0_0_1px_rgba(211,227,253,0.35)]',
   confirmList: 'grid gap-2',
   confirmRow: 'flex justify-between gap-3 border-b border-[#33383f] pb-2',
   dialogNote: 'leading-7 text-[#c3c7cf]',

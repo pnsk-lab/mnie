@@ -75,6 +75,7 @@ const orderSubmitMethodByEstimateMethod = {
   'orders.ifd.estimateCorrection': 'orders.ifd.placeCorrection',
   'orders.ifd.estimateCancel': 'orders.ifd.placeCancel',
   'orders.themeInvestment.estimate': 'orders.themeInvestment.place',
+  'orders.exchange.estimate': 'orders.exchange.place',
 } as const satisfies Partial<Record<RpcMethod, RpcMethod>>
 
 const submitMethodForEstimateMethod = (method: RpcMethod) =>
@@ -567,9 +568,39 @@ const placeThemeInvestmentOrderSchema = themeInvestmentOrderSchema.extend({
     .describe('Explicitly allows sending a live theme investment order'),
 })
 
+const exchangeOrderSchema = z.object({
+  currencyCode: z.string().min(1).describe('Currency code, such as USD'),
+  side: z.enum(['buy', 'sell']).describe('Buy or sell the foreign currency'),
+  tradeQuantity: z.union([z.number().positive(), z.string().min(1)]).describe('Order quantity'),
+  specificMethod: z
+    .enum(['foreign', 'domestic'])
+    .optional()
+    .describe('foreign for foreign-currency quantity, domestic for yen amount'),
+  accountKind: z.enum(['GENERAL', 'JR_NISA']).optional().describe('SBI exchange account kind'),
+  sellMethod: z.enum(['SELL_PART', 'SELL_ALL']).optional().describe('Required for sell orders'),
+  orderAmount: z
+    .union([z.number().positive(), z.string().min(1)])
+    .optional()
+    .describe('Hidden order amount posted to SBI; required for domestic orders'),
+  tradePassword: z.string().optional().describe('Trading password used by SBI'),
+})
+
+const exchangeRateSchema = exchangeOrderSchema.pick({
+  currencyCode: true,
+  side: true,
+})
+
+const placeExchangeOrderSchema = exchangeOrderSchema.extend({
+  allowTrading: z
+    .literal(true)
+    .optional()
+    .describe('Explicitly allows sending a live exchange order'),
+})
+
 const methodParamSchemas = {
   'session.profile': undefined,
   'account.profile': undefined,
+  'account.assets.current': undefined,
   'account.power.buyingPower': undefined,
   'account.power.collateralRatio': undefined,
   'account.positions.cash': cashPositionOptionsSchema.optional(),
@@ -629,6 +660,9 @@ const methodParamSchemas = {
   'orders.themeInvestment.list': themeInvestmentPreOrderSchema,
   'orders.themeInvestment.estimate': themeInvestmentOrderSchema,
   'orders.themeInvestment.place': placeThemeInvestmentOrderSchema,
+  'orders.exchange.rate': exchangeRateSchema,
+  'orders.exchange.estimate': exchangeOrderSchema,
+  'orders.exchange.place': placeExchangeOrderSchema,
 } satisfies Record<RpcMethod, z.ZodType | undefined>
 
 const createMcpServer = (c: Context<AppBindings>) => {

@@ -11,8 +11,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { createMethodsFromSession, registerDeviceId } from '../methods'
+import { mtsMarketToDomestic } from '../markets'
 import type {
   AccountProfile,
+  ForeignStockEndpointConfig,
+  ForeignStockSession,
   LoginWithPasskeyOptions,
   PasskeyLoginResponse,
   PlaintextStoredWebAuthnCredential,
@@ -27,6 +30,11 @@ type PasskeyLoginStart = {
   publicKey: string
 }
 
+type PasskeyAccessToken = {
+  callbackUrl: string
+  accessToken: string
+}
+
 type CredentialRequest = {
   challenge: string
   rpId: string
@@ -37,7 +45,24 @@ type SbiEndpointConfig = {
   authBaseUrl: string
   mtsBaseUrl: string
   izanagiBaseUrl?: string
+  foreignStock?: ForeignStockEndpointConfig
+  mainSiteBaseUrl?: string
+  mainSiteEtGatePath?: string
+  mainSiteAssetsValuationsPath?: string
+  mainSiteExchangeOrderInputPath?: string
+  mainSiteExchangeOrderPasswordPath?: string
+  mainSiteExchangeOrderConfirmPath?: string
+  mainSiteExchangeOrderCompletePath?: string
 }
+
+const MAIN_SITE_DEFAULT_PATHS = {
+  etGate: '/ETGate/',
+  assetsValuations: '/account/api/assets/valuations/current',
+  exchangeOrderInput: '/exchange/order/input',
+  exchangeOrderPassword: '/exchange/api/order/input/password',
+  exchangeOrderConfirm: '/exchange/order/confirm',
+  exchangeOrderComplete: '/exchange/order/complete',
+} as const
 
 export const loginWithPasskey = async (
   options: LoginWithPasskeyOptions,
@@ -52,7 +77,257 @@ export const createPasskeySession = async (
   clientOptions: SbiClientOptions = {},
 ): Promise<SbiSession> => {
   const endpoints = resolveSbiEndpointConfig(options)
-  const started = startPasskeyLogin(endpoints.authBaseUrl)
+  const domesticAccess = await requestPasskeyAccessToken({
+    authBaseUrl: endpoints.authBaseUrl,
+    passkeyCredential: options.passkeyCredential,
+    channel: 'kabu-app',
+  })
+  const loginResponse = await finishPasskeyLogin({
+    accessToken: domesticAccess.accessToken,
+    mtsBaseUrl: endpoints.mtsBaseUrl,
+  })
+  const profile = parsePasskeyLoginProfile(loginResponse)
+  const foreignStock = endpoints.foreignStock
+    ? await createForeignStockSession(
+        endpoints.foreignStock,
+        (
+          await requestPasskeyAccessToken({
+            authBaseUrl: endpoints.authBaseUrl,
+            passkeyCredential: options.passkeyCredential,
+            channel: 'foreign-kabu-app',
+          })
+        ).accessToken,
+      )
+    : undefined
+  const session: SbiSession = {
+    mtsBaseUrl: endpoints.mtsBaseUrl,
+    izanagiBaseUrl: endpoints.izanagiBaseUrl,
+    foreignStock,
+    mainSite: endpoints.mainSiteBaseUrl
+      ? {
+          baseUrl: endpoints.mainSiteBaseUrl,
+          etGatePath: endpoints.mainSiteEtGatePath,
+          assetsValuationsPath: endpoints.mainSiteAssetsValuationsPath,
+          exchangeOrderInputPath: endpoints.mainSiteExchangeOrderInputPath,
+          exchangeOrderPasswordPath: endpoints.mainSiteExchangeOrderPasswordPath,
+          exchangeOrderConfirmPath: endpoints.mainSiteExchangeOrderConfirmPath,
+          exchangeOrderCompletePath: endpoints.mainSiteExchangeOrderCompletePath,
+        }
+      : undefined,
+    profile,
+    loginResponse,
+    tradePassword: clientOptions.tradePassword,
+    tradeAuthentication: clientOptions.tradeAuthentication,
+  }
+  if (clientOptions.deviceId) {
+    await registerDeviceId(session, clientOptions.deviceId)
+    session.deviceIdRegistered = true
+  }
+  return session
+}
+
+const resolveSbiEndpointConfig = (options: LoginWithPasskeyOptions): SbiEndpointConfig => {
+  const authBaseUrl = options.authBaseUrl ?? process.env.SBI_AUTH_BASE_URL
+  const mtsBaseUrl = options.mtsBaseUrl ?? process.env.SBI_MTS_BASE_URL
+  const izanagiBaseUrl = options.izanagiBaseUrl ?? process.env.SBI_IZANAGI_BASE_URL
+  const foreignStock = resolveForeignStockEndpointConfig(options)
+  const mainSiteBaseUrl = options.mainSiteBaseUrl ?? process.env.SBI_MAIN_SITE_BASE_URL
+  const mainSiteEtGatePath =
+    options.mainSiteEtGatePath ??
+    process.env.SBI_MAIN_SITE_ET_GATE_PATH ??
+    MAIN_SITE_DEFAULT_PATHS.etGate
+  const mainSiteAssetsValuationsPath =
+    options.mainSiteAssetsValuationsPath ??
+    process.env.SBI_MAIN_SITE_ASSETS_VALUATIONS_PATH ??
+    MAIN_SITE_DEFAULT_PATHS.assetsValuations
+  const mainSiteExchangeOrderInputPath =
+    options.mainSiteExchangeOrderInputPath ??
+    process.env.SBI_MAIN_SITE_EXCHANGE_ORDER_INPUT_PATH ??
+    MAIN_SITE_DEFAULT_PATHS.exchangeOrderInput
+  const mainSiteExchangeOrderPasswordPath =
+    options.mainSiteExchangeOrderPasswordPath ??
+    process.env.SBI_MAIN_SITE_EXCHANGE_ORDER_PASSWORD_PATH ??
+    MAIN_SITE_DEFAULT_PATHS.exchangeOrderPassword
+  const mainSiteExchangeOrderConfirmPath =
+    options.mainSiteExchangeOrderConfirmPath ??
+    process.env.SBI_MAIN_SITE_EXCHANGE_ORDER_CONFIRM_PATH ??
+    MAIN_SITE_DEFAULT_PATHS.exchangeOrderConfirm
+  const mainSiteExchangeOrderCompletePath =
+    options.mainSiteExchangeOrderCompletePath ??
+    process.env.SBI_MAIN_SITE_EXCHANGE_ORDER_COMPLETE_PATH ??
+    MAIN_SITE_DEFAULT_PATHS.exchangeOrderComplete
+
+  if (!authBaseUrl) throw new Error('SBI_AUTH_BASE_URL is required')
+  if (!mtsBaseUrl) throw new Error('SBI_MTS_BASE_URL is required')
+
+  return {
+    authBaseUrl,
+    mtsBaseUrl,
+    izanagiBaseUrl: optionalUrl(izanagiBaseUrl),
+    foreignStock,
+    mainSiteBaseUrl: optionalUrl(mainSiteBaseUrl),
+    mainSiteEtGatePath,
+    mainSiteAssetsValuationsPath,
+    mainSiteExchangeOrderInputPath,
+    mainSiteExchangeOrderPasswordPath,
+    mainSiteExchangeOrderConfirmPath,
+    mainSiteExchangeOrderCompletePath,
+  }
+}
+
+const optionalUrl = (value: string | undefined) => {
+  if (!value) return undefined
+  return new URL(value).toString()
+}
+
+const resolveForeignStockEndpointConfig = (
+  options: LoginWithPasskeyOptions,
+): ForeignStockEndpointConfig | undefined => {
+  const baseUrl =
+    options.foreignStockBaseUrl ??
+    options.usStockBaseUrl ??
+    process.env.SBI_FOREIGN_STOCK_BASE_URL ??
+    process.env.SBI_US_STOCK_BASE_URL
+  const restUrl = options.foreignStockRestUrl ?? process.env.SBI_FOREIGN_STOCK_REST_URL
+  const graphqlBffUrl =
+    options.foreignStockGraphqlBffUrl ?? process.env.SBI_FOREIGN_STOCK_GRAPHQL_BFF_URL
+  const graphqlIntUrl =
+    options.foreignStockGraphqlIntUrl ?? process.env.SBI_FOREIGN_STOCK_GRAPHQL_INT_URL
+  const userAgent = options.foreignStockUserAgent ?? process.env.SBI_FOREIGN_STOCK_USER_AGENT
+
+  if (!baseUrl && !restUrl && !graphqlBffUrl && !graphqlIntUrl) return undefined
+  if (!baseUrl && (!restUrl || !graphqlBffUrl || !graphqlIntUrl)) {
+    throw new Error(
+      'foreign stock endpoints require foreignStockBaseUrl/usStockBaseUrl or all foreignStockRestUrl, foreignStockGraphqlBffUrl, and foreignStockGraphqlIntUrl',
+    )
+  }
+
+  return {
+    baseUrl: optionalUrl(baseUrl),
+    restUrl: optionalUrl(restUrl) ?? requiredDerivedUrl(baseUrl, '/rest/'),
+    graphqlBffUrl: optionalUrl(graphqlBffUrl) ?? requiredDerivedUrl(baseUrl, '/graphql/bff'),
+    graphqlIntUrl: optionalUrl(graphqlIntUrl) ?? requiredDerivedUrl(baseUrl, '/graphql/int'),
+    userAgent: userAgent || 'SBIFStockAndroid/1.6.10(csbi/0)',
+  }
+}
+
+const requiredDerivedUrl = (baseUrl: string | undefined, path: string) => {
+  if (!baseUrl) throw new Error(`foreign stock base URL is required to derive ${path}`)
+  return new URL(path, baseUrl).toString()
+}
+
+const createForeignStockSession = async (
+  endpoints: ForeignStockEndpointConfig,
+  ssoToken: string | undefined,
+): Promise<ForeignStockSession> => {
+  if (!ssoToken) {
+    throw new Error('foreign stock SSO login requires a passkey callback access token')
+  }
+
+  const response = await fetch(new URL('account/authentication:ssoLogin', endpoints.restUrl), {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ ssoToken }),
+  })
+  const text = await response.text()
+  if (!response.ok) {
+    throw new Error(`foreign stock SSO login failed with HTTP ${response.status}: ${text}`)
+  }
+
+  let body: unknown
+  try {
+    body = text ? JSON.parse(text) : undefined
+  } catch {
+    throw new Error('foreign stock SSO login returned non-JSON response')
+  }
+  const objectBody = body && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+  const sessionId = response.headers.get('Set-Session') ?? stringField(objectBody, 'sessionId')
+  const accountId = response.headers.get('Account-Id') ?? stringField(objectBody, 'accountId')
+  if (!sessionId || !accountId) {
+    throw new Error('foreign stock SSO login did not return Set-Session and Account-Id')
+  }
+  const marketPriceHash = await fetchForeignStockMarketPriceHash(endpoints, sessionId, accountId)
+  const candleHash = await fetchForeignStockHash(
+    endpoints,
+    sessionId,
+    accountId,
+    'information/chart/countries/US/candle_hashes',
+    'foreign stock candle hash',
+  )
+
+  return {
+    endpoints,
+    ssoToken,
+    sessionId,
+    accountId,
+    marketPriceHash,
+    candleHash,
+    loginAuthenticated: true,
+  }
+}
+
+const fetchForeignStockMarketPriceHash = async (
+  endpoints: ForeignStockEndpointConfig,
+  sessionId: string,
+  accountId: string,
+) => {
+  return fetchForeignStockHash(
+    endpoints,
+    sessionId,
+    accountId,
+    'information/market_price/countries/US/price_hashes',
+    'foreign stock market price hash',
+  )
+}
+
+const fetchForeignStockHash = async (
+  endpoints: ForeignStockEndpointConfig,
+  sessionId: string,
+  accountId: string,
+  path: string,
+  label: string,
+) => {
+  const response = await fetch(new URL(path, endpoints.restUrl), {
+    headers: {
+      accept: 'application/json',
+      authorization: `Bearer ${sessionId}`,
+      'account-id': accountId,
+      ...(endpoints.userAgent ? { 'user-agent': endpoints.userAgent } : {}),
+    },
+  })
+  const text = await response.text()
+  if (!response.ok) {
+    throw new Error(`${label} failed with HTTP ${response.status}: ${text}`)
+  }
+
+  let body: unknown
+  try {
+    body = text ? JSON.parse(text) : undefined
+  } catch {
+    throw new Error(`${label} returned non-JSON response`)
+  }
+  const objectBody = body && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+  const hashValue = stringField(objectBody, 'hashValue')
+  if (!hashValue) {
+    throw new Error(`${label} response did not include hashValue`)
+  }
+  return hashValue
+}
+
+const stringField = (object: Record<string, unknown>, key: string) => {
+  const value = object[key]
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+const requestPasskeyAccessToken = async (options: {
+  authBaseUrl: string
+  passkeyCredential: PlaintextStoredWebAuthnCredential
+  channel: string
+}): Promise<PasskeyAccessToken> => {
+  const started = startPasskeyLogin(options.authBaseUrl, options.channel)
   const jar = new CookieJar()
   const headers = defaultBrowserHeaders()
 
@@ -68,7 +343,7 @@ export const createPasskeySession = async (
   const csrfToken = extractCsrfToken(entryText)
 
   const challengeUrl = new URL('/api/fido2/auth/challenge', started.url)
-  challengeUrl.searchParams.set('cccid', 'kabu-app')
+  challengeUrl.searchParams.set('cccid', options.channel)
   const challengeResponse = await fetchWithCookies(challengeUrl, {
     jar,
     method: 'POST',
@@ -81,16 +356,16 @@ export const createPasskeySession = async (
       ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
     },
   })
-  assertOk(challengeResponse, 'passkey challenge')
+  assertOk(challengeResponse, `passkey challenge (${options.channel})`)
 
   const challengeJson = await challengeResponse.json()
   const credentialRequest = normalizeCredentialRequest(challengeJson, options.passkeyCredential)
   const assertion = createWebAuthnAssertion(options.passkeyCredential, credentialRequest)
   const csrf = credentialRequest.csrfToken ?? csrfToken
-  if (!csrf) throw new Error('missing CSRF token for passkey authentication')
+  if (!csrf) throw new Error(`missing CSRF token for passkey authentication (${options.channel})`)
 
   const authUrl = new URL('/fido2/auth', started.url)
-  authUrl.searchParams.set('cccid', 'kabu-app')
+  authUrl.searchParams.set('cccid', options.channel)
   const authResponse = await fetchWithCookies(authUrl, {
     jar,
     method: 'POST',
@@ -116,7 +391,7 @@ export const createPasskeySession = async (
   })
 
   const channelUrl = new URL(
-    authResponse.headers.get('location') ?? '/sso/channel?cccid=kabu-app',
+    authResponse.headers.get('location') ?? `/sso/channel?cccid=${options.channel}`,
     started.url,
   )
   const channelResponse = await fetchWithCookies(channelUrl, {
@@ -128,50 +403,23 @@ export const createPasskeySession = async (
       'upgrade-insecure-requests': '1',
     },
   })
-  assertOk(channelResponse, 'passkey callback')
+  assertOk(channelResponse, `passkey callback (${options.channel})`)
 
   const channelHtml = await channelResponse.text()
   const callbackUrl = extractCallbackUrl(channelHtml)
-  if (!callbackUrl) throw new Error('passkey callback token was not found in sso/channel response')
+  if (!callbackUrl) {
+    throw new Error(
+      `passkey callback token was not found in sso/channel response (${options.channel})`,
+    )
+  }
 
-  const loginResponse = await finishPasskeyLogin({
+  return {
     callbackUrl,
-    privateKeyPem: started.privateKeyPem,
-    mtsBaseUrl: endpoints.mtsBaseUrl,
-  })
-  const profile = parsePasskeyLoginProfile(loginResponse)
-  const session: SbiSession = {
-    mtsBaseUrl: endpoints.mtsBaseUrl,
-    izanagiBaseUrl: endpoints.izanagiBaseUrl,
-    profile,
-    loginResponse,
-    tradePassword: clientOptions.tradePassword,
-    tradeAuthentication: clientOptions.tradeAuthentication,
+    accessToken: extractPasskeyAccessToken(callbackUrl, started.privateKeyPem),
   }
-  if (clientOptions.deviceId) {
-    await registerDeviceId(session, clientOptions.deviceId)
-    session.deviceIdRegistered = true
-  }
-  return session
 }
 
-const resolveSbiEndpointConfig = (options: LoginWithPasskeyOptions): SbiEndpointConfig => {
-  const authBaseUrl = options.authBaseUrl ?? process.env.SBI_AUTH_BASE_URL
-  const mtsBaseUrl = options.mtsBaseUrl ?? process.env.SBI_MTS_BASE_URL
-  const izanagiBaseUrl = options.izanagiBaseUrl ?? process.env.SBI_IZANAGI_BASE_URL
-
-  if (!authBaseUrl) throw new Error('SBI_AUTH_BASE_URL is required')
-  if (!mtsBaseUrl) throw new Error('SBI_MTS_BASE_URL is required')
-
-  return { authBaseUrl, mtsBaseUrl, izanagiBaseUrl: optionalUrl(izanagiBaseUrl) }
-}
-
-const optionalUrl = (value: string | undefined) => {
-  if (!value) return undefined
-  return new URL(value).toString()
-}
-
-const startPasskeyLogin = (authBaseUrl: string): PasskeyLoginStart => {
+const startPasskeyLogin = (authBaseUrl: string, channel: string): PasskeyLoginStart => {
   const { publicKey, privateKey } = generateKeyPairSync('rsa', {
     modulusLength: 4096,
     publicExponent: 0x10001,
@@ -181,7 +429,7 @@ const startPasskeyLogin = (authBaseUrl: string): PasskeyLoginStart => {
 
   const publicKeyParam = base64Url(publicKey, true)
   const url = new URL(authBaseUrl)
-  url.searchParams.set('channel', 'kabu-app')
+  url.searchParams.set('channel', channel)
   url.searchParams.set('pk', publicKeyParam)
   url.searchParams.set('ap', 'true')
 
@@ -193,16 +441,9 @@ const startPasskeyLogin = (authBaseUrl: string): PasskeyLoginStart => {
 }
 
 const finishPasskeyLogin = async (options: {
-  callbackUrl: string
-  privateKeyPem: string
+  accessToken: string
   mtsBaseUrl: string
 }): Promise<PasskeyLoginResponse> => {
-  const encryptedToken = extractEncryptedToken(options.callbackUrl)
-  if (!encryptedToken) {
-    throw new Error('callbackUrl must contain token=...')
-  }
-
-  const accessToken = decryptPasskeyToken(encryptedToken, options.privateKeyPem)
   const requestUrl = new URL('/mtsmobile/ssologingate', options.mtsBaseUrl)
   const response = await fetch(requestUrl, {
     method: 'POST',
@@ -211,7 +452,7 @@ const finishPasskeyLogin = async (options: {
     },
     body: new URLSearchParams({
       KIND: 'L',
-      TOKEN: accessToken,
+      TOKEN: options.accessToken,
     }),
   })
 
@@ -224,8 +465,17 @@ const finishPasskeyLogin = async (options: {
     status: response.status,
     body,
     text,
+    accessToken: options.accessToken,
     header: parseMtsHeader(text),
   }
+}
+
+const extractPasskeyAccessToken = (callbackUrl: string, privateKeyPem: string) => {
+  const encryptedToken = extractEncryptedToken(callbackUrl)
+  if (!encryptedToken) {
+    throw new Error('callbackUrl must contain token=...')
+  }
+  return decryptPasskeyToken(encryptedToken, privateKeyPem)
 }
 
 const extractEncryptedToken = (callbackUrl: string) => {
@@ -335,8 +585,8 @@ const parsePasskeyLoginProfile = (response: PasskeyLoginResponse): AccountProfil
       sor: {
         defaultEnabled: sorDefaultCode === '1',
         defaultCode: emptyToUndefined(sorDefaultCode),
-        lastMarket: emptyToUndefined(sorLastMarket),
-        juniorNisaLastMarket: emptyToUndefined(sorLastMarketJrNisa),
+        lastMarket: mtsMarketToDomestic(emptyToUndefined(sorLastMarket)),
+        juniorNisaLastMarket: mtsMarketToDomestic(emptyToUndefined(sorLastMarketJrNisa)),
       },
       notices: {
         hasImportantNotice: importantNoticeFlag === '1',
@@ -458,8 +708,8 @@ const parsePasskeyLoginProfile = (response: PasskeyLoginResponse): AccountProfil
     sor: {
       defaultEnabled: sorDefaultCode === '1',
       defaultCode: emptyToUndefined(sorDefaultCode),
-      lastMarket: emptyToUndefined(sorLastMarket),
-      juniorNisaLastMarket: emptyToUndefined(sorLastMarketJrNisa),
+      lastMarket: mtsMarketToDomestic(emptyToUndefined(sorLastMarket)),
+      juniorNisaLastMarket: mtsMarketToDomestic(emptyToUndefined(sorLastMarketJrNisa)),
     },
     notices: {
       hasImportantNotice: importantNoticeFlag === '1',
@@ -722,8 +972,8 @@ const uint32be = (value: number) => {
 
 const extractCallbackUrl = (html: string) => {
   const match =
-    html.match(/sbikabu2:\\\/\\\/auth\\\/callback\?token=[^"'<\\]+/) ??
-    html.match(/sbikabu2:\/\/auth\/callback\?token=[^"'<\\]+/)
+    html.match(/[a-z][a-z0-9+.-]*:\\\/\\\/auth\\\/callback\?token=[^"'<\\]+/i) ??
+    html.match(/[a-z][a-z0-9+.-]*:\/\/auth\/callback\?token=[^"'<\\]+/i)
   if (!match) return undefined
   return match[0].replaceAll('\\/', '/')
 }

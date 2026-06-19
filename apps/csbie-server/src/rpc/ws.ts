@@ -1,4 +1,4 @@
-import type { SbiClientMethods } from '@repo/sbi-client'
+import type { MarketCode, SbiClientMethods } from '@repo/sbi-client'
 import { createBunWebSocket } from 'hono/bun'
 import type { WSContext } from 'hono/ws'
 import { randomUUID } from 'node:crypto'
@@ -27,7 +27,7 @@ type RpcSocketState = {
 
 type BoardPollingParams = {
   issueCode: string
-  market?: string
+  market: MarketCode
   intervalSeconds?: number
 }
 
@@ -67,8 +67,11 @@ const parseBoardPollingParams = (params: unknown): BoardPollingParams => {
   if (typeof value.issueCode !== 'string' || !value.issueCode) {
     throw new Error('issueCode is required')
   }
-  if (value.market != null && typeof value.market !== 'string') {
-    throw new Error('market must be a string')
+  if (typeof value.market !== 'string' || !value.market) {
+    throw new Error('market is required')
+  }
+  if (!['XTKS', 'XNAS', 'XNYS', 'ARCX'].includes(value.market)) {
+    throw new Error('market must be XTKS, XNAS, XNYS, or ARCX')
   }
   if (
     value.intervalSeconds != null &&
@@ -81,7 +84,7 @@ const parseBoardPollingParams = (params: unknown): BoardPollingParams => {
 
   return {
     issueCode: value.issueCode,
-    market: typeof value.market === 'string' ? value.market : undefined,
+    market: value.market as MarketCode,
     intervalSeconds: typeof value.intervalSeconds === 'number' ? value.intervalSeconds : undefined,
   }
 }

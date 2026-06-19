@@ -1,24 +1,54 @@
 <script setup lang="ts">
 import { X } from 'lucide-vue-next'
+import { type ComponentPublicInstance, nextTick, ref, watch } from 'vue'
 import { motion } from 'motion-v'
 import Spinner from '../../components/ui/Spinner.vue'
 import UiButton from '../../components/ui/UiButton.vue'
 import UiField from '../../components/ui/UiField.vue'
 import searchEmptyImage from '../../assets/search-empty.png'
+import { uiMotion } from '../../constants/motion'
 import { ui } from '../../styles/ui'
 import type { Stock } from '../../types/trading'
-import { currency } from '../../utils/format'
+import { currencyForMarket } from '../../utils/format'
 
-const overlayTransition = { duration: 0.2, ease: 'easeOut' } as const
-const sheetTransition = { type: 'spring', damping: 28, stiffness: 320 } as const
+const overlayTransition = uiMotion.overlay.fadeDefault
+const sheetTransition = uiMotion.trade.searchSheet
 
-defineProps<{
+const props = defineProps<{
   stocks: Stock[]
   selectedStockCode: string
   countries: string[]
   markets: string[]
   loading?: boolean
 }>()
+const selectedButtonRefs = ref(new Map<string, Element | null>())
+const setSelectedButtonRef =
+  (code: string) => (element: Element | ComponentPublicInstance | null) => {
+    if (element instanceof Element) {
+      selectedButtonRefs.value.set(code, element)
+    } else {
+      selectedButtonRefs.value.delete(code)
+    }
+  }
+
+const scrollToSelectedStock = async () => {
+  await nextTick()
+  const element = selectedButtonRefs.value.get(props.selectedStockCode)
+  if (!(element instanceof HTMLButtonElement)) return
+  element.scrollIntoView({
+    block: 'nearest',
+    inline: 'nearest',
+    behavior: 'smooth',
+  })
+}
+
+watch(
+  () => [props.stocks, props.selectedStockCode],
+  () => {
+    void scrollToSelectedStock()
+  },
+  { immediate: true },
+)
 
 const searchQuery = defineModel<string>('searchQuery', { required: true })
 const countryFilter = defineModel<string>('countryFilter', { required: true })
@@ -93,17 +123,27 @@ const emit = defineEmits<{
             <button
               v-for="stock in stocks"
               :key="stock.code"
-              :class="[ui.searchResult, selectedStockCode === stock.code && ui.searchResultActive]"
+              :ref="setSelectedButtonRef(stock.code)"
+              :class="[
+                ui.searchResult,
+                selectedStockCode === stock.code && ui.searchResultActive,
+                selectedStockCode === stock.code && ui.searchResultFocus,
+              ]"
               type="button"
               :aria-current="selectedStockCode === stock.code ? 'true' : undefined"
+              :aria-selected="selectedStockCode === stock.code"
+              :tabindex="selectedStockCode === stock.code ? 0 : -1"
               @click="emit('select', stock)"
+              @keyup.enter="emit('select', stock)"
             >
               <span class="grid gap-1">
                 <strong>{{ stock.name }}</strong>
                 <small>{{ stock.code }} / {{ stock.country }} / {{ stock.market }}</small>
               </span>
               <span>
-                <template v-if="stock.price > 0">{{ currency(stock.price) }}</template>
+                <template v-if="stock.price > 0">{{
+                  currencyForMarket(stock.price, stock.market)
+                }}</template>
                 <Spinner v-else size="sm" />
               </span>
             </button>

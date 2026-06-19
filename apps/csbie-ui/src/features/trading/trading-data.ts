@@ -68,6 +68,11 @@ const nullableNumberValue = (value: unknown): number | null => {
 export const textValue = (value: unknown, fallback = ''): string =>
   typeof value === 'string' && value ? value : fallback
 
+const issueSymbol = (code: string, market: string) => (market ? `${market}:${code}` : code)
+
+const countryFromMarket = (market: string) =>
+  market === 'XNAS' || market === 'XNYS' || market === 'ARCX' ? '米国' : '日本'
+
 export const issueFrom = (value: unknown) => {
   const issue = asRecord(value)
   return {
@@ -110,8 +115,8 @@ const boxFromHistory = (history: number[]) => {
 export const stockFromIssue = (issue: ReturnType<typeof issueFrom>): Stock => ({
   code: issue.code,
   name: issue.name || issue.code,
-  symbol: issue.code ? `${issue.code}${issue.market ? `.${issue.market}` : ''}` : '',
-  country: '日本',
+  symbol: issue.code ? issueSymbol(issue.code, issue.market) : '',
+  country: countryFromMarket(issue.market),
   market: issue.market,
   sector: '',
   price: 0,
@@ -163,8 +168,8 @@ export const stockFromBoard = (
   return {
     code: issue.code,
     name: issue.name,
-    symbol: issue.code ? `${issue.code}${issue.market ? `.${issue.market}` : ''}` : '',
-    country: '日本',
+    symbol: issue.code ? issueSymbol(issue.code, issue.market) : '',
+    country: countryFromMarket(issue.market),
     market: issue.market,
     sector: '',
     price,
@@ -257,6 +262,15 @@ export const startOfMarketDateUtcMs = (timeZone: string, now = new Date()) => {
   })
 }
 
+export const marketDateKey = (timeZone: string, now = new Date()) => {
+  const parts = zonedParts(now, timeZone)
+  return [
+    parts.year,
+    String(parts.month).padStart(2, '0'),
+    String(parts.day).padStart(2, '0'),
+  ].join('-')
+}
+
 const chartDateTimeToIso = (value: string, timeZone = 'Asia/Tokyo') => {
   const digits = value.replace(/\D/g, '')
   if (digits.length < 8) return ''
@@ -319,6 +333,8 @@ export const chartNoticeFromIssueChart = (value: unknown): ChartNotice | null =>
   const today = japanToday()
   if (!latestDate || latestDate >= today) return null
 
+  if (!isWeekendInJapan()) return null
+
   const formattedLatestDate = new Intl.DateTimeFormat('ja-JP', {
     timeZone: 'Asia/Tokyo',
     month: 'numeric',
@@ -326,7 +342,7 @@ export const chartNoticeFromIssueChart = (value: unknown): ChartNotice | null =>
   }).format(new Date(`${latestDate}T00:00:00+09:00`))
 
   return {
-    title: isWeekendInJapan() ? '本日は休場日です' : '本日の取引データはまだありません',
+    title: '本日は休場日です',
     detail: `最新のチャートは${formattedLatestDate}です`,
   }
 }
@@ -365,7 +381,7 @@ export const orderFromApi = (value: unknown): OrderRow | null => {
   const issue = issueFrom(item.issue)
   if (!issue.code) return null
   const side = item.side === 'sell' ? 'sell' : 'buy'
-  const kind = item.kind === 's' ? 's' : 'standard'
+  const kind = 'standard'
   const status = orderStatusText(textValue(item.status, 'executed'))
   const executedQuantity = nullableNumberValue(item.executedQuantity)
   const orderedQuantity = nullableNumberValue(item.quantity)
@@ -382,6 +398,7 @@ export const orderFromApi = (value: unknown): OrderRow | null => {
     id: textValue(item.id, textValue(item.orderNumber, `${issue.code}-${item.orderedAt ?? ''}`)),
     date: textValue(item.orderedAt, textValue(item.expiresAt)),
     stock: issue.name || issue.code,
+    market: issue.market,
     side,
     kind,
     quantity,

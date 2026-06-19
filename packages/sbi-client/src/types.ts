@@ -82,6 +82,7 @@ export type PasskeyLoginResponse = {
   status: number
   body: ArrayBuffer
   text: string
+  accessToken?: string
   header: {
     sessionId: string
     trCode: string
@@ -89,9 +90,48 @@ export type PasskeyLoginResponse = {
   } | null
 }
 
+export type ForeignStockEndpointConfig = {
+  baseUrl?: string
+  restUrl: string
+  graphqlBffUrl: string
+  graphqlIntUrl: string
+  userAgent?: string
+}
+
+export type ForeignStockSession = {
+  endpoints: ForeignStockEndpointConfig
+  ssoToken?: string
+  sessionId?: string
+  accountId?: string
+  marketPriceHash?: string
+  candleHash?: string
+  loginAuthenticated?: boolean
+}
+
+export type MainSiteAuthCache = {
+  baseUrl: string
+  assetsUrl: string
+  cookieHeader: string
+  authenticatedAt: string
+}
+
+export type MainSiteSession = {
+  baseUrl?: string
+  etGatePath?: string
+  assetsValuationsPath?: string
+  exchangeOrderInputPath?: string
+  exchangeOrderPasswordPath?: string
+  exchangeOrderConfirmPath?: string
+  exchangeOrderCompletePath?: string
+  auth?: MainSiteAuthCache
+  authPromise?: Promise<MainSiteAuthCache>
+}
+
 export type SbiSession = {
   mtsBaseUrl: string
   izanagiBaseUrl?: string
+  foreignStock?: ForeignStockSession
+  mainSite?: MainSiteSession
   profile: AccountProfile
   loginResponse: PasskeyLoginResponse
   tradePassword?: string
@@ -104,6 +144,19 @@ export type LoginWithPasskeyOptions = {
   authBaseUrl?: string
   mtsBaseUrl?: string
   izanagiBaseUrl?: string
+  foreignStockBaseUrl?: string
+  usStockBaseUrl?: string
+  foreignStockRestUrl?: string
+  foreignStockGraphqlBffUrl?: string
+  foreignStockGraphqlIntUrl?: string
+  foreignStockUserAgent?: string
+  mainSiteBaseUrl?: string
+  mainSiteEtGatePath?: string
+  mainSiteAssetsValuationsPath?: string
+  mainSiteExchangeOrderInputPath?: string
+  mainSiteExchangeOrderPasswordPath?: string
+  mainSiteExchangeOrderConfirmPath?: string
+  mainSiteExchangeOrderCompletePath?: string
 }
 
 export type SbiClientOptions = {
@@ -127,7 +180,10 @@ export type SbiTradeAuthenticationOptions = {
 }
 
 export type IssueCode = string
-export type MarketCode = string
+export type DomesticMarketCode = 'XTKS'
+export type SKabuMarketCode = 'STK'
+export type UsStockMarketCode = 'XNAS' | 'XNYS' | 'ARCX'
+export type MarketCode = DomesticMarketCode | SKabuMarketCode | UsStockMarketCode
 export type OrderId = string
 export type WatchlistId = string
 export type PositionId = string
@@ -136,7 +192,7 @@ export type ThemeId = string
 export type CurrencyAmount = {
   value: number | null
   text: string
-  currency: 'JPY'
+  currency: 'JPY' | 'USD'
 }
 
 export type PercentValue = {
@@ -148,6 +204,35 @@ export type SignedTextValue = {
   value: number | null
   text: string
   sign?: 'positive' | 'negative' | 'zero'
+}
+
+export type AccountAssetsValuationSummary = {
+  assetsErrorType: unknown
+  valuation: number | null
+  netChange: number | null
+  percentChange: number | null
+  monthOnMonth: number | null
+  monthOnMonthRatio: unknown
+  profitLoss: number | null
+  profitLossRate: number | null
+  acquisitionCost: number | null
+}
+
+export type AccountAssetsValuationDetail = AccountAssetsValuationSummary & {
+  category: string
+  compositionRatio: number | null
+}
+
+export type AccountAssetsValuations = {
+  fetchedAt: string
+  summary: AccountAssetsValuationSummary
+  summaryWithoutDeposit: AccountAssetsValuationSummary
+  summaryWithoutIdeco?: AccountAssetsValuationSummary
+  summaryWithoutDepositAndIdeco?: AccountAssetsValuationSummary
+  summaryDetails: AccountAssetsValuationDetail[]
+  summaryDetailsWithoutDeposit: AccountAssetsValuationDetail[]
+  summaryDetailsWithoutIdeco: AccountAssetsValuationDetail[]
+  summaryDetailsWithoutDepositAndIdeco: AccountAssetsValuationDetail[]
 }
 
 export type AccountType =
@@ -745,6 +830,58 @@ export type OrderReceipt = {
   acceptedAt?: string
   message?: string
   error?: SbiMethodError
+}
+
+export type ExchangeOrderSide = 'buy' | 'sell'
+export type ExchangeSpecificMethod = 'foreign' | 'domestic'
+export type ExchangeAccountKind = 'GENERAL' | 'JR_NISA'
+export type ExchangeSellMethod = 'SELL_PART' | 'SELL_ALL'
+
+export type ExchangeOrderPreview = {
+  currencyCode: string
+  currencyName?: string
+  side: ExchangeOrderSide
+  exchangeType?: string
+  accountKind?: ExchangeAccountKind
+  specificMethod?: ExchangeSpecificMethod
+  sellMethod?: ExchangeSellMethod | null
+  tradeQuantity?: string
+  orderAmount?: string
+  exchangeRate?: string
+  netAmount?: string
+  valueDate?: string
+  rateDateTime?: string
+  warningMessage?: string | null
+  isMaintenance?: boolean
+  csrfToken: string
+}
+
+export type ExchangeOrderReceipt = {
+  accepted: boolean
+  currencyCode?: string
+  side?: ExchangeOrderSide
+  message?: string
+  warningMessage?: string | null
+  rawTitle?: string
+}
+
+export type ExchangeRateInfo = {
+  currencyCode: string
+  side: ExchangeOrderSide
+  referenceExchangeRate?: string
+  computeExchangeRate?: string
+  basePrice?: string
+  exchangeTradeType?: string
+  updateTime?: string
+  buyPossibleAmount?: string
+  sellPossibleAmount?: string
+  buyUnit?: string
+  sellUnit?: string
+  buyLimitMin?: string
+  buyLimitMax?: string
+  sellLimitMin?: string
+  sellLimitMax?: string
+  raw: Record<string, unknown>
 }
 
 export type ThemeInvestment = {

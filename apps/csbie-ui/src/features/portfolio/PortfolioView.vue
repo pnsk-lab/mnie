@@ -1,10 +1,20 @@
 <script setup lang="ts">
-import { Plug } from 'lucide-vue-next'
+import { computed, ref } from 'vue'
+import { AnimatePresence } from 'motion-v'
+import { ArrowLeft, Ban, Plug } from 'lucide-vue-next'
 import Spinner from '../../components/ui/Spinner.vue'
+import UiButton from '../../components/ui/UiButton.vue'
+import UiModal from '../../components/ui/UiModal.vue'
 import { ui } from '../../styles/ui'
 import type { OrderRow, Position } from '../../types/trading'
-import { currency, signedCurrency, signedPercent } from '../../utils/format'
-import { orderAmountText, orderQuantityText } from '../trading/trading-data'
+import {
+  currency,
+  currencyForMarket,
+  signedCurrency,
+  signedCurrencyForMarket,
+  signedPercent,
+} from '../../utils/format'
+import { orderAmountText, orderHistoryKey, orderQuantityText } from '../trading/trading-data'
 
 defineProps<{
   showPortfolioSpinner: boolean
@@ -17,6 +27,7 @@ defineProps<{
   cashAssetRatio: number
   positions: Position[]
   recentOrders: OrderRow[]
+  cancelingOrderKey: string
   dataLoading: boolean
   connected: boolean
   orderHistoryLoaded: boolean
@@ -26,7 +37,27 @@ defineProps<{
 const emit = defineEmits<{
   connect: []
   openPosition: [code: string]
+  cancelOrder: [order: OrderRow]
 }>()
+
+const usMarkets = new Set(['XNAS', 'XNYS', 'ARCX'])
+const canCancel = (order: OrderRow) =>
+  order.status === '注文中' && Boolean(order.orderNumber) && !usMarkets.has(order.market)
+const isCanceling = (order: OrderRow, cancelingOrderKey: string) =>
+  orderHistoryKey(order) === cancelingOrderKey
+const cancelCandidate = ref<OrderRow | null>(null)
+const cancelTitle = computed(() => cancelCandidate.value?.stock ?? '')
+
+const askCancel = (order: OrderRow) => {
+  if (!canCancel(order)) return
+  cancelCandidate.value = order
+}
+
+const confirmCancel = () => {
+  if (!cancelCandidate.value) return
+  emit('cancelOrder', cancelCandidate.value)
+  cancelCandidate.value = null
+}
 </script>
 
 <template>
@@ -137,12 +168,14 @@ const emit = defineEmits<{
               position.type ?? (position.quantity >= 100 ? '単元' : 'S株')
             }}</b>
             <span>{{ position.quantity }}</span>
-            <span :class="ui.muted">{{ currency(position.marketValue) }}</span>
+            <span :class="ui.muted">{{
+              currencyForMarket(position.marketValue, position.market)
+            }}</span>
             <span
               class="grid justify-items-end gap-0.5"
               :class="position.profitLoss >= 0 ? ui.positive : ui.negative"
             >
-              <strong>{{ signedCurrency(position.profitLoss) }}</strong>
+              <strong>{{ signedCurrencyForMarket(position.profitLoss, position.market) }}</strong>
               <small>{{ signedPercent(position.profitLossRate) }}</small>
             </span>
           </button>
@@ -162,14 +195,28 @@ const emit = defineEmits<{
             <span class="grid gap-1">
               <strong>{{ order.stock }}</strong>
               <small
-                >{{ order.side === 'buy' ? '買付' : '売却' }}({{
-                  order.kind === 's' ? 'S株' : '単元'
-                }}) ・ {{ orderQuantityText(order) }}</small
+                >{{ order.side === 'buy' ? '買付' : '売却' }}(単元) ・
+                {{ orderQuantityText(order) }}</small
               >
+              <small :class="[ui.statusBadge, order.status === '注文中' && ui.pendingBadge]">
+                {{ order.status }}
+              </small>
             </span>
             <span class="grid justify-items-end gap-1">
               <small>{{ order.date.slice(5, 10) }}</small>
               <strong>{{ orderAmountText(order) }}</strong>
+              <button
+                v-if="canCancel(order)"
+                :class="ui.ghostButton"
+                class="min-h-8 px-3 text-xs"
+                type="button"
+                :disabled="Boolean(cancelingOrderKey)"
+                @click="askCancel(order)"
+              >
+                <Spinner v-if="isCanceling(order, cancelingOrderKey)" size="sm" />
+                <Ban v-else class="h-3.5 w-3.5" aria-hidden="true" />
+                {{ isCanceling(order, cancelingOrderKey) ? '取消中' : '取消' }}
+              </button>
             </span>
           </div>
         </div>
@@ -188,4 +235,43 @@ const emit = defineEmits<{
       </div>
     </article>
   </section>
+
+  <AnimatePresence>
+    <UiModal
+      v-if="cancelCandidate"
+      key="portfolio-cancel-order-dialog"
+      eyebrow="注文取消"
+      :title="cancelTitle"
+      @close="cancelCandidate = null"
+    >
+      <dl :class="ui.confirmList">
+        <div :class="ui.confirmRow">
+          <dt>注文番号</dt>
+          <dd>{{ cancelCandidate.orderNumber }}</dd>
+        </div>
+        <div :class="ui.confirmRow">
+          <dt>売買</dt>
+          <dd>{{ cancelCandidate.side === 'buy' ? '購入' : '売却' }}</dd>
+        </div>
+        <div :class="ui.confirmRow">
+          <dt>数量</dt>
+          <dd>{{ orderQuantityText(cancelCandidate) }}</dd>
+        </div>
+        <div :class="ui.confirmRow">
+          <dt>注文金額</dt>
+          <dd>{{ orderAmountText(cancelCandidate) }}</dd>
+        </div>
+      </dl>
+      <div :class="ui.actions">
+        <UiButton variant="ghost" @click="cancelCandidate = null">
+          <ArrowLeft class="h-4 w-4" aria-hidden="true" />
+          戻る
+        </UiButton>
+        <UiButton variant="danger" @click="confirmCancel">
+          <Ban class="h-4 w-4" aria-hidden="true" />
+          注文取消
+        </UiButton>
+      </div>
+    </UiModal>
+  </AnimatePresence>
 </template>

@@ -2,6 +2,7 @@
 
 - Run `bun fmt` and `bun typecheck` before finishing.
 - Do not hardcode real endpoint
+  - origin のみ。パスは許可。
 
 ## Hints
 

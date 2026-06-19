@@ -11,6 +11,7 @@ const settings = defineModel<ApiKeySettings>({ required: true })
 const rpcMethods = [
   'session.profile',
   'account.profile',
+  'account.assets.current',
   'account.power.buyingPower',
   'account.power.collateralRatio',
   'account.positions.cash',
@@ -66,6 +67,9 @@ const rpcMethods = [
   'orders.themeInvestment.list',
   'orders.themeInvestment.estimate',
   'orders.themeInvestment.place',
+  'orders.exchange.rate',
+  'orders.exchange.estimate',
+  'orders.exchange.place',
 ] as const
 
 const tradingMethods = [
@@ -81,6 +85,7 @@ const tradingMethods = [
   'orders.ifd.placeCorrection',
   'orders.ifd.placeCancel',
   'orders.themeInvestment.place',
+  'orders.exchange.place',
 ] as const
 
 const tradingMethodSet = new Set<string>(tradingMethods)

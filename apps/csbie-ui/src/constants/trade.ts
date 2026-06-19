@@ -33,19 +33,36 @@ export const cashOrderMarketOptions: Array<{
   value: CashOrderMarket
 }> = [
   { label: '自動', value: 'auto' },
-  { label: '東証', value: 'TKY' },
-  { label: '名証', value: 'NGY' },
-  { label: '福証', value: 'FKO' },
-  { label: '札証', value: 'SPR' },
-  { label: 'SOR', value: 'SOR' },
-  { label: 'PTS', value: 'PTS' },
-  { label: 'PTS(X)', value: 'PTX' },
+  { label: '東証', value: 'XTKS' },
+  { label: 'NASDAQ', value: 'XNAS' },
+  { label: 'NYSE', value: 'XNYS' },
+  { label: 'NYSE Arca', value: 'ARCX' },
 ]
+
+export const searchableMarkets: CashOrderMarket[] = ['XTKS', 'XNAS', 'XNYS', 'ARCX']
+
+export const tradeRouteIdFromStockId = (id: string) => {
+  const separator = id.indexOf(':')
+  if (separator <= 0) return id
+
+  const market = id.slice(0, separator).toUpperCase()
+  if (!searchableMarkets.includes(market as CashOrderMarket)) return id
+  return `${market}.${id.slice(separator + 1)}`
+}
+
+export const stockIdFromTradeRouteId = (id: string) => {
+  const separator = id.indexOf('.')
+  if (separator <= 0) return id
+
+  const market = id.slice(0, separator).toUpperCase()
+  if (!searchableMarkets.includes(market as CashOrderMarket)) return id
+  return `${market}:${id.slice(separator + 1)}`
+}
 
 export const sKabuOrderMarketOptions: Array<{
   label: string
   value: CashOrderMarket
-}> = [{ label: 'S株', value: 'STK' }]
+}> = []
 
 export const cashOrderPriceConditionOptions: Array<{
   label: string
