@@ -49,6 +49,7 @@ export const listApiKeys = async (db: Db) =>
       revokedAt: apiKeys.revokedAt,
     })
     .from(apiKeys)
+    .where(isNull(apiKeys.revokedAt))
     .orderBy(apiKeys.createdAt)
 
 export const createApiKey = async (db: Db, label: string, settings: ApiKeySettings = {}) => {

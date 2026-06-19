@@ -36,7 +36,7 @@ export const useAuthAdmin = () => {
   const refresh = async (options?: { autoConnect?: boolean; connect?: () => void }) => {
     status.value = await getStatus()
     if (status.value.authenticated) {
-      apiKeys.value = (await listApiKeys()).apiKeys
+      apiKeys.value = (await listApiKeys()).apiKeys.filter((key) => !key.revokedAt)
       sbiPasskeys.value = (await listSbiPasskeys()).passkeys
       selectedPasskeyId.value ||= sbiPasskeys.value[0]?.id ?? ''
       if (options?.autoConnect && selectedPasskeyId.value) options.connect?.()
