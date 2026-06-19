@@ -2,7 +2,7 @@ services:
   csbie:
     image: git.yutakobayashi.com/nakasyou/csbi:latest
     ports:
-      - '18787:8787'
+      - '${CSBIE_HOST_PORT:-18787}:8787'
     env_file:
       - .env
     volumes:
