@@ -16,6 +16,9 @@ Before running, setup .env, refering `.env.example`.
 
 #### With docker
 
+Docker uses `CSBIE_KEYRING_BACKEND=sqlite` because platform keyrings are not available in
+headless containers. Set `CSBIE_KEYRING_SECRET` in `.env` before saving SBI passkeys.
+
 docker-compose.yml:
 
 ```yaml

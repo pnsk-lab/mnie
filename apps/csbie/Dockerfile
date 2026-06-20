@@ -14,6 +14,8 @@ RUN bun --filter @repo/csbie build
 FROM oven/bun:1-slim AS runtime
 ENV NODE_ENV=production
 ENV CSBIE_DATABASE_PATH=/app/data/csbie.sqlite
+ENV CSBIE_KEYRING_BACKEND=sqlite
+ENV CSBIE_KEYRING_SQLITE_PATH=/app/data/csbie.keyring.sqlite
 WORKDIR /app
 COPY --from=build /app/apps/csbie/dist ./apps/csbie/dist
 COPY --from=build /app/apps/csbie-ui/dist ./apps/csbie-ui/dist

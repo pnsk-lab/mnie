@@ -3,6 +3,7 @@ const requiredForSetup = ['CSBIE_SETUP_PASSWORD', 'CSBIE_SETUP_PASSWORD_HASH'] a
 const runtimeDefaults = {
   PORT: '8787',
   CSBIE_DATABASE_PATH: './data/csbie.sqlite',
+  CSBIE_KEYRING_BACKEND: 'platform',
   CSBIE_ORIGIN: 'http://127.0.0.1:5173',
   CSBIE_RP_ID: '127.0.0.1',
 }
@@ -37,6 +38,10 @@ if (!requiredForSetup.some(present)) {
   messages.push(
     'Set CSBIE_SETUP_PASSWORD or CSBIE_SETUP_PASSWORD_HASH before first owner passkey setup',
   )
+}
+
+if (process.env.CSBIE_KEYRING_BACKEND === 'sqlite' && !present('CSBIE_KEYRING_SECRET')) {
+  messages.push('Set CSBIE_KEYRING_SECRET when CSBIE_KEYRING_BACKEND=sqlite')
 }
 
 if (!present('SBI_AUTH_BASE_URL') || !present('SBI_MTS_BASE_URL')) {
