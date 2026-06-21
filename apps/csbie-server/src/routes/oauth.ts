@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { Hono } from 'hono'
+import type { Context } from 'hono'
 import type { AppBindings } from '../context'
 import { oauthClients } from '../db/schema'
 import type { ApiKeySettings } from '../security/api-keys'
@@ -31,11 +32,13 @@ const redirectUriAllowed = (redirectUri: string, registeredUris: string[]) => {
   })
 }
 
+const isOwnerSession = (c: Context<AppBindings>) => c.get('auth').type === 'session'
+
 export const createOAuthRoutes = () => {
   const app = new Hono<AppBindings>()
 
   app.get('/client/:id', async (c) => {
-    if (!c.get('authenticated')) return c.json({ error: 'unauthorized' }, 401)
+    if (!isOwnerSession(c)) return c.json({ error: 'unauthorized' }, 401)
     const [client] = await c
       .get('db')
       .select()
@@ -46,7 +49,7 @@ export const createOAuthRoutes = () => {
   })
 
   app.post('/approve', async (c) => {
-    if (!c.get('authenticated')) return c.json({ error: 'unauthorized' }, 401)
+    if (!isOwnerSession(c)) return c.json({ error: 'unauthorized' }, 401)
     const body = await c.req.json<{
       clientId?: string
       redirectUri?: string

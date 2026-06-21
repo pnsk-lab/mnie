@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { extname, join } from 'node:path'
+import { extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { Hono } from 'hono'
 import { createServerApp } from '@repo/csbie-server/app'
 import { loadConfig } from '@repo/csbie-server/config'
@@ -9,7 +9,7 @@ const config = loadConfig()
 const db = createDb(config.databasePath)
 const api = createServerApp(db, config)
 const app = new Hono()
-const uiDist = join(import.meta.dir, '../../csbie-ui/dist')
+const uiDist = resolve(import.meta.dir, '../../csbie-ui/dist')
 
 const contentTypes: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
@@ -23,11 +23,22 @@ const contentTypes: Record<string, string> = {
 app.route('/api', api.app)
 app.route('/', api.app)
 
+const isInsideUiDist = (path: string) => {
+  const pathFromUiDist = relative(uiDist, path)
+  return pathFromUiDist === '' || (!pathFromUiDist.startsWith('..') && !isAbsolute(pathFromUiDist))
+}
+
 const serveUi = async (request: Request) => {
   const url = new URL(request.url)
-  const pathname = decodeURIComponent(url.pathname)
+  let pathname: string
+  try {
+    pathname = decodeURIComponent(url.pathname)
+  } catch {
+    return new Response('Bad Request', { status: 400 })
+  }
   const relativePath = pathname === '/' ? 'index.html' : pathname.slice(1)
-  const filePath = join(uiDist, relativePath)
+  const filePath = resolve(uiDist, relativePath)
+  if (!isInsideUiDist(filePath)) return new Response('Not Found', { status: 404 })
   const resolvedPath = existsSync(filePath) ? filePath : join(uiDist, 'index.html')
   const file = Bun.file(resolvedPath)
   const headers = new Headers()

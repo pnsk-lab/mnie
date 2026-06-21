@@ -1,36 +1,40 @@
 export const ui = {
-  appShell: 'grid h-dvh overflow-hidden grid-cols-[7rem_minmax(0,1fr)] bg-[#101418] text-[#e3e3e9]',
-  sidebar: 'flex h-full min-h-0 flex-col items-center border-r border-[#2f3338] bg-[#191c20] py-4',
+  appShell:
+    'grid h-dvh grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-[#101418] text-[#e3e3e9] lg:grid-cols-[7rem_minmax(0,1fr)] lg:grid-rows-none',
+  sidebar:
+    'order-2 flex h-20 min-h-0 items-center overflow-x-auto border-t border-[#2f3338] bg-[#191c20] px-2 py-2 lg:order-none lg:h-full lg:flex-col lg:overflow-visible lg:border-t-0 lg:border-r lg:px-0 lg:py-4',
   brandMark:
-    'grid h-14 w-14 place-items-center rounded-[18px] bg-[#a8c7fa] text-3xl font-black text-[#0b305f] shadow-lg shadow-black/20',
-  navStack: 'mt-10 grid w-full gap-4 px-2',
+    'hidden h-14 w-14 place-items-center rounded-[18px] bg-[#a8c7fa] text-3xl font-black text-[#0b305f] shadow-lg shadow-black/20 lg:grid',
+  navStack:
+    'flex w-full min-w-max justify-around gap-2 lg:mt-10 lg:grid lg:min-w-0 lg:gap-4 lg:px-2',
   navButton:
-    'grid min-h-16 place-items-center gap-1 rounded-[20px] bg-transparent p-1 text-xs font-semibold text-[#c3c7cf] transition hover:bg-[#22272e]',
+    'grid min-h-14 min-w-16 place-items-center gap-1 rounded-[20px] bg-transparent p-1 text-xs font-semibold text-[#c3c7cf] transition hover:bg-[#22272e] lg:min-h-16 lg:min-w-0',
   navButtonActive: 'text-[#d3e3fd]',
-  navIcon: 'grid h-8 w-16 place-items-center rounded-full text-[#c3c7cf]',
+  navIcon: 'grid h-8 w-12 place-items-center rounded-full text-[#c3c7cf] lg:w-16',
   navIconActive: 'bg-[#263141] text-[#d3e3fd]',
-  workspace: 'flex min-h-0 min-w-0 flex-col gap-7 overflow-y-auto px-8 pt-8 pb-8',
-  topbar: 'flex shrink-0 items-center justify-between gap-4',
+  workspace:
+    'order-1 flex min-h-0 min-w-0 flex-col gap-5 overflow-y-auto px-4 pt-4 pb-5 sm:px-6 sm:pt-6 lg:order-none lg:gap-7 lg:px-8 lg:pt-8 lg:pb-8',
+  topbar: 'flex shrink-0 flex-wrap items-center justify-between gap-4',
   tradeTopbar: 'hidden',
 
-  authPanel: 'grid justify-center pt-12',
+  authPanel: 'grid justify-center pt-6 sm:pt-12',
   panel:
-    'grid content-start gap-4 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-6 shadow-lg shadow-black/15',
-  loginPanel: 'w-[28rem]',
-  panelHead: 'flex items-center justify-between gap-3',
+    'grid content-start gap-4 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-4 shadow-lg shadow-black/15 sm:p-6',
+  loginPanel: 'w-full max-w-[28rem]',
+  panelHead: 'flex flex-wrap items-center justify-between gap-3',
   eyebrow: 'mb-1 text-xs font-black uppercase text-[#9aa0a9]',
   dashboardGrid:
-    'grid min-h-0 flex-1 grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)] grid-rows-[auto_minmax(0,1fr)] items-stretch gap-6 overflow-hidden',
+    'grid min-h-0 flex-1 grid-cols-1 items-stretch gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)] lg:grid-rows-[auto_minmax(0,1fr)] lg:gap-6 lg:overflow-hidden',
   metricPanel:
-    'grid min-h-40 content-center gap-3 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-7 shadow-lg shadow-black/15',
+    'grid min-h-36 content-center gap-3 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-5 shadow-lg shadow-black/15 sm:min-h-40 sm:p-7',
   assetOverviewPanel:
-    'grid min-h-40 grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] items-center gap-x-7 gap-y-4 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-7 shadow-lg shadow-black/15',
+    'grid min-h-40 grid-cols-1 items-center gap-x-7 gap-y-5 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-5 shadow-lg shadow-black/15 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] sm:p-7',
   assetOverviewHead: 'grid gap-2',
   assetOverviewSubtext: 'text-sm font-semibold text-[#c3c7cf]',
   assetBreakdownPanel: 'grid gap-3',
   assetBreakdownTitle: 'text-xs font-extrabold text-[#9aa0a9]',
   metricLabel: 'text-xs font-extrabold text-[#9aa0a9]',
-  metricValue: 'text-3xl font-black',
+  metricValue: 'break-words text-2xl font-black sm:text-3xl',
   positive: 'text-[#40dba2]',
   negative: 'text-[#ffb4ab]',
   miniProgress: 'block h-2 w-full overflow-hidden rounded-full bg-[#33383f]',
@@ -48,48 +52,51 @@ export const ui = {
   assetBreakdownAmount: 'text-sm font-black text-[#e3e3e9]',
   assetBreakdownRatio: 'text-xs font-semibold text-[#8f949d]',
   holdingsPanel:
-    'flex min-h-0 flex-col gap-4 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-7 shadow-lg shadow-black/15',
-  holdingsBody: 'flex min-h-0 flex-1 flex-col overflow-hidden',
+    'flex min-h-0 flex-col gap-4 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-5 shadow-lg shadow-black/15 sm:p-7',
+  holdingsBody: 'flex min-h-0 flex-1 flex-col overflow-visible lg:overflow-hidden',
   holdingsRows: 'grid min-h-0 flex-1 content-start overflow-y-auto',
   holdingsHead:
-    'grid grid-cols-[1.7fr_0.8fr_0.7fr_1fr_1fr] items-center gap-4 border-b border-[#33383f] py-3 text-xs font-extrabold text-[#8f949d]',
+    'hidden grid-cols-[1.7fr_0.8fr_0.7fr_1fr_1fr] items-center gap-4 border-b border-[#33383f] py-3 text-xs font-extrabold text-[#8f949d] md:grid',
   holdingRow:
-    'grid min-h-16 grid-cols-[1.7fr_0.8fr_0.7fr_1fr_1fr] items-center gap-4 rounded-2xl bg-transparent px-3 py-3 text-left text-[#e3e3e9] transition hover:bg-[#242930]',
+    'grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-2xl bg-[#111418] px-3 py-3 text-left text-[#e3e3e9] transition hover:bg-[#242930] md:grid-cols-[1.7fr_0.8fr_0.7fr_1fr_1fr] md:gap-4 md:bg-transparent',
   typePill: 'w-fit rounded-full bg-[#263141] px-3 py-1 text-xs text-[#d3e3fd]',
   muted: 'text-[#8f949d]',
   portfolioHistory:
-    'flex min-h-0 flex-col gap-4 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-7 shadow-lg shadow-black/15',
-  historyList: 'flex min-h-0 flex-1 flex-col overflow-hidden',
-  historyRows: 'grid min-h-0 flex-1 content-start gap-7 overflow-y-auto',
+    'flex min-h-0 flex-col gap-4 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-5 shadow-lg shadow-black/15 sm:p-7',
+  historyList: 'flex min-h-0 flex-1 flex-col overflow-visible lg:overflow-hidden',
+  historyRows: 'grid min-h-0 flex-1 content-start gap-5 overflow-y-auto lg:gap-7',
   emptyState: 'flex flex-1 items-center justify-center py-8 text-center',
   miniOrder: 'grid grid-cols-[minmax(0,1fr)_auto] gap-3',
-  tradeLayout: 'trade-layout grid w-full min-h-[calc(100dvh-6rem)] grid-cols-5 items-stretch gap-5',
+  tradeLayout:
+    'trade-layout grid w-full min-w-0 grid-cols-1 items-stretch gap-5 lg:min-h-[calc(100dvh-6rem)] lg:grid-cols-5',
   watchlist:
-    'order-3 pl-2 col-span-1 grid h-full min-h-[calc(100dvh-6rem)] content-start overflow-y-auto border-l border-[#30343a] bg-[#101418] shadow-none',
+    'order-3 grid min-w-0 content-start gap-2 overflow-visible border-t border-[#30343a] bg-[#101418] pt-4 shadow-none lg:col-span-1 lg:h-full lg:min-h-[calc(100dvh-6rem)] lg:overflow-y-auto lg:border-t-0 lg:border-l lg:pt-0 lg:pl-2',
   watchSearch:
     'm-3 inline-flex min-h-11 items-center gap-2 rounded-full bg-[#111418] px-4 text-left font-medium text-[#9aa0a9] outline outline-1 outline-[#33383f] transition hover:bg-[#22272e] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d3e3fd]',
   watchRow:
     'grid min-h-18 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border-l-2 border-transparent px-4 py-3 text-left text-[#e3e3e9] transition hover:bg-[#242930] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d3e3fd]',
   watchRowActive: 'bg-gray-900',
   centerStack: 'order-1 col-span-3 flex min-h-0 h-full flex-col gap-5',
-  stockMetadataPanel: 'grid min-h-0 gap-4 rounded-[24px] border-0 bg-[#101418] p-6 shadow-none',
-  stockBodyGrid: 'flex-1 min-h-0 grid grid-rows-3 gap-5',
+  stockMetadataPanel:
+    'grid min-h-0 gap-4 rounded-[24px] border-0 bg-[#101418] p-0 shadow-none sm:p-6',
+  stockBodyGrid: 'grid min-h-0 flex-1 gap-5 lg:grid-rows-3',
   tradeSeparator: 'order-3 hidden',
   stockPanel:
-    'grid min-h-0 h-full grid-rows-[auto_auto_1fr] gap-4 rounded-[24px] border-0 bg-[#101418] p-6 shadow-none',
-  stockPanelSpan: 'row-span-2',
-  stockTitle: 'flex items-start justify-between gap-3',
+    'grid min-h-0 h-full grid-rows-[auto_auto_1fr] gap-4 rounded-[24px] border-0 bg-[#101418] p-0 shadow-none sm:p-6',
+  stockPanelSpan: 'lg:row-span-2',
+  stockTitle: 'flex flex-wrap items-start justify-between gap-3',
   stockHoldingNote:
     'inline-flex w-fit items-center rounded-full border border-[#2f343b] bg-[#111418] px-4 py-2 text-sm font-semibold text-[#c3c7cf]',
-  quoteBox: 'grid justify-items-end gap-1',
-  periodTabs: 'flex flex-wrap justify-end gap-2',
+  quoteBox: 'grid justify-items-start gap-1 sm:justify-items-end',
+  periodTabs: 'flex flex-wrap justify-start gap-2 sm:justify-end',
   periodButton: 'min-h-7 rounded-full bg-transparent px-3 text-xs font-bold text-[#8f949d]',
   periodButtonActive: 'bg-[#d3e3fd] text-[#102033]',
-  chartActions: 'flex items-center justify-between gap-4',
+  chartActions: 'flex flex-wrap items-center justify-between gap-4',
   smallTabs: 'grid grid-cols-2 gap-1 rounded-full bg-[#111418] p-1',
   smallTab: 'min-h-8 rounded-full bg-transparent px-3 text-xs font-bold text-[#9aa0a9]',
   smallTabActive: 'bg-[#263141] text-[#d3e3fd]',
-  chartBox: 'mt-1 min-h-0 h-full min-h-[14rem] overflow-hidden rounded-[20px] bg-[#111418]',
+  chartBox:
+    'mt-1 h-72 min-h-0 overflow-hidden rounded-[20px] bg-[#111418] lg:h-full lg:min-h-[14rem]',
   chartLine: 'fill-none stroke-[#40dba2] stroke-[3]',
   boxplot: 'grid min-h-36 content-center gap-5 rounded-[24px] bg-[#111418] p-7',
   boxplotScale: 'flex justify-between text-xs text-[#8f949d]',
@@ -98,7 +105,7 @@ export const ui = {
   whisker: 'absolute top-9 h-3 border-x-2 border-[#c3c7cf]',
   box: 'absolute top-6 h-9 rounded-xl border-2 border-[#a8c7fa] bg-[#a8c7fa]/25',
   median: 'absolute top-4 h-12 border-l-4 border-[#fdd663]',
-  infoTabPanel: 'grid gap-0 rounded-[24px] border-0 bg-[#101418] p-6 shadow-none',
+  infoTabPanel: 'grid gap-0 rounded-[24px] border-0 bg-[#101418] p-0 shadow-none sm:p-6',
   infoTabList: 'flex gap-6 border-b border-[#33383f]',
   infoTabButton:
     'relative min-h-10 px-1 text-sm font-black text-[#8f949d] transition hover:text-[#d3e3fd] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#d3e3fd]',
@@ -106,12 +113,12 @@ export const ui = {
   infoTabIndicator: 'absolute inset-x-0 bottom-[-1px] block h-0.5 rounded-full bg-[#d3e3fd]',
   infoTabBody: 'overflow-hidden pt-4',
   infoTabBodyInner: 'relative min-h-[9.5rem]',
-  detailGrid: 'grid grid-cols-3 gap-3',
+  detailGrid: 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3',
   detailItem: 'grid min-h-16 gap-1 rounded-[14px] bg-[#111418] p-3',
   holdingEmpty:
     'rounded-[16px] border border-[#2f343b] bg-[#111418] px-4 py-3 text-sm font-semibold text-[#8f949d]',
   ticketPanel:
-    'order-2 col-span-1 flex h-full min-h-0 flex-col gap-4 overflow-hidden border-0 bg-[#101418] p-6 shadow-none',
+    'order-2 col-span-1 flex h-full min-h-0 flex-col gap-4 overflow-visible border-0 bg-[#101418] p-0 shadow-none sm:p-6 lg:overflow-hidden',
   ticketTop: 'shrink-0',
   ticketScroll: 'min-h-0 flex-1 overflow-y-auto pr-1',
   ticketScrollInner: 'grid content-start gap-3',
@@ -134,7 +141,7 @@ export const ui = {
   input:
     'min-h-12 w-full rounded-[16px] border border-[#4a5058] bg-[#111418] px-4 text-[#e3e3e9] outline-none transition placeholder:text-[#747982] focus:border-[#a8c7fa]',
   estimateSummary:
-    'flex items-center justify-between rounded-[18px] border border-[#2f343b] bg-[#111418] px-5 py-4',
+    'flex flex-wrap items-center justify-between gap-2 rounded-[18px] border border-[#2f343b] bg-[#111418] px-5 py-4',
   holdingNote:
     'rounded-[16px] border border-[#2f343b] bg-[#111418] px-4 py-3 text-sm font-semibold text-[#c3c7cf]',
   actions: 'grid gap-3',
@@ -146,25 +153,25 @@ export const ui = {
     'inline-flex min-h-10 items-center justify-center gap-2 rounded-full border border-[#4a5058] bg-transparent px-5 font-extrabold text-[#d3e3fd] transition hover:bg-[#263141]',
   list: 'grid gap-2',
   orderRow:
-    'grid grid-cols-[minmax(180px,1fr)_auto_auto_auto_auto_auto] items-center gap-3 rounded-[20px] bg-[#111418] p-4',
+    'grid grid-cols-2 items-center gap-3 rounded-[20px] bg-[#111418] p-4 md:grid-cols-[minmax(180px,1fr)_auto_auto_auto_auto_auto]',
   statusBadge: 'w-fit rounded-full bg-[#263141] px-3 py-1 text-xs font-black text-[#d3e3fd]',
   pendingBadge: 'bg-[#4a3720] text-[#ffddb3]',
-  apiLayout: 'grid grid-cols-[minmax(0,1fr)_minmax(20rem,0.9fr)] gap-7',
+  apiLayout: 'grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.9fr)] lg:gap-7',
   settingsLayout: 'grid gap-7',
-  row: 'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-[20px] bg-[#111418] p-4',
+  row: 'grid grid-cols-1 items-center gap-3 rounded-[20px] bg-[#111418] p-4 sm:grid-cols-[minmax(0,1fr)_auto]',
   rowActions: 'flex gap-2',
   keyRow: 'grid gap-3 rounded-[24px] bg-[#111418] p-4',
   profileRow:
-    'grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[20px] bg-[#111418] p-4',
+    'grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-[20px] bg-[#111418] p-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]',
   searchOverlay: 'fixed inset-0 z-20 bg-[#101418]/75 backdrop-blur-sm',
   searchSheet:
-    'mx-auto mt-4 grid max-h-[85vh] w-[48rem] gap-3 overflow-auto rounded-[28px] border border-[#30343a] bg-[#1b1f24]/85 p-4 shadow-2xl shadow-black/35',
-  searchInputRow: 'grid grid-cols-[minmax(0,1fr)_auto] gap-3',
-  filterRow: 'grid grid-cols-2 gap-3',
+    'mx-auto mt-2 grid max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[48rem] gap-3 overflow-auto rounded-[28px] border border-[#30343a] bg-[#1b1f24]/85 p-3 shadow-2xl shadow-black/35 sm:mt-4 sm:max-h-[85vh] sm:w-[calc(100vw-2rem)] sm:p-4 md:w-[48rem]',
+  searchInputRow: 'grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]',
+  filterRow: 'grid grid-cols-1 gap-3 sm:grid-cols-2',
   searchResults: 'grid gap-2',
   searchLoading: 'flex min-h-32 flex-col items-center justify-center gap-3 py-8 text-[#9aa0a8]',
   searchResult:
-    'flex min-h-16 items-center justify-between gap-4 rounded-[20px] border border-transparent bg-[#111418] p-4 text-left text-[#e3e3e9] transition hover:bg-[#242930] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d3e3fd]',
+    'flex min-h-16 flex-wrap items-center justify-between gap-4 rounded-[20px] border border-transparent bg-[#111418] p-4 text-left text-[#e3e3e9] transition hover:bg-[#242930] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d3e3fd]',
   searchResultActive: 'border-l-4 border-[#d3e3fd] bg-[#242930]',
   searchResultFocus:
     'bg-[#2a323a] outline outline-2 outline-[#d3e3fd] outline-offset-[-2px] shadow-[0_0_0_1px_rgba(211,227,253,0.35)]',

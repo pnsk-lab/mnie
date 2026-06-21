@@ -20,14 +20,14 @@ export type StoredSbiPasskeySecret = {
   deviceId?: string
 }
 
-const requireAuth: MiddlewareHandler<AppBindings> = async (c, next) => {
-  if (!c.get('authenticated')) return c.json({ error: 'unauthorized' }, 401)
+const requireOwnerSession: MiddlewareHandler<AppBindings> = async (c, next) => {
+  if (c.get('auth').type !== 'session') return c.json({ error: 'unauthorized' }, 401)
   await next()
 }
 
 export const createAdminRoutes = () => {
   const app = new Hono<AppBindings>()
-  app.use('*', requireAuth)
+  app.use('*', requireOwnerSession)
 
   app.get('/api-keys', async (c) => c.json({ apiKeys: await listApiKeys(c.get('db')) }))
 
