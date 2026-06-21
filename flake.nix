@@ -1,5 +1,5 @@
 {
-  description = "cSBI development and runtime helpers";
+  description = "Mnie development and runtime helpers";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -40,7 +40,7 @@
         let
           pkgs = import nixpkgs { inherit system; };
           composeUp = pkgs.writeShellApplication {
-            name = "csbi-compose-up";
+            name = "mnie-compose-up";
             runtimeInputs = [
               pkgs.docker-compose
             ];
@@ -49,17 +49,17 @@
             '';
           };
           nativeRun = pkgs.writeShellApplication {
-            name = "csbi-native-run";
+            name = "mnie-native-run";
             runtimeInputs = [
               pkgs.bun
               pkgs.coreutils
             ];
             text = ''
-              env_file="''${CSBIE_ENV_FILE:-$PWD/.env}"
-              data_dir="''${CSBIE_DATA_DIR:-$PWD/data}"
+              env_file="''${MNIE_ENV_FILE:-$PWD/.env}"
+              data_dir="''${MNIE_DATA_DIR:-$PWD/data}"
 
               if [ ! -f "$env_file" ]; then
-                echo "CSBIE_ENV_FILE does not exist: $env_file" >&2
+                echo "MNIE_ENV_FILE does not exist: $env_file" >&2
                 exit 1
               fi
 
@@ -74,30 +74,30 @@
 
               cd "$source_dir"
               bun install --frozen-lockfile --linker hoisted
-              bun --filter @repo/csbie build
+              bun --filter @repo/mnie-app build
 
-              export CSBIE_DATABASE_PATH="''${CSBIE_DATABASE_PATH:-$data_dir/csbie.sqlite}"
-              exec bun --env-file="$env_file" apps/csbie/dist/index.js "$@"
+              export MNIE_DATABASE_PATH="''${MNIE_DATABASE_PATH:-$data_dir/mnie-app.sqlite}"
+              exec bun --env-file="$env_file" apps/mnie-app/dist/index.js "$@"
             '';
           };
         in
         {
           default = {
             type = "app";
-            program = "${composeUp}/bin/csbi-compose-up";
-            meta.description = "Run cSBI with docker-compose";
+            program = "${composeUp}/bin/mnie-compose-up";
+            meta.description = "Run Mnie with docker-compose";
           };
 
           compose-up = {
             type = "app";
-            program = "${composeUp}/bin/csbi-compose-up";
-            meta.description = "Run cSBI with docker-compose";
+            program = "${composeUp}/bin/mnie-compose-up";
+            meta.description = "Run Mnie with docker-compose";
           };
 
-          csbie = {
+          mnie = {
             type = "app";
-            program = "${nativeRun}/bin/csbi-native-run";
-            meta.description = "Build and run cSBI directly with Bun";
+            program = "${nativeRun}/bin/mnie-native-run";
+            meta.description = "Build and run Mnie directly with Bun";
           };
 
         }
@@ -111,19 +111,19 @@
           ...
         }:
         let
-          cfg = config.services.csbie;
+          cfg = config.services.mnie;
           nativeRun = pkgs.writeShellApplication {
-            name = "csbi-native-run";
+            name = "mnie-native-run";
             runtimeInputs = [
               pkgs.bun
               pkgs.coreutils
             ];
             text = ''
-              env_file="''${CSBIE_ENV_FILE:-$PWD/.env}"
-              data_dir="''${CSBIE_DATA_DIR:-$PWD/data}"
+              env_file="''${MNIE_ENV_FILE:-$PWD/.env}"
+              data_dir="''${MNIE_DATA_DIR:-$PWD/data}"
 
               if [ ! -f "$env_file" ]; then
-                echo "CSBIE_ENV_FILE does not exist: $env_file" >&2
+                echo "MNIE_ENV_FILE does not exist: $env_file" >&2
                 exit 1
               fi
 
@@ -138,16 +138,16 @@
 
               cd "$source_dir"
               bun install --frozen-lockfile --linker hoisted
-              bun --filter @repo/csbie build
+              bun --filter @repo/mnie-app build
 
-              export CSBIE_DATABASE_PATH="''${CSBIE_DATABASE_PATH:-$data_dir/csbie.sqlite}"
-              exec bun --env-file="$env_file" apps/csbie/dist/index.js "$@"
+              export MNIE_DATABASE_PATH="''${MNIE_DATABASE_PATH:-$data_dir/mnie-app.sqlite}"
+              exec bun --env-file="$env_file" apps/mnie-app/dist/index.js "$@"
             '';
           };
         in
         {
-          options.services.csbie = {
-            enable = lib.mkEnableOption "cSBI";
+          options.services.mnie = {
+            enable = lib.mkEnableOption "Mnie";
 
             runtime = lib.mkOption {
               type = lib.types.enum [
@@ -160,7 +160,7 @@
 
             image = lib.mkOption {
               type = lib.types.str;
-              default = "git.yutakobayashi.com/nakasyou/csbi:latest";
+              default = "git.yutakobayashi.com/nakasyou/mnie:latest";
               description = "Container image to run when runtime is docker.";
             };
 
@@ -171,14 +171,14 @@
 
             dataDir = lib.mkOption {
               type = lib.types.str;
-              default = "/var/lib/csbie";
+              default = "/var/lib/mnie-app";
               description = "Host directory mounted at /app/data.";
             };
 
             port = lib.mkOption {
               type = lib.types.port;
               default = 18787;
-              description = "Host port exposed for cSBI.";
+              description = "Host port exposed for Mnie.";
             };
           };
 
@@ -191,7 +191,7 @@
 
             (lib.mkIf (cfg.runtime == "docker") {
               virtualisation.oci-containers.backend = lib.mkDefault "docker";
-              virtualisation.oci-containers.containers.csbie = {
+              virtualisation.oci-containers.containers.mnie = {
                 image = cfg.image;
                 ports = [
                   "${toString cfg.port}:8787"
@@ -206,8 +206,8 @@
             })
 
             (lib.mkIf (cfg.runtime == "native") {
-              systemd.services.csbie = {
-                description = "cSBI";
+              systemd.services.mnie = {
+                description = "Mnie";
                 wantedBy = [
                   "multi-user.target"
                 ];
@@ -218,8 +218,8 @@
                   "network-online.target"
                 ];
                 environment = {
-                  CSBIE_ENV_FILE = toString cfg.envFile;
-                  CSBIE_DATA_DIR = cfg.dataDir;
+                  MNIE_ENV_FILE = toString cfg.envFile;
+                  MNIE_DATA_DIR = cfg.dataDir;
                   PORT = toString cfg.port;
                 };
                 serviceConfig = {
@@ -228,7 +228,7 @@
                   RestartSec = "5s";
                 };
                 script = ''
-                  exec ${nativeRun}/bin/csbi-native-run
+                  exec ${nativeRun}/bin/mnie-native-run
                 '';
               };
             })

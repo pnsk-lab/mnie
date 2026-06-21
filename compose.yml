@@ -1,8 +1,8 @@
 services:
-  csbie:
-    image: git.yutakobayashi.com/nakasyou/csbi:latest
+  mnie:
+    image: git.yutakobayashi.com/nakasyou/mnie:latest
     ports:
-      - '${CSBIE_HOST_PORT:-18787}:8787'
+      - '${MNIE_HOST_PORT:-18787}:8787'
     env_file:
       - .env
     volumes:

@@ -1,5 +1,5 @@
 {
-  "name": "csbi",
+  "name": "mnie",
   "private": true,
   "workspaces": [
     "apps/*",

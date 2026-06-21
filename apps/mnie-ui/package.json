@@ -1,0 +1,28 @@
+{
+  "name": "@repo/mnie-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "clean": "rm -rf dist",
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@simplewebauthn/browser": "^13.1.2",
+    "d3": "^7.9.0",
+    "lucide-vue-next": "^1.0.0",
+    "motion-v": "^2.3.0",
+    "tailwindcss": "^4.1.10",
+    "vite": "^8",
+    "vue": "^3.5.16",
+    "vue-router": "^5.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.1",
+    "@types/d3": "^7.4.3",
+    "@vitejs/plugin-vue": "^6.0.7",
+    "typescript": "^5",
+    "vue-tsc": "^3"
+  }
+}

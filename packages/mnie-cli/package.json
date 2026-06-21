@@ -1,0 +1,22 @@
+{
+  "name": "@repo/mnie-cli",
+  "private": true,
+  "bin": {
+    "mnie": "./src/index.ts"
+  },
+  "type": "module",
+  "scripts": {
+    "clean": "rm -rf dist",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@napi-rs/keyring": "^1.2.0",
+    "@repo/mnie-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

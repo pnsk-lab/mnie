@@ -1,19 +1,19 @@
-const requiredForSetup = ['CSBIE_SETUP_PASSWORD', 'CSBIE_SETUP_PASSWORD_HASH'] as const
+const requiredForSetup = ['MNIE_SETUP_PASSWORD', 'MNIE_SETUP_PASSWORD_HASH'] as const
 
 const runtimeDefaults = {
   PORT: '8787',
-  CSBIE_DATABASE_PATH: './data/csbie.sqlite',
-  CSBIE_KEYRING_BACKEND: 'platform',
-  CSBIE_ORIGIN: 'http://127.0.0.1:5173',
-  CSBIE_RP_ID: '127.0.0.1',
+  MNIE_DATABASE_PATH: './data/mnie-app.sqlite',
+  MNIE_KEYRING_BACKEND: 'platform',
+  MNIE_ORIGIN: 'http://127.0.0.1:5173',
+  MNIE_RP_ID: '127.0.0.1',
 }
 
 const optionalUrls = [
   'SBI_AUTH_BASE_URL',
   'SBI_MTS_BASE_URL',
   'SBI_IZANAGI_BASE_URL',
-  'CSBIE_ORIGIN',
-  'CSBIE_CORS_ORIGIN',
+  'MNIE_ORIGIN',
+  'MNIE_CORS_ORIGIN',
 ]
 
 const present = (key: string) => Boolean(process.env[key]?.trim())
@@ -42,12 +42,12 @@ for (const key of optionalUrls) {
 
 if (!requiredForSetup.some(present)) {
   messages.push(
-    'Set CSBIE_SETUP_PASSWORD or CSBIE_SETUP_PASSWORD_HASH before first owner passkey setup',
+    'Set MNIE_SETUP_PASSWORD or MNIE_SETUP_PASSWORD_HASH before first owner passkey setup',
   )
 }
 
-if (process.env.CSBIE_KEYRING_BACKEND === 'sqlite' && !present('CSBIE_KEYRING_SECRET')) {
-  messages.push('Set CSBIE_KEYRING_SECRET when CSBIE_KEYRING_BACKEND=sqlite')
+if (process.env.MNIE_KEYRING_BACKEND === 'sqlite' && !present('MNIE_KEYRING_SECRET')) {
+  messages.push('Set MNIE_KEYRING_SECRET when MNIE_KEYRING_BACKEND=sqlite')
 }
 
 if (

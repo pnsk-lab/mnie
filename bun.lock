@@ -12,10 +12,10 @@
         "typescript": "^5",
       },
     },
-    "apps/csbie": {
-      "name": "@repo/csbie",
+    "apps/mnie-app": {
+      "name": "@repo/mnie-app",
       "dependencies": {
-        "@repo/csbie-server": "workspace:*",
+        "@repo/mnie-server": "workspace:*",
         "hono": "^4.8.3",
       },
       "devDependencies": {
@@ -23,13 +23,13 @@
         "typescript": "^5",
       },
     },
-    "apps/csbie-server": {
-      "name": "@repo/csbie-server",
+    "apps/mnie-server": {
+      "name": "@repo/mnie-server",
       "dependencies": {
         "@hono/mcp": "^0.3.0",
         "@modelcontextprotocol/sdk": "^1.29.0",
         "@napi-rs/keyring": "^1.2.0",
-        "@repo/sbi-client": "workspace:*",
+        "@repo/client-sbi": "workspace:*",
         "@simplewebauthn/server": "^13.1.2",
         "drizzle-orm": "^0.44.2",
         "hono": "^4.8.3",
@@ -41,8 +41,8 @@
         "typescript": "^5",
       },
     },
-    "apps/csbie-ui": {
-      "name": "@repo/csbie-ui",
+    "apps/mnie-ui": {
+      "name": "@repo/mnie-ui",
       "dependencies": {
         "@simplewebauthn/browser": "^13.1.2",
         "d3": "^7.9.0",
@@ -61,11 +61,49 @@
         "vue-tsc": "^3",
       },
     },
-    "packages/sbi-client": {
-      "name": "@repo/sbi-client",
+    "packages/client-sbi": {
+      "name": "@repo/client-sbi",
       "dependencies": {
+        "@repo/mnie-types": "workspace:*",
         "iconv-lite": "^0.7.2",
       },
+      "devDependencies": {
+        "@types/bun": "latest",
+      },
+      "peerDependencies": {
+        "typescript": "^5",
+      },
+    },
+    "packages/mnie-cli": {
+      "name": "@repo/mnie-cli",
+      "bin": {
+        "mnie": "./src/index.ts",
+      },
+      "dependencies": {
+        "@napi-rs/keyring": "^1.2.0",
+        "@repo/mnie-sdk": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+      },
+      "peerDependencies": {
+        "typescript": "^5",
+      },
+    },
+    "packages/mnie-sdk": {
+      "name": "@repo/mnie-sdk",
+      "dependencies": {
+        "@repo/mnie-types": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+      },
+      "peerDependencies": {
+        "typescript": "^5",
+      },
+    },
+    "packages/mnie-types": {
+      "name": "@repo/mnie-types",
       "devDependencies": {
         "@types/bun": "latest",
       },
@@ -319,13 +357,19 @@
 
     "@polka/url": ["@polka/url@1.0.0-next.29", "", {}, "sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww=="],
 
-    "@repo/csbie": ["@repo/csbie@workspace:apps/csbie"],
+    "@repo/client-sbi": ["@repo/client-sbi@workspace:packages/client-sbi"],
 
-    "@repo/csbie-server": ["@repo/csbie-server@workspace:apps/csbie-server"],
+    "@repo/mnie-app": ["@repo/mnie-app@workspace:apps/mnie-app"],
 
-    "@repo/csbie-ui": ["@repo/csbie-ui@workspace:apps/csbie-ui"],
+    "@repo/mnie-cli": ["@repo/mnie-cli@workspace:packages/mnie-cli"],
 
-    "@repo/sbi-client": ["@repo/sbi-client@workspace:packages/sbi-client"],
+    "@repo/mnie-sdk": ["@repo/mnie-sdk@workspace:packages/mnie-sdk"],
+
+    "@repo/mnie-server": ["@repo/mnie-server@workspace:apps/mnie-server"],
+
+    "@repo/mnie-types": ["@repo/mnie-types@workspace:packages/mnie-types"],
+
+    "@repo/mnie-ui": ["@repo/mnie-ui@workspace:apps/mnie-ui"],
 
     "@rolldown/binding-android-arm64": ["@rolldown/binding-android-arm64@1.0.3", "", { "os": "android", "cpu": "arm64" }, "sha512-454rs7jHngixp/NMxd5srYD57OnzSlZ/eFTETjORQHLwJG1lRtmNOJcBerZlfu4GjKqeq8aCCIQrMdHyhI51Hw=="],
 

@@ -10,7 +10,7 @@
 
   const originalCreate = navigator.credentials.create.bind(navigator.credentials)
   const textEncoder = new TextEncoder()
-  const credentialLabel = 'csbi'
+  const credentialLabel = 'mnie'
 
   const base64Url = (value) => {
     const bytes =

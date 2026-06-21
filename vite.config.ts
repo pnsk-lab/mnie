@@ -9,20 +9,20 @@ export default defineConfig({
     cache: true,
     tasks: {
       'app:dev': {
-        command: 'vp run @repo/csbie#dev',
+        command: 'vp run @repo/mnie-app#dev',
         cache: false,
         dependsOn: ['env:doctor'],
       },
       'app:build': {
-        command: 'vp run @repo/csbie#build',
+        command: 'vp run @repo/mnie-app#build',
         dependsOn: ['typecheck:all'],
       },
       'app:start': {
-        command: 'vp run @repo/csbie#start',
+        command: 'vp run @repo/mnie-app#start',
         cache: false,
       },
       'server:db:push': {
-        command: 'vp run @repo/csbie-server#db:push',
+        command: 'vp run @repo/mnie-server#db:push',
         cache: false,
         dependsOn: ['env:doctor'],
       },
@@ -41,12 +41,12 @@ export default defineConfig({
         command: ['vp check', 'vp run typecheck:all', 'vp run app:build'],
       },
       'docker:build':
-        'docker build --no-cache -f apps/csbie/Dockerfile -t git.yutakobayashi.com/nakasyou/csbi:latest .',
+        'docker build --no-cache -f apps/mnie-app/Dockerfile -t git.yutakobayashi.com/nakasyou/mnie:latest .',
       'docker:run':
-        'docker run --rm -p 8787:8787 --env-file .env -v "$PWD/data:/app/data" git.yutakobayashi.com/nakasyou/csbi:latest',
+        'docker run --rm -p 8787:8787 --env-file .env -v "$PWD/data:/app/data" git.yutakobayashi.com/nakasyou/mnie:latest',
       'docker:tag':
-        'docker tag git.yutakobayashi.com/nakasyou/csbi:latest git.yutakobayashi.com/nakasyou/csbi:latest',
-      'docker:push': 'docker push git.yutakobayashi.com/nakasyou/csbi:latest',
+        'docker tag git.yutakobayashi.com/nakasyou/mnie:latest git.yutakobayashi.com/nakasyou/mnie:latest',
+      'docker:push': 'docker push git.yutakobayashi.com/nakasyou/mnie:latest',
     },
   },
 })
