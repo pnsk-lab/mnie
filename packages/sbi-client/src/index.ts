@@ -37,6 +37,8 @@ export type {
   OrderCorrectionPreOrder,
   OrderCorrectionPreOrderDetail,
   OrderPreview,
+  TradeRecord,
+  TradeRecordList,
   StockOrderPreOrder,
   StockOrderPreOrderMarginTradeType,
   StockOrderPreOrderPaymentLimit,

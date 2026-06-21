@@ -297,19 +297,21 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
       positions: {
         cash: async (options) =>
           options?.market && isUsMarket(options.market)
-            ? usStock.positions()
+            ? usStock.positions(options)
             : parseCashPositions(
                 await callMts(session, 'F2631', listAccountTrin(session, options)),
                 options,
               ),
         cashDetail: async (options) =>
-          parseCashPositions(
-            await callMts(session, 'F2632', listAccountTrin(session, options)),
-            options,
-          ),
+          options?.market && isUsMarket(options.market)
+            ? usStock.positionsDetail(options)
+            : parseCashPositions(
+                await callMts(session, 'F2632', listAccountTrin(session, options)),
+                options,
+              ),
         cashForIssue: async (options) => {
           return isUsMarket(options.market)
-            ? usStock.positions()
+            ? usStock.positions(options)
             : filterCashPositions(
                 parseCashPositions(
                   await callMts(session, 'F2602', issuePositionTrin(session, options)),
@@ -487,6 +489,18 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
                 ),
                 options,
               ),
+        detail: async (options) => {
+          if (isUsMarket(options.market)) return usStock.orderDetail(options)
+          throw new Error(
+            'orders.inquiry.detail is currently implemented only for US stock markets',
+          )
+        },
+        tradeRecords: async (options) => {
+          if (!options.market || isUsMarket(options.market)) return usStock.tradeRecords(options)
+          throw new Error(
+            'orders.inquiry.tradeRecords is currently implemented only for US stock markets',
+          )
+        },
       },
       cash: {
         preOrder: async (options) =>
@@ -528,22 +542,28 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
           )
         },
         estimateCorrection: async (options) =>
-          parseOrderCorrectionPreOrder(
-            await callMts(session, 'F2301', orderCorrectionPreOrderTrin(session, options)),
-            cashCorrectionPreviewInput,
-          ),
+          options.market && isUsMarket(options.market)
+            ? usStock.estimateCorrection(options)
+            : parseOrderCorrectionPreOrder(
+                await callMts(session, 'F2301', orderCorrectionPreOrderTrin(session, options)),
+                cashCorrectionPreviewInput,
+              ),
         estimateCorrectionConfirm: async (options) =>
-          parseOrderPreview(
-            await callMts(session, 'F2302', orderCorrectionSubmitTrin(session, options)),
-            cashCorrectionPreviewInput,
-          ),
+          options.market && isUsMarket(options.market)
+            ? usStock.estimateCorrectionConfirm(options)
+            : parseOrderPreview(
+                await callMts(session, 'F2302', orderCorrectionSubmitTrin(session, options)),
+                cashCorrectionPreviewInput,
+              ),
         placeCorrection: async (options) => {
+          if (options.market && isUsMarket(options.market)) return usStock.placeCorrection(options)
           assertTradingAllowed(options, 'orders.cash.placeCorrection')
           return parseOrderReceipt(
             await callMts(session, 'F2303', orderCorrectionSubmitTrin(session, options)),
           )
         },
         estimateCancel: async (options) => {
+          if (options.market && isUsMarket(options.market)) return usStock.estimateCancel(options)
           assertOrderCancelOptions(options)
           return parseOrderCorrectionPreOrder(
             await callMts(session, 'F2311', orderCancelPreOrderTrin(session, options)),

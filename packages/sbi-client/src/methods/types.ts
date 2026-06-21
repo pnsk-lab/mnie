@@ -23,6 +23,7 @@ import type {
   MarketCode,
   MarketIndex,
   NewsList,
+  Order,
   OrderId,
   OrderKind,
   OrderList,
@@ -36,6 +37,7 @@ import type {
   Ranking,
   ThemeId,
   ThemeInvestmentList,
+  TradeRecordList,
   TradeSide,
   Watchlist,
 } from '../types'
@@ -115,6 +117,22 @@ export type OrderInquiryOptions = PagingOptions &
     /** Filters order inquiry results by order status. */
     status?: OrderStatus
   }
+
+export type OrderDetailOptions = {
+  /** Order number shown in order inquiry. */
+  orderNumber?: string
+  /** Order ID from order inquiry. For US stocks this is often `orderSubNo`. */
+  orderId?: OrderId
+  /** Issue code used to fetch the related security and quote details. */
+  issueCode?: IssueCode
+  /** Market code used to fetch the related security and quote details. */
+  market: MarketCode
+}
+
+export type TradeRecordInquiryOptions = OrderInquiryOptions & {
+  /** Filters trade records by account type. */
+  accountType?: AccountType
+}
 
 export type BoardOptions = IssueOptions & {
   /** Account type used when requesting board-order information. */
@@ -384,6 +402,10 @@ export type OrderCancelOptions = {
   orderNumber: string
   /** Original order ID shown in order inquiry. */
   orderId?: OrderId
+  /** Original issue code shown in order inquiry. */
+  issueCode?: IssueCode
+  /** Original market code shown in order inquiry. */
+  market?: MarketCode
   /** Original trade ID code. Defaults to cash stock when omitted. */
   tradeId?: string
   /** Additional cancel flag used by the mobile MTS route. */
@@ -667,6 +689,10 @@ export interface SbiClientMethodOrderInquiry {
   executionsToday(options?: OrderInquiryOptions): Promise<OrderList>
   /** Fetches open or recently active orders. */
   open(options?: OrderInquiryOptions): Promise<OrderList>
+  /** Fetches a detailed order record. Currently implemented for US stock orders. */
+  detail(options: OrderDetailOptions): Promise<Order>
+  /** Fetches trade records. Currently implemented for US stock trades. */
+  tradeRecords(options: TradeRecordInquiryOptions): Promise<TradeRecordList>
 }
 
 export interface SbiClientMethodCashOrder {

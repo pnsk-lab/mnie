@@ -24,12 +24,12 @@ export const ui = {
   panelHead: 'flex flex-wrap items-center justify-between gap-3',
   eyebrow: 'mb-1 text-xs font-black uppercase text-[#9aa0a9]',
   dashboardGrid:
-    'grid min-h-0 flex-1 grid-cols-1 items-stretch gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)] lg:grid-rows-[auto_minmax(0,1fr)] lg:gap-6 lg:overflow-hidden',
+    'grid min-h-0 flex-1 grid-cols-1 items-stretch gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)] lg:grid-rows-[auto_minmax(20rem,auto)_auto] lg:gap-6',
   metricPanel:
     'grid min-h-36 content-center gap-3 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-5 shadow-lg shadow-black/15 sm:min-h-40 sm:p-7',
   assetOverviewPanel:
-    'grid min-h-40 grid-cols-1 items-center gap-x-7 gap-y-5 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-5 shadow-lg shadow-black/15 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] sm:p-7',
-  assetOverviewHead: 'grid gap-2',
+    'grid min-h-48 grid-cols-1 items-center gap-x-7 gap-y-5 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-5 pb-8 shadow-lg shadow-black/15 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] sm:p-7 sm:pb-10 lg:col-span-2',
+  assetOverviewHead: 'grid gap-3',
   assetOverviewSubtext: 'text-sm font-semibold text-[#c3c7cf]',
   assetBreakdownPanel: 'grid gap-3',
   assetBreakdownTitle: 'text-xs font-extrabold text-[#9aa0a9]',
@@ -52,19 +52,24 @@ export const ui = {
   assetBreakdownAmount: 'text-sm font-black text-[#e3e3e9]',
   assetBreakdownRatio: 'text-xs font-semibold text-[#8f949d]',
   holdingsPanel:
-    'flex min-h-0 flex-col gap-4 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-5 shadow-lg shadow-black/15 sm:p-7',
+    'flex min-h-80 flex-col gap-4 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-5 shadow-lg shadow-black/15 sm:p-7',
   holdingsBody: 'flex min-h-0 flex-1 flex-col overflow-visible lg:overflow-hidden',
   holdingsRows: 'grid min-h-0 flex-1 content-start overflow-y-auto',
   holdingsHead:
-    'hidden grid-cols-[1.7fr_0.8fr_0.7fr_1fr_1fr] items-center gap-4 border-b border-[#33383f] py-3 text-xs font-extrabold text-[#8f949d] md:grid',
+    'hidden grid-cols-[1.6fr_0.7fr_0.6fr_0.9fr_0.9fr_auto] items-center gap-4 border-b border-[#33383f] py-3 text-xs font-extrabold text-[#8f949d] md:grid',
   holdingRow:
-    'grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-2xl bg-[#111418] px-3 py-3 text-left text-[#e3e3e9] transition hover:bg-[#242930] md:grid-cols-[1.7fr_0.8fr_0.7fr_1fr_1fr] md:gap-4 md:bg-transparent',
+    'grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-2xl bg-[#111418] px-3 py-3 text-left text-[#e3e3e9] transition hover:bg-[#242930] md:grid-cols-[1.6fr_0.7fr_0.6fr_0.9fr_0.9fr_auto] md:gap-4 md:bg-transparent',
   typePill: 'w-fit rounded-full bg-[#263141] px-3 py-1 text-xs text-[#d3e3fd]',
   muted: 'text-[#8f949d]',
   portfolioHistory:
-    'flex min-h-0 flex-col gap-4 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-5 shadow-lg shadow-black/15 sm:p-7',
+    'flex min-h-80 flex-col gap-4 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-5 shadow-lg shadow-black/15 sm:p-7',
   historyList: 'flex min-h-0 flex-1 flex-col overflow-visible lg:overflow-hidden',
   historyRows: 'grid min-h-0 flex-1 content-start gap-5 overflow-y-auto lg:gap-7',
+  marketIndexPanel:
+    'grid gap-4 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-5 shadow-lg shadow-black/15 sm:p-7 lg:col-span-2',
+  marketIndexGrid: 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4',
+  marketIndexCard: 'grid min-h-28 content-center gap-2 rounded-2xl bg-[#111418] p-4',
+  marketIndexValue: 'break-words text-xl font-black text-[#e3e3e9]',
   emptyState: 'flex flex-1 items-center justify-center py-8 text-center',
   miniOrder: 'grid grid-cols-[minmax(0,1fr)_auto] gap-3',
   tradeLayout:
@@ -153,13 +158,13 @@ export const ui = {
     'inline-flex min-h-10 items-center justify-center gap-2 rounded-full border border-[#4a5058] bg-transparent px-5 font-extrabold text-[#d3e3fd] transition hover:bg-[#263141]',
   list: 'grid gap-2',
   orderRow:
-    'grid grid-cols-2 items-center gap-3 rounded-[20px] bg-[#111418] p-4 md:grid-cols-[minmax(180px,1fr)_auto_auto_auto_auto_auto]',
+    'grid grid-cols-2 items-center gap-3 rounded-[20px] bg-[#111418] p-4 md:grid-cols-[minmax(180px,1fr)_auto_auto_auto_auto_minmax(12rem,auto)]',
   statusBadge: 'w-fit rounded-full bg-[#263141] px-3 py-1 text-xs font-black text-[#d3e3fd]',
   pendingBadge: 'bg-[#4a3720] text-[#ffddb3]',
   apiLayout: 'grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.9fr)] lg:gap-7',
   settingsLayout: 'grid gap-7',
   row: 'grid grid-cols-1 items-center gap-3 rounded-[20px] bg-[#111418] p-4 sm:grid-cols-[minmax(0,1fr)_auto]',
-  rowActions: 'flex gap-2',
+  rowActions: 'flex flex-wrap items-center justify-end gap-2',
   keyRow: 'grid gap-3 rounded-[24px] bg-[#111418] p-4',
   profileRow:
     'grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-[20px] bg-[#111418] p-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]',

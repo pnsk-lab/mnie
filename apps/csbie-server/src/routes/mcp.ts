@@ -7,13 +7,7 @@ import { eq } from 'drizzle-orm'
 import * as z from 'zod/v4'
 import type { AppBindings, AuthContext } from '../context'
 import { sbiPasskeys } from '../db/schema'
-import {
-  invokeSbiMethod,
-  isCashOrderMethod,
-  isTradingMethod,
-  RPC_METHODS,
-  type RpcMethod,
-} from '../rpc/methods'
+import { invokeSbiMethod, isCashOrderMethod, isTradingMethod, type RpcMethod } from '../rpc/methods'
 import { connectSbi } from '../rpc/sbi-session'
 import type { StoredSbiPasskeySecret } from './admin'
 import {
@@ -32,8 +26,6 @@ const textResult = (value: unknown) => ({
 const requireAuthenticated = (auth: AuthContext) => {
   if (!auth.authenticated) throw new Error('unauthorized')
 }
-
-const toolNameForMethod = (method: RpcMethod) => `csbie_sbi_${method.replaceAll('.', '_')}`
 
 const ORDER_SUBMIT_TICKET_TTL_MS = 10 * 60 * 1000
 
@@ -80,10 +72,6 @@ const orderSubmitMethodByEstimateMethod = {
 
 const submitMethodForEstimateMethod = (method: RpcMethod) =>
   orderSubmitMethodByEstimateMethod[method as keyof typeof orderSubmitMethodByEstimateMethod]
-
-const isDirectOrderSubmitMethod = (method: RpcMethod) => isTradingMethod(method)
-
-const mcpExposedRpcMethods = RPC_METHODS.filter((method) => !isDirectOrderSubmitMethod(method))
 
 const orderSubmitParams = (value: unknown, confirmationId?: string) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return { allowTrading: true }
@@ -177,6 +165,17 @@ const orderInquiryOptionsSchema = z.object({
   issueCode: issueCodeSchema.optional(),
   market: marketCodeSchema.optional(),
   status: z.enum(['open', 'executed', 'cancelled', 'expired', 'rejected', 'unknown']).optional(),
+})
+
+const orderDetailSchema = z.object({
+  orderNumber: z.string().min(1).optional().describe('Order number shown in order inquiry'),
+  orderId: orderIdSchema.optional().describe('Order id shown in order inquiry'),
+  issueCode: issueCodeSchema.optional(),
+  market: marketCodeSchema.describe('US stock market code for order detail'),
+})
+
+const tradeRecordInquiryOptionsSchema = orderInquiryOptionsSchema.extend({
+  accountType: accountTypeSchema.optional(),
 })
 
 const boardOptionsSchema = issueOptionsSchema.extend({
@@ -337,6 +336,8 @@ const placeOrderCorrectionSchema = orderCorrectionSchema.extend({
 const orderCancelSchema = z.object({
   orderNumber: z.string().min(1).describe('Order number shown in order inquiry'),
   orderId: orderIdSchema.optional().describe('Original order id shown in order inquiry'),
+  issueCode: issueCodeSchema.optional().describe('Original issue code shown in order inquiry'),
+  market: marketCodeSchema.optional().describe('Original market code shown in order inquiry'),
   tradeId: z.string().min(1).optional().describe('Original trade id code'),
   cancelType: z.string().min(1).optional().describe('Additional cancel flag'),
 })
@@ -628,8 +629,10 @@ const methodParamSchemas = {
   'market.ranking.sbi': undefined,
   'news.list': undefined,
   'watchlist.list': undefined,
+  'orders.inquiry.detail': orderDetailSchema,
   'orders.inquiry.executionsToday': orderInquiryOptionsSchema.optional(),
   'orders.inquiry.open': orderInquiryOptionsSchema.optional(),
+  'orders.inquiry.tradeRecords': tradeRecordInquiryOptionsSchema,
   'orders.cash.preOrder': cashOrderPreOrderSchema,
   'orders.cash.estimate': cashOrderSchema,
   'orders.cash.place': placeCashOrderSchema,
@@ -665,6 +668,84 @@ const methodParamSchemas = {
   'orders.exchange.place': placeExchangeOrderSchema,
 } satisfies Record<RpcMethod, z.ZodType | undefined>
 
+const getActionToMethod = {
+  sessionProfile: 'session.profile',
+  accountProfile: 'account.profile',
+  currentAssets: 'account.assets.current',
+  buyingPower: 'account.power.buyingPower',
+  collateralRatio: 'account.power.collateralRatio',
+  cashPositions: 'account.positions.cash',
+  cashPositionDetail: 'account.positions.cashDetail',
+  cashPositionForIssue: 'account.positions.cashForIssue',
+  marginPositions: 'account.positions.margin',
+  marginPositionDetail: 'account.positions.marginDetail',
+  marginPositionForIssue: 'account.positions.marginForIssue',
+  marginSummaryForIssue: 'account.positions.marginSummaryForIssue',
+  marginDetailsForIssue: 'account.positions.marginDetailsForIssue',
+  closeableMarginPositions: 'account.positions.closeableMargin',
+  deliverableMarginPositions: 'account.positions.deliverableMargin',
+  unrealizedProfitLoss: 'account.profitLoss.unrealized',
+  issueSearch: 'market.issue.search',
+  issueSuggest: 'market.issue.suggest',
+  allowedPrices: 'market.issue.allowedPrices',
+  board: 'market.issue.board',
+  chart: 'market.issue.chart',
+  openOrdersForIssue: 'market.issue.openOrders',
+  tradingInfo: 'market.issue.tradingInfo',
+  majorIndexes: 'market.index.major',
+  marketOverview: 'market.overview',
+  marketRanking: 'market.ranking.market',
+  sectorRanking: 'market.ranking.sector',
+  sbiRanking: 'market.ranking.sbi',
+  news: 'news.list',
+  watchlist: 'watchlist.list',
+  orderDetail: 'orders.inquiry.detail',
+  executionsToday: 'orders.inquiry.executionsToday',
+  openOrders: 'orders.inquiry.open',
+  tradeRecords: 'orders.inquiry.tradeRecords',
+  cashOrderPreflight: 'orders.cash.preOrder',
+  marginOpenPreflight: 'orders.margin.preOrderOpen',
+  marginClosePreflight: 'orders.margin.preOrderClose',
+  actualDeliveryPreflight: 'orders.margin.preOrderActualDelivery',
+  themeInvestmentList: 'orders.themeInvestment.list',
+  exchangeRate: 'orders.exchange.rate',
+} as const satisfies Record<string, RpcMethod>
+
+const changeActionToEstimateMethod = {
+  cashOrder: 'orders.cash.estimate',
+  cashOrderCorrection: 'orders.cash.estimateCorrection',
+  cashOrderCorrectionConfirm: 'orders.cash.estimateCorrectionConfirm',
+  cashOrderCancel: 'orders.cash.estimateCancel',
+  marginOpenOrder: 'orders.margin.estimateOpen',
+  marginCloseOrder: 'orders.margin.estimateClose',
+  marginCloseSummaryOrder: 'orders.margin.estimateSummary',
+  marginCloseSummaryConfirm: 'orders.margin.estimateCloseSummary',
+  actualDeliveryOrder: 'orders.margin.estimateActualDelivery',
+  ifdOrder: 'orders.ifd.estimate',
+  ifdOrderCorrection: 'orders.ifd.estimateCorrection',
+  ifdOrderCancel: 'orders.ifd.estimateCancel',
+  themeInvestmentOrder: 'orders.themeInvestment.estimate',
+  exchangeOrder: 'orders.exchange.estimate',
+} as const satisfies Record<string, keyof typeof orderSubmitMethodByEstimateMethod>
+
+const getActions = Object.keys(getActionToMethod) as Array<keyof typeof getActionToMethod>
+const changeActions = Object.keys(changeActionToEstimateMethod) as Array<
+  keyof typeof changeActionToEstimateMethod
+>
+const getActionSchema = z.enum(['capabilities', 'passkeys', ...getActions])
+const changeActionSchema = z.enum(changeActions)
+
+const parseMethodParams = (method: RpcMethod, input: unknown) => {
+  const schema = methodParamSchemas[method]
+  if (!schema) {
+    if (input !== undefined && input !== null) {
+      throw new Error(`${method} does not accept input`)
+    }
+    return undefined
+  }
+  return schema.parse(input)
+}
+
 const createMcpServer = (c: Context<AppBindings>) => {
   const db = c.get('db')
   const config = c.get('config')
@@ -675,59 +756,33 @@ const createMcpServer = (c: Context<AppBindings>) => {
     version: '0.1.0',
   })
 
-  server.registerTool(
-    'csbie_sbi_methods',
-    {
-      title: 'List SBI RPC Methods',
-      description: 'List SBI client methods exposed through CSBIE.',
-      inputSchema: {},
-    },
-    async () => {
-      requireAuthenticated(auth)
-      return textResult({
-        methods: mcpExposedRpcMethods,
-        submitTool: 'csbie_sbi_submit_order',
+  const listPasskeys = async () => {
+    const rows = await db
+      .select({
+        id: sbiPasskeys.id,
+        label: sbiPasskeys.label,
+        keyringAccount: sbiPasskeys.keyringAccount,
+        createdAt: sbiPasskeys.createdAt,
+        updatedAt: sbiPasskeys.updatedAt,
       })
-    },
-  )
+      .from(sbiPasskeys)
+      .orderBy(sbiPasskeys.createdAt)
+    return Promise.all(
+      rows.map(async ({ keyringAccount, ...row }) => {
+        const secret = await readSecret<StoredSbiPasskeySecret>(keyringAccount)
+        const hasDeviceId = Boolean(effectiveSbiDeviceId(secret))
+        const hasTradePassword = Boolean(effectiveSbiTradePassword(secret))
+        return {
+          ...row,
+          hasTradePassword,
+          hasDeviceId,
+          cashOrderReady: hasTradePassword && hasDeviceId,
+        }
+      }),
+    )
+  }
 
-  server.registerTool(
-    'csbie_sbi_passkeys',
-    {
-      title: 'List SBI Passkeys',
-      description: 'List saved SBI passkey profiles. Secret material is never returned.',
-      inputSchema: {},
-    },
-    async () => {
-      requireAuthenticated(auth)
-      const rows = await db
-        .select({
-          id: sbiPasskeys.id,
-          label: sbiPasskeys.label,
-          keyringAccount: sbiPasskeys.keyringAccount,
-          createdAt: sbiPasskeys.createdAt,
-          updatedAt: sbiPasskeys.updatedAt,
-        })
-        .from(sbiPasskeys)
-        .orderBy(sbiPasskeys.createdAt)
-      const passkeys = await Promise.all(
-        rows.map(async ({ keyringAccount, ...row }) => {
-          const secret = await readSecret<StoredSbiPasskeySecret>(keyringAccount)
-          const hasDeviceId = Boolean(effectiveSbiDeviceId(secret))
-          const hasTradePassword = Boolean(effectiveSbiTradePassword(secret))
-          return {
-            ...row,
-            hasTradePassword,
-            hasDeviceId,
-            cashOrderReady: hasTradePassword && hasDeviceId,
-          }
-        }),
-      )
-      return textResult({ passkeys })
-    },
-  )
-
-  const callSbiMethod = async (method: RpcMethod, passkeyId: string, params: unknown) => {
+  const invokeCheckedSbiMethod = async (method: RpcMethod, passkeyId: string, params: unknown) => {
     requireAuthenticated(auth)
 
     if (auth.type === 'apiKey') {
@@ -767,41 +822,105 @@ const createMcpServer = (c: Context<AppBindings>) => {
     }
 
     const client = await connectSbi(db, config, passkeyId)
-    const result = await invokeSbiMethod(client, method, params)
-    const submitMethod = submitMethodForEstimateMethod(method)
-    if (!submitMethod) return textResult(result)
+    return invokeSbiMethod(client, method, params)
+  }
+
+  const createChangeRequest = async (
+    action: keyof typeof changeActionToEstimateMethod,
+    passkeyId: string,
+    input: unknown,
+  ) => {
+    const estimateMethod = changeActionToEstimateMethod[action]
+    const submitMethod = submitMethodForEstimateMethod(estimateMethod)
+    if (!submitMethod) throw new Error(`${action} cannot create a confirmable request`)
+
+    const params = parseMethodParams(estimateMethod, input)
+    const preview = await invokeCheckedSbiMethod(estimateMethod, passkeyId, params)
 
     cleanupExpiredOrderSubmitTickets()
     const uuid = randomUUID()
     const expiresAt = new Date(Date.now() + ORDER_SUBMIT_TICKET_TTL_MS)
-    const confirmationId = confirmationIdFromPreview(result)
+    const confirmationId = confirmationIdFromPreview(preview)
     orderSubmitTickets.set(uuid, {
       passkeyId,
-      estimateMethod: method,
+      estimateMethod,
       submitMethod,
       params,
       confirmationId,
       authKey: authKey(auth),
       expiresAt,
     })
-    return textResult({
-      preview: result,
-      submit: {
-        uuid,
-        tool: 'csbie_sbi_submit_order',
-        expiresAt: expiresAt.toISOString(),
-      },
-    })
+
+    return {
+      uuid,
+      expiresAt: expiresAt.toISOString(),
+      preview,
+      confirmTool: 'confirm-request',
+    }
   }
 
   server.registerTool(
-    'csbie_sbi_submit_order',
+    'csbie-get',
     {
-      title: 'Submit Estimated SBI Order',
+      title: 'Get SBI Data',
       description:
-        'Submit the same SBI order as a previous MCP estimate result by UUID. The UUID expires shortly and is bound to the same authenticated caller.',
+        'Read SBI data through a small abstract action API. This tool never places, corrects, cancels, or otherwise changes real orders.',
       inputSchema: {
-        uuid: z.string().uuid().describe('UUID returned by an order estimate tool'),
+        action: getActionSchema.describe('Read action to perform'),
+        passkeyId: z
+          .string()
+          .optional()
+          .describe('Saved SBI passkey id. Required for SBI-backed read actions.'),
+        input: z.unknown().optional().describe('Action input object'),
+      },
+    },
+    async ({ action, passkeyId, input }) => {
+      requireAuthenticated(auth)
+
+      if (action === 'capabilities') {
+        return textResult({
+          getActions,
+          changeActions,
+          changeTool: 'csbie-request-change',
+          confirmTool: 'confirm-request',
+        })
+      }
+
+      if (action === 'passkeys') return textResult({ passkeys: await listPasskeys() })
+
+      const method = getActionToMethod[action]
+      if (!method) throw new Error(`unsupported get action: ${String(action)}`)
+      if (!passkeyId) throw new Error(`${action} requires passkeyId`)
+
+      const params = parseMethodParams(method, input)
+      return textResult(await invokeCheckedSbiMethod(method, passkeyId, params))
+    },
+  )
+
+  server.registerTool(
+    'csbie-request-change',
+    {
+      title: 'Create SBI Change Request',
+      description:
+        'Prepare a real SBI change by running the corresponding estimate/preview and returning a UUID. This tool never submits the change; pass the UUID to confirm-request.',
+      inputSchema: {
+        action: changeActionSchema.describe('Change action to prepare'),
+        passkeyId: z.string().describe('Saved SBI passkey id'),
+        input: z.unknown().describe('Change action input object'),
+      },
+    },
+    async ({ action, passkeyId, input }) =>
+      textResult(await createChangeRequest(action, passkeyId, input)),
+  )
+
+  server.registerTool(
+    'confirm-request',
+    {
+      title: 'Confirm SBI Change Request',
+      description:
+        'Submit a previously prepared SBI change request by UUID. The UUID expires shortly, is single-use, and is bound to the same authenticated caller.',
+      inputSchema: {
+        uuid: z.string().uuid().describe('UUID returned by csbie-request-change'),
       },
     },
     async ({ uuid }) => {
@@ -809,39 +928,20 @@ const createMcpServer = (c: Context<AppBindings>) => {
       cleanupExpiredOrderSubmitTickets()
 
       const ticket = orderSubmitTickets.get(uuid)
-      if (!ticket) throw new Error('order submit uuid not found or expired')
+      if (!ticket) throw new Error('request uuid not found or expired')
       if (ticket.authKey !== authKey(auth)) {
-        throw new Error('order submit uuid was created by a different authenticated caller')
+        throw new Error('request uuid was created by a different authenticated caller')
       }
 
       orderSubmitTickets.delete(uuid)
-      return callSbiMethod(
+      const result = await invokeCheckedSbiMethod(
         ticket.submitMethod,
         ticket.passkeyId,
         orderSubmitParams(ticket.params, ticket.confirmationId),
       )
+      return textResult(result)
     },
   )
-
-  for (const method of mcpExposedRpcMethods) {
-    const paramsSchema = methodParamSchemas[method]
-    server.registerTool(
-      toolNameForMethod(method),
-      {
-        title: `Call ${method}`,
-        description: `Connect with one saved SBI passkey and call ${method}. API key method permissions and trading limits are enforced.`,
-        inputSchema: {
-          passkeyId: z.string().describe('Saved SBI passkey id from csbie_sbi_passkeys'),
-          ...(paramsSchema
-            ? {
-                params: paramsSchema.describe(`${method} params`),
-              }
-            : {}),
-        },
-      },
-      async ({ passkeyId, params }) => callSbiMethod(method, passkeyId, params),
-    )
-  }
 
   return server
 }

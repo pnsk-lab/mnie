@@ -180,7 +180,7 @@ export type SbiTradeAuthenticationOptions = {
 }
 
 export type IssueCode = string
-export type DomesticMarketCode = 'XTKS'
+export type DomesticMarketCode = 'XTKS' | 'XNGO' | 'XFKA' | 'XSAP'
 export type SKabuMarketCode = 'STK'
 export type UsStockMarketCode = 'XNAS' | 'XNYS' | 'ARCX'
 export type MarketCode = DomesticMarketCode | SKabuMarketCode | UsStockMarketCode
@@ -647,13 +647,39 @@ export type Order = {
   orderedAt?: string
   expiresAt?: string
   orderNumber?: string
+  orderSubNo?: string
   tradeId?: string
   exchangeCode?: string
   accountInformation?: string
+  cancelable?: boolean
+  correctable?: boolean
 }
 
 export type OrderList = {
   orders: Order[]
+  hasMore?: boolean
+  error?: SbiMethodError
+}
+
+export type TradeRecord = {
+  id: string
+  issue: IssueRef
+  tradeRecordTypeCode?: string
+  tradeCurrencyCode?: string
+  listedSecuritiesStatus?: string
+  orderPriceKindCode?: string
+  accountType?: AccountType
+  settlementCurrencyCode?: string
+  amount?: CurrencyAmount
+  quantity?: number | null
+  price?: CurrencyAmount
+  tradeDate?: string
+  valueDate?: string
+  marginCloseLimitType?: string
+}
+
+export type TradeRecordList = {
+  records: TradeRecord[]
   hasMore?: boolean
   error?: SbiMethodError
 }

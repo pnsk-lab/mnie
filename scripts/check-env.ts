@@ -8,7 +8,13 @@ const runtimeDefaults = {
   CSBIE_RP_ID: '127.0.0.1',
 }
 
-const optionalUrls = ['SBI_AUTH_BASE_URL', 'SBI_MTS_BASE_URL', 'CSBIE_ORIGIN', 'CSBIE_CORS_ORIGIN']
+const optionalUrls = [
+  'SBI_AUTH_BASE_URL',
+  'SBI_MTS_BASE_URL',
+  'SBI_IZANAGI_BASE_URL',
+  'CSBIE_ORIGIN',
+  'CSBIE_CORS_ORIGIN',
+]
 
 const present = (key: string) => Boolean(process.env[key]?.trim())
 
@@ -44,8 +50,14 @@ if (process.env.CSBIE_KEYRING_BACKEND === 'sqlite' && !present('CSBIE_KEYRING_SE
   messages.push('Set CSBIE_KEYRING_SECRET when CSBIE_KEYRING_BACKEND=sqlite')
 }
 
-if (!present('SBI_AUTH_BASE_URL') || !present('SBI_MTS_BASE_URL')) {
-  messages.push('Set SBI_AUTH_BASE_URL and SBI_MTS_BASE_URL before connecting an SBI session')
+if (
+  !present('SBI_AUTH_BASE_URL') ||
+  !present('SBI_MTS_BASE_URL') ||
+  !present('SBI_IZANAGI_BASE_URL')
+) {
+  messages.push(
+    'Set SBI_AUTH_BASE_URL, SBI_MTS_BASE_URL, and SBI_IZANAGI_BASE_URL before connecting an SBI session with domestic issue search',
+  )
 }
 
 if (messages.length === 0) {

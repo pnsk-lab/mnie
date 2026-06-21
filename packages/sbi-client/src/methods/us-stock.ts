@@ -16,23 +16,32 @@ import type {
   SbiSession,
   SignedTextValue,
   StockOrderPreOrder,
+  TradeRecord,
+  TradeRecordList,
   TradeSide,
 } from '../types'
 import type {
   BoardOptions,
   CashOrderOptions,
   CashOrderPreOrderOptions,
+  CashPositionOptions,
   IssueChartOptions,
   IssueOptions,
   IssueSearchOptions,
+  OrderCancelOptions,
+  OrderCorrectionOptions,
+  OrderDetailOptions,
   OrderInquiryOptions,
   PlaceCashOrderOptions,
   PlaceOrderCancelOptions,
+  PlaceOrderCorrectionOptions,
+  TradeRecordInquiryOptions,
 } from './types'
 import { requireUsMarket } from '../markets'
 
 const COUNTRY_US = 'US'
 const DEFAULT_CHART_COUNT = 120
+const DEFAULT_US_INQUIRY_LOOKBACK_DAYS = 90
 const US_CHART_INTERVALS: Record<ChartPeriod, Record<number, string>> = {
   minute: { 1: '1', 5: '2', 10: '3', 15: '4' },
   day: { 1: '7' },
@@ -127,7 +136,10 @@ export const createUsStockAdapter = (session: SbiSession) => ({
       quote,
     }
   },
-  positions: async (): Promise<CashPositionList> => fetchUsCashPositions(session),
+  positions: async (options?: CashPositionOptions): Promise<CashPositionList> =>
+    fetchUsCashPositions(session, options),
+  positionsDetail: async (options?: CashPositionOptions): Promise<CashPositionList> =>
+    fetchUsCashPositionDetail(session, options),
   unrealized: async () => {
     const positions = await fetchUsCashPositions(session)
     return {
@@ -139,6 +151,10 @@ export const createUsStockAdapter = (session: SbiSession) => ({
   },
   orders: async (options?: OrderInquiryOptions): Promise<OrderList> =>
     fetchUsOrders(session, options),
+  orderDetail: async (options: OrderDetailOptions): Promise<Order> =>
+    fetchUsOrderDetail(session, options),
+  tradeRecords: async (options: TradeRecordInquiryOptions): Promise<TradeRecordList> =>
+    fetchUsTradeRecords(session, options),
   preOrder: async (options: CashOrderPreOrderOptions): Promise<StockOrderPreOrder> => {
     requireUsMarket(options.market, 'orders.cash.preOrder')
     const data = await callUsGraphql(session, 'GetOrderCreatingInitialData', ORDER_INITIAL_DATA, {
@@ -204,11 +220,108 @@ export const createUsStockAdapter = (session: SbiSession) => ({
       message: stringAt(data, ['createForeignStockOrder', 'message']),
     }
   },
+  estimateCorrection: async (options: OrderCorrectionOptions): Promise<OrderPreview> => {
+    requireUsOrderCorrectionOptions(options, 'orders.cash.estimateCorrection')
+    const order = await resolveUsOrderForAction(session, options)
+    const input = usOrderCorrectionInput(options, order)
+    const market = requireUsOrderMarket(order, 'orders.cash.estimateCorrection')
+    const data = await callUsGraphql(
+      session,
+      'GetOrderUpdatingInitialData',
+      ORDER_UPDATE_INITIAL_DATA,
+      {
+        countryCode: COUNTRY_US,
+        securitiesCode: order.issue.code,
+        baseDate: undefined,
+        orderSubNo: input.orderSubNo,
+        rics: [usRic(order.issue.code, market)],
+      },
+    )
+    const init = objectAt(data, ['getForeignStockUpdatedOrderInitialization'])
+    const initOrder = objectAt(init, ['order'])
+    return {
+      issue: order.issue,
+      side: order.side,
+      quantity: numberAt(initOrder, ['orderQuantity']) ?? order.quantity ?? options.quantity,
+      price: usd(stringAt(initOrder, ['orderPrice']) ?? String(options.price ?? '')),
+      estimatedAmount: usd(stringAt(initOrder, ['frnNetAmount'])),
+      commission: usd(stringAt(initOrder, ['frnCommissionAmount'])),
+      tax: usd(stringAt(initOrder, ['frnCommissionCtax'])),
+      warnings: [],
+      confirmationId: input.orderSubNo,
+      correction: usOrderCorrectionPreOrderFromOrder(order, init),
+    }
+  },
+  estimateCorrectionConfirm: async (options: OrderCorrectionOptions): Promise<OrderPreview> => {
+    requireUsOrderCorrectionOptions(options, 'orders.cash.estimateCorrectionConfirm')
+    const order = await resolveUsOrderForAction(session, options)
+    const input = usOrderCorrectionInput(options, order)
+    const data = await callUsGraphql(
+      session,
+      'ConfirmOrderUpdating',
+      CONFIRM_ORDER_UPDATE,
+      { input: { order: input } },
+      { tradePassword: requireUsTradePassword(session, 'orders.cash.estimateCorrectionConfirm') },
+    )
+    return orderUpdatePreviewFromConfirmation(data, order, options)
+  },
+  placeCorrection: async (options: PlaceOrderCorrectionOptions): Promise<OrderReceipt> => {
+    requireUsOrderCorrectionOptions(options, 'orders.cash.placeCorrection')
+    if (options.allowTrading !== true) {
+      throw new Error('orders.cash.placeCorrection requires allowTrading: true')
+    }
+    const order = await resolveUsOrderForAction(session, options)
+    const input = usOrderCorrectionInput(options, order)
+    const data = await callUsGraphql(
+      session,
+      'SubmitOrderUpdating',
+      SUBMIT_ORDER_UPDATE,
+      { input: { order: input } },
+      { tradePassword: requireUsTradePassword(session, 'orders.cash.placeCorrection') },
+    )
+    const updatedOrder = objectAt(data, ['updateForeignStockOrder', 'order'])
+    return orderReceiptFromUsOrder(updatedOrder, 'updateForeignStockOrder')
+  },
+  estimateCancel: async (options: OrderCancelOptions): Promise<OrderPreview> => {
+    const order = await resolveUsOrderForAction(session, options)
+    const orderSubNo = requireUsOrderSubNo(order, options, 'orders.cash.estimateCancel')
+    await callUsGraphql(session, 'ConfirmCancelOrderInitialization', CONFIRM_CANCEL_ORDER, {
+      input: { orderSubNo },
+    })
+    return {
+      issue: order.issue,
+      side: order.side,
+      quantity: order.unexecutedQuantity ?? order.quantity ?? undefined,
+      price: order.price,
+      estimatedAmount: usd(stringAt(order, ['frnNetAmount'])),
+      commission: usd(''),
+      tax: usd(''),
+      warnings: [],
+      confirmationId: orderSubNo,
+      correction: usOrderCorrectionPreOrderFromOrder(order),
+    }
+  },
   placeCancel: async (options: PlaceOrderCancelOptions): Promise<OrderReceipt> => {
     if (options.allowTrading !== true) {
       throw new Error('orders.cash.placeCancel requires allowTrading: true')
     }
-    throw new Error('orders.cash.placeCancel is not implemented for US stock markets')
+    const order = await resolveUsOrderForAction(session, options)
+    const orderSubNo = requireUsOrderSubNo(order, options, 'orders.cash.placeCancel')
+    await callUsGraphql(session, 'ConfirmCancelOrderInitialization', CONFIRM_CANCEL_ORDER, {
+      input: { orderSubNo },
+    })
+    const data = await callUsGraphql(
+      session,
+      'SubmitOrderCancelling',
+      SUBMIT_ORDER_CANCEL,
+      { input: { orderSubNo } },
+      {
+        tradePassword:
+          options.tradePassword ?? requireUsTradePassword(session, 'orders.cash.placeCancel'),
+      },
+    )
+    const deletedOrder = objectAt(data, ['deleteForeignStockOrder', 'order'])
+    return orderReceiptFromUsOrder(deletedOrder, 'deleteForeignStockOrder')
   },
 })
 
@@ -224,39 +337,75 @@ const fetchStockDetail = async (session: SbiSession, options: IssueOptions, meth
   return { stock, marketPrice }
 }
 
-const fetchUsCashPositions = async (session: SbiSession): Promise<CashPositionList> => {
+const fetchUsCashPositions = async (
+  session: SbiSession,
+  options?: CashPositionOptions,
+): Promise<CashPositionList> => {
   const data = await callUsGraphql(session, 'GetSecuritiesBalanceList', SECURITIES_BALANCES, {
     input: { countryCode: COUNTRY_US, page: { pageNum: 1, pageSize: 999 } },
   })
   const balances = arrayAt(data, ['listSecuritiesBalances', 'securitiesBalances'])
-  const positions = balances.map((balance): CashPosition => {
-    const securities = objectAt(balance, ['securities'])
-    const evaluation = objectAt(balance, ['evaluationProfitLoss'])
-    const market = usMarketFromGraphql(objectAt(balance, ['market']))
-    return {
-      issue: {
-        code: stringAt(securities, ['securitiesCode']) ?? '',
-        market,
-        name:
-          stringAt(securities, ['securitiesName']) ?? stringAt(securities, ['securitiesShortName']),
-      },
-      accountType: mapUsSpecificAccount(stringAt(balance, ['specificAccountCode'])),
-      depositType: mapUsSpecificAccount(stringAt(balance, ['specificAccountCode'])),
-      quantity: numberAt(balance, ['securitiesQuantity']),
-      currentPrice: usd(stringAt(balance, ['stockPrice', 'last'])),
-      averagePrice: usd(stringAt(balance, ['frnAcquisitionPrice'])),
-      purchasePrice: usd(stringAt(balance, ['frnAcquisitionPrice'])),
-      marketValue: usd(stringAt(evaluation, ['frnEvaluationAmount'])),
-      valuationPrice: usd(stringAt(evaluation, ['frnEvaluationAmount'])),
-      profitLoss: signed(stringAt(evaluation, ['frnEvaluationProfitLoss'])),
-      profitLossRate: percent(stringAt(evaluation, ['frnEvaluationProfitLossPercent'])),
-    }
-  })
+  const positions = balances
+    .map((balance) => cashPositionFromUsBalance(balance))
+    .filter((position) => {
+      if (options?.issueCode && position.issue.code !== options.issueCode) return false
+      if (options?.market && position.issue.market !== options.market) return false
+      if (options?.accountType && position.accountType !== options.accountType) return false
+      return true
+    })
+  const limited = limitList(positions, options)
   return {
-    positions,
+    positions: limited,
     totalCount: positions.length,
-    totalMarketValue: sumAmounts(positions.map((position) => position.marketValue)),
-    totalProfitLoss: sumSigned(positions.map((position) => position.profitLoss)),
+    totalMarketValue: sumAmounts(limited.map((position) => position.marketValue)),
+    totalProfitLoss: sumSigned(limited.map((position) => position.profitLoss)),
+  }
+}
+
+const fetchUsCashPositionDetail = async (
+  session: SbiSession,
+  options?: CashPositionOptions,
+): Promise<CashPositionList> => {
+  if (options?.market) requireUsMarket(options.market, 'account.positions.cashDetail')
+  if (!options?.issueCode) {
+    throw new Error('account.positions.cashDetail requires issueCode for US stock positions')
+  }
+
+  const baseList = await fetchUsCashPositions(session, options)
+  const base = baseList.positions[0]
+  if (!base) {
+    throw new Error('account.positions.cashDetail could not find the requested US stock position')
+  }
+
+  const data = await callUsGraphql(
+    session,
+    'GetSecuritiesBalanceDetail',
+    SECURITIES_BALANCE_DETAIL,
+    {
+      inputSecuritiesBalance: {
+        productCode: 'FOREIGN_STOCK',
+        countryCode: COUNTRY_US,
+        currencyCode: 'USD',
+        specificAccountCode: usSpecificAccountCode(base.accountType),
+        securitiesCode: base.issue.code,
+      },
+      inputExchangeRate: { currencyPair: 'USDJPY' },
+      inputStockSecurities: {
+        countryCode: COUNTRY_US,
+        securitiesCode: base.issue.code,
+      },
+    },
+  )
+  const balance = objectAt(data, ['getSecuritiesBalance'])
+  if (!balance) {
+    throw new Error('account.positions.cashDetail returned no US stock balance detail')
+  }
+  const position = cashPositionFromUsBalance(balance, base.issue.market)
+  return {
+    positions: [position],
+    totalCount: 1,
+    totalMarketValue: position.marketValue,
+    totalProfitLoss: position.profitLoss,
   }
 }
 
@@ -264,10 +413,21 @@ const fetchUsOrders = async (
   session: SbiSession,
   options?: OrderInquiryOptions,
 ): Promise<OrderList> => {
+  const dateRange = usInquiryDateRange(options)
   const data = await callUsGraphql(session, 'GetOrderList', ORDER_LIST, {
-    input: { countryCode: COUNTRY_US, page: { pageNum: 1, pageSize: options?.limit ?? 999 } },
+    input: {
+      countryCode: COUNTRY_US,
+      securitiesCode: options?.issueCode,
+      orderDateFrom: dateRange.from,
+      orderDateTo: dateRange.to,
+      orderDateType: 'ORDER_INPUT_DATE',
+      page: { pageNum: options?.index ?? 1, pageSize: options?.limit ?? 999 },
+    },
   })
-  const orders = arrayAt(data, ['listForeignStockOrders', 'orderDecodes']).map(orderFromGraphql)
+  const orders = arrayAt(data, ['listForeignStockOrders', 'orderDecodes']).map((order) =>
+    orderFromGraphql(order),
+  )
+  const list = objectAt(data, ['listForeignStockOrders'])
   return {
     orders: orders.filter((order) => {
       if (options?.issueCode && order.issue.code !== options.issueCode) return false
@@ -275,6 +435,65 @@ const fetchUsOrders = async (
       if (options?.status && order.status !== options.status) return false
       return true
     }),
+    hasMore: booleanAt(list, ['page', 'hasNextPage']),
+  }
+}
+
+const fetchUsOrderDetail = async (
+  session: SbiSession,
+  options: OrderDetailOptions,
+): Promise<Order> => {
+  requireUsMarket(options.market, 'orders.inquiry.detail')
+  const base = await resolveUsOrderForAction(session, options)
+  const orderNo = base.orderNumber ?? options.orderNumber
+  if (!orderNo) throw new Error('orders.inquiry.detail requires orderNumber for US stock orders')
+  const data = await callUsGraphql(session, 'GetOrderDetail', ORDER_DETAIL, {
+    input: { orderNo },
+    inputStockSecurities: {
+      countryCode: COUNTRY_US,
+      securitiesCode: base.issue.code,
+    },
+    inputStockPrice: {
+      countryCode: COUNTRY_US,
+      rics: [usRic(base.issue.code, requireUsOrderMarket(base, 'orders.inquiry.detail'))],
+    },
+  })
+  const detail = objectAt(data, ['getForeignStockOrderDetail', 'orderDetail'])
+  const order = objectAt(detail, ['order'])
+  if (!order) throw new Error('orders.inquiry.detail returned no US stock order detail')
+  return orderFromGraphql(order, {
+    issue: base.issue,
+    cancelable: booleanAt(detail, ['cancelable']),
+    correctable: booleanAt(detail, ['correctable']),
+  })
+}
+
+const fetchUsTradeRecords = async (
+  session: SbiSession,
+  options: TradeRecordInquiryOptions,
+): Promise<TradeRecordList> => {
+  if (options.market) requireUsMarket(options.market, 'orders.inquiry.tradeRecords')
+  const dateRange = usInquiryDateRange(options)
+  const data = await callUsGraphql(session, 'GetTradeRecordList', TRADE_RECORD_LIST, {
+    input: {
+      productCode: 'FOREIGN_STOCK',
+      countryCode: COUNTRY_US,
+      securitiesCode: options.issueCode,
+      specificAccountCode: usSpecificAccountCode(options.accountType),
+      tradeHistoryType: 'TRADE_RECORD',
+      searchDateType: 'TRADE_DATE_BASE',
+      searchDateFrom: dateRange.from,
+      searchDateTo: dateRange.to,
+      page: { pageNum: options.index ?? 1, pageSize: options.limit ?? 999 },
+    },
+  })
+  const list = objectAt(data, ['listTradeRecords'])
+  const records = arrayAt(list, ['tradeRecords']).map((record) =>
+    tradeRecordFromGraphql(record, options.market),
+  )
+  return {
+    records,
+    hasMore: booleanAt(list, ['page', 'hasNextPage']),
   }
 }
 
@@ -450,16 +669,23 @@ const orderPreviewFromConfirmation = (
   }
 }
 
-const orderFromGraphql = (value: unknown): Order => {
-  const market = usMarketFromGraphql(objectAt(value, ['market']))
+const orderFromGraphql = (
+  value: unknown,
+  extra: { issue?: Order['issue']; cancelable?: boolean; correctable?: boolean } = {},
+): Order => {
+  const market = extra.issue?.market ?? usMarketFromGraphql(objectAt(value, ['market']))
   const securities = objectAt(value, ['securities'])
+  const orderNo = stringAt(value, ['orderNo'])
+  const orderSubNo = stringAt(value, ['orderSubNo'])
   return {
-    id: stringAt(value, ['orderNo']) ?? stringAt(value, ['orderSubNo']) ?? '',
+    id: orderSubNo ?? orderNo ?? '',
     issue: {
-      code: stringAt(securities, ['securitiesCode']) ?? '',
+      code: extra.issue?.code ?? stringAt(securities, ['securitiesCode']) ?? '',
       market,
       name:
-        stringAt(securities, ['securitiesName']) ?? stringAt(securities, ['securitiesShortName']),
+        extra.issue?.name ??
+        stringAt(securities, ['securitiesName']) ??
+        stringAt(securities, ['securitiesShortName']),
     },
     side: stringAt(value, ['buySellCode']) === 'SELL' ? 'sell' : 'buy',
     status: mapOrderStatus(stringAt(value, ['orderStatus'])),
@@ -470,7 +696,204 @@ const orderFromGraphql = (value: unknown): Order => {
     price: usd(stringAt(value, ['orderPrice'])),
     executedPrice: usd(stringAt(value, ['executionAveragePrice'])),
     orderedAt: stringAt(value, ['orderInputDatetime']),
-    orderNumber: stringAt(value, ['orderNo']),
+    expiresAt: stringAt(value, ['expiredDatetime']) ?? stringAt(value, ['orderTerm']),
+    orderNumber: orderNo,
+    orderSubNo,
+    accountType: mapUsSpecificAccount(stringAt(value, ['specificAccountCode'])),
+    depositType: mapUsSpecificAccount(stringAt(value, ['specificAccountCode'])),
+    cancelable: extra.cancelable,
+    correctable: extra.correctable,
+  }
+}
+
+const cashPositionFromUsBalance = (balance: unknown, fallbackMarket?: MarketCode): CashPosition => {
+  const securities = objectAt(balance, ['securities'])
+  const evaluation = objectAt(balance, ['evaluationProfitLoss'])
+  const market = usMarketFromGraphql(objectAt(balance, ['market']), fallbackMarket)
+  return {
+    issue: {
+      code: stringAt(securities, ['securitiesCode']) ?? '',
+      market,
+      name:
+        stringAt(securities, ['securitiesName']) ?? stringAt(securities, ['securitiesShortName']),
+    },
+    accountType: mapUsSpecificAccount(stringAt(balance, ['specificAccountCode'])),
+    depositType: mapUsSpecificAccount(stringAt(balance, ['specificAccountCode'])),
+    quantity: numberAt(balance, ['securitiesQuantity']),
+    currentPrice: usd(stringAt(balance, ['stockPrice', 'last'])),
+    averagePrice: usd(stringAt(balance, ['frnAcquisitionPrice'])),
+    purchasePrice: usd(stringAt(balance, ['frnAcquisitionPrice'])),
+    marketValue: usd(stringAt(evaluation, ['frnEvaluationAmount'])),
+    valuationPrice: usd(stringAt(evaluation, ['frnEvaluationAmount'])),
+    profitLoss: signed(stringAt(evaluation, ['frnEvaluationProfitLoss'])),
+    profitLossRate: percent(stringAt(evaluation, ['frnEvaluationProfitLossPercent'])),
+  }
+}
+
+const resolveUsOrderForAction = async (
+  session: SbiSession,
+  options: {
+    orderNumber?: string
+    orderId?: string
+    issueCode?: string
+    market?: MarketCode
+  },
+): Promise<Order> => {
+  if (options.market) requireUsMarket(options.market, 'US stock order action')
+  const orders = await fetchUsOrders(session, {
+    issueCode: options.issueCode,
+    market: options.market,
+    limit: 999,
+  })
+  const order = orders.orders.find((candidate) => {
+    const ids = [candidate.id, candidate.orderNumber, candidate.orderSubNo].filter(Boolean)
+    return (
+      (options.orderId != null && ids.includes(options.orderId)) ||
+      (options.orderNumber != null && ids.includes(options.orderNumber))
+    )
+  })
+  if (!order) {
+    throw new Error('US stock order action could not find the requested order in order inquiry')
+  }
+  return order
+}
+
+const requireUsOrderSubNo = (
+  order: Order,
+  options: { orderId?: string; orderNumber?: string },
+  methodName: string,
+) => {
+  const orderSubNo = order.orderSubNo ?? order.id ?? options.orderId ?? options.orderNumber
+  if (!orderSubNo) throw new Error(`${methodName} requires US stock orderSubNo`)
+  return orderSubNo
+}
+
+const requireUsOrderMarket = (order: Order, methodName: string) => {
+  if (!order.issue.market) throw new Error(`${methodName} requires US stock order market`)
+  requireUsMarket(order.issue.market, methodName)
+  return order.issue.market
+}
+
+const requireUsOrderCorrectionOptions = (options: OrderCorrectionOptions, methodName: string) => {
+  if (options.market) requireUsMarket(options.market, methodName)
+  if (options.orderMethod && options.orderMethod !== 'normal') {
+    throw new Error(`${methodName} does not support stop/OCO/IFD correction for US stocks`)
+  }
+  if (options.secondaryPriceCondition || options.secondaryPrice || options.ifdPriceCondition) {
+    throw new Error(`${methodName} does not support OCO/IFD correction for US stocks`)
+  }
+  if (
+    options.triggerZone ||
+    options.triggerPrice ||
+    options.ifdOrderMethod ||
+    options.ifdTriggerZone
+  ) {
+    throw new Error(`${methodName} does not support stop correction for US stocks`)
+  }
+  if (!Number.isFinite(options.quantity) || options.quantity == null || options.quantity <= 0) {
+    throw new Error(`${methodName} requires quantity for US stock correction`)
+  }
+  const priceCondition = options.priceCondition ?? 'limit'
+  if (priceCondition !== 'market' && priceCondition !== 'limit') {
+    throw new Error(`${methodName} supports only market or limit correction for US stocks`)
+  }
+  if (priceCondition === 'limit' && options.price == null) {
+    throw new Error(`${methodName} requires price for limit US stock correction`)
+  }
+  if (priceCondition === 'market' && options.price != null) {
+    throw new Error(`${methodName} cannot specify price for market US stock correction`)
+  }
+}
+
+const usOrderCorrectionInput = (options: OrderCorrectionOptions, order: Order) => {
+  const priceCondition = options.priceCondition ?? 'limit'
+  const orderSubNo = requireUsOrderSubNo(order, options, 'orders.cash.correction')
+  return {
+    orderSubNo,
+    countryCode: COUNTRY_US,
+    orderQuantity: String(options.quantity),
+    orderPriceKindCode: priceCondition === 'market' ? 'MARKET' : 'LIMIT',
+    orderPrice: priceCondition === 'market' ? undefined : String(options.price),
+    stopPrice: undefined,
+  }
+}
+
+const usOrderCorrectionPreOrderFromOrder = (order: Order, init?: Record<string, unknown>) => ({
+  issue: order.issue,
+  details: [],
+  orderNumber: order.orderNumber,
+  orderId: order.orderSubNo ?? order.id,
+  status: order.status,
+  statusText: order.statusText,
+  quantity: order.unexecutedQuantity ?? order.quantity,
+  price: order.price?.value,
+  priceAmount: order.price,
+  priceSteps: arrayAt(init, ['tickSizes']).map((tick) => ({
+    from: usd(stringAt(tick, ['tickSize']) ?? stringAt(tick, ['basePriceFrom'])),
+    to: usd(stringAt(tick, ['basePriceTo'])),
+  })),
+  marketName: order.issue.market,
+})
+
+const orderUpdatePreviewFromConfirmation = (
+  data: Record<string, unknown>,
+  order: Order,
+  options: OrderCorrectionOptions,
+): OrderPreview => {
+  const confirmation = objectAt(data, ['confirmForeignStockUpdatedOrder'])
+  const confirmedOrder = objectAt(confirmation, ['order'])
+  return {
+    issue: order.issue,
+    side: order.side,
+    quantity: options.quantity,
+    price: usd(stringAt(confirmedOrder, ['orderPrice']) ?? String(options.price ?? '')),
+    estimatedAmount: usd(stringAt(confirmedOrder, ['frnNetAmount'])),
+    commission: usd(stringAt(confirmedOrder, ['frnCommissionAmount'])),
+    tax: usd(stringAt(confirmedOrder, ['frnCommissionCtax'])),
+    warnings: stringArrayAt(confirmation, ['warningStatuses']),
+    confirmationId: stringAt(confirmedOrder, ['orderSubNo']) ?? order.orderSubNo,
+    correction: usOrderCorrectionPreOrderFromOrder(order),
+  }
+}
+
+const orderReceiptFromUsOrder = (order: unknown, sourceName: string): OrderReceipt => {
+  if (!order) throw new Error(`${sourceName} returned no US stock order`)
+  return {
+    accepted: true,
+    orderId: stringAt(order, ['orderSubNo']) ?? stringAt(order, ['orderNo']),
+    acceptedAt: stringAt(order, ['orderInputDatetime']),
+    message: stringAt(order, ['orderStatus']) ?? sourceName,
+  }
+}
+
+const tradeRecordFromGraphql = (
+  value: unknown,
+  fallbackMarket: MarketCode = 'XNAS',
+): TradeRecord => {
+  const securities = objectAt(value, ['securities'])
+  const code = stringAt(securities, ['securitiesCode']) ?? ''
+  const tradeDate = stringAt(value, ['tradeDate'])
+  const typeCode = stringAt(value, ['tradeRecordTypeCode'])
+  return {
+    id: [code, tradeDate, typeCode, stringAt(value, ['valueDate'])].filter(Boolean).join(':'),
+    issue: {
+      code,
+      market: fallbackMarket,
+      name:
+        stringAt(securities, ['securitiesName']) ?? stringAt(securities, ['securitiesShortName']),
+    },
+    tradeRecordTypeCode: typeCode,
+    tradeCurrencyCode: stringAt(value, ['tradeCurrencyCode']),
+    listedSecuritiesStatus: stringAt(value, ['listedSecuritiesStatus']),
+    orderPriceKindCode: stringAt(value, ['orderPriceKindCode']),
+    accountType: mapUsSpecificAccount(stringAt(value, ['specificAccountCode'])),
+    settlementCurrencyCode: stringAt(value, ['settlementCurrencyCode']),
+    amount: usd(stringAt(value, ['amount'])),
+    quantity: numberAt(value, ['quantity']),
+    price: usd(stringAt(value, ['price'])),
+    tradeDate,
+    valueDate: stringAt(value, ['valueDate']),
+    marginCloseLimitType: stringAt(value, ['marginCloseLimitType']),
   }
 }
 
@@ -547,6 +970,35 @@ const normalizeUsOrderDate = (value: string) => {
     throw new Error('US stock orderDate must be yyyy-MM-dd or yyyyMMdd')
   }
   return normalized
+}
+
+const usInquiryDateRange = (options?: { from?: string; to?: string }) => {
+  const to = normalizeUsOptionalDate(options?.to) ?? formatUsDate(new Date())
+  const from =
+    normalizeUsOptionalDate(options?.from) ??
+    formatUsDate(addDays(parseUsDate(to), -DEFAULT_US_INQUIRY_LOOKBACK_DAYS))
+  return { from, to }
+}
+
+const parseUsDate = (value: string) => {
+  const date = new Date(`${value}T00:00:00.000Z`)
+  if (Number.isNaN(date.getTime())) {
+    throw new Error('US stock inquiry date must be yyyy-MM-dd or yyyyMMdd')
+  }
+  return date
+}
+
+const addDays = (date: Date, days: number) => {
+  const next = new Date(date)
+  next.setUTCDate(next.getUTCDate() + days)
+  return next
+}
+
+const formatUsDate = (date: Date) => {
+  const year = date.getUTCFullYear()
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(date.getUTCDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 const usGraphqlMarketCode = (market: MarketCode) => {
@@ -705,6 +1157,20 @@ const stringArrayAt = (source: unknown, path: string[]) =>
 
 const numberAt = (source: unknown, path: string[]) => parseNumber(stringAt(source, path))
 
+const booleanAt = (source: unknown, path: string[]) => {
+  const value = valueAt(source, path)
+  return typeof value === 'boolean' ? value : undefined
+}
+
+const limitList = <T>(items: T[], options?: { index?: number; limit?: number }) => {
+  const start = Math.max((options?.index ?? 1) - 1, 0)
+  const end = options?.limit ? start + options.limit : undefined
+  return items.slice(start, end)
+}
+
+const normalizeUsOptionalDate = (value: string | undefined) =>
+  value ? normalizeUsOrderDate(value) : undefined
+
 const valueAt = (source: unknown, path: string[]): unknown =>
   path.reduce<unknown>((current, key) => {
     if (!current || typeof current !== 'object') return undefined
@@ -801,10 +1267,138 @@ query GetOrderList($input: Input_fstock_order_ListForeignStockOrdersRequest) {
   listForeignStockOrders(input: $input) {
     orderDecodes {
       orderNo orderSubNo buySellCode orderStatus orderQuantity unexecutedQuantity executionQuantity
-      orderPrice executionAveragePrice orderInputDatetime
+      orderPrice executionAveragePrice orderInputDatetime orderTerm specificAccountCode
       securities { securitiesCode securitiesName securitiesShortName }
       market { marketCode marketName marketShortName }
     }
     page { hasNextPage pageNum pageSize }
   }
+}`
+
+const ORDER_UPDATE_INITIAL_DATA = `
+query GetOrderUpdatingInitialData($countryCode: common_enums_CountryEnum_Country, $securitiesCode: String, $baseDate: String, $orderSubNo: String, $rics: [String]) {
+  getForeignStockUpdatedOrderInitialization(input: { orderSubNo: $orderSubNo }) {
+    priceRangeLimitMax priceRangeLimitMin priceRangeNoLimit
+    tickSizes { basePriceFrom basePriceTo tickSize }
+    orderPriceKindCodes buyPossibleAmount
+    order {
+      orderNo orderSubNo buySellCode orderStatus orderQuantity unexecutedQuantity executionQuantity
+      orderPrice executionAveragePrice orderInputDatetime orderTerm frnNetAmount frnCommissionAmount frnCommissionCtax
+      securities { securitiesCode securitiesName securitiesShortName }
+      market { marketCode marketName marketShortName }
+    }
+  }
+  getForeignStockSecurities(input: { countryCode: $countryCode securitiesCode: $securitiesCode }) {
+    securities { countryCode securitiesCode securitiesName securitiesShortName ric }
+    market { marketCode marketName marketShortName timeZone }
+  }
+  checkJrNisaRestrictedReleaseBefore(input: { baseDate: $baseDate }) { restrictedReleaseBefore }
+  listMarketPrices(input: { countryCode: $countryCode rics: $rics }) {
+    marketPrices { ask askSize bid bidSize price { last lastDatetime change changePercent } }
+  }
+  checkJrNisaOpen { opened }
+}`
+
+const CONFIRM_ORDER_UPDATE = `
+query ConfirmOrderUpdating($input: Input_fstock_order_ConfirmForeignStockUpdatedOrderRequest) {
+  confirmForeignStockUpdatedOrder(input: $input) {
+    buyPossibleAmount nisaBuyLimitAmount warningStatuses
+    order {
+      orderNo orderSubNo buySellCode orderStatus orderQuantity unexecutedQuantity executionQuantity
+      orderPrice executionAveragePrice orderInputDatetime orderTerm frnNetAmount frnCommissionAmount frnCommissionCtax
+      securities { securitiesCode securitiesName securitiesShortName }
+      market { marketCode marketName marketShortName }
+    }
+  }
+  checkJrNisaOpen { opened }
+}`
+
+const SUBMIT_ORDER_UPDATE = `
+mutation SubmitOrderUpdating($input: Input_fstock_order_UpdateForeignStockOrderRequest) {
+  updateForeignStockOrder(input: $input) {
+    warningStatuses
+    order {
+      orderNo orderSubNo buySellCode orderStatus orderQuantity unexecutedQuantity executionQuantity
+      orderPrice executionAveragePrice orderInputDatetime orderTerm
+      securities { securitiesCode securitiesName securitiesShortName }
+      market { marketCode marketName marketShortName }
+    }
+  }
+}`
+
+const CONFIRM_CANCEL_ORDER = `
+query ConfirmCancelOrderInitialization($input: Input_fstock_order_GetForeignStockDeletedOrderInitializationRequest) {
+  getForeignStockDeletedOrderInitialization(input: $input) { __typename }
+}`
+
+const SUBMIT_ORDER_CANCEL = `
+mutation SubmitOrderCancelling($input: Input_fstock_order_DeleteForeignStockOrderRequest) {
+  deleteForeignStockOrder(input: $input) {
+    order {
+      orderNo orderSubNo buySellCode orderStatus orderQuantity unexecutedQuantity executionQuantity
+      orderPrice executionAveragePrice orderInputDatetime orderTerm
+      securities { securitiesCode securitiesName securitiesShortName }
+      market { marketCode marketName marketShortName }
+    }
+  }
+}`
+
+const ORDER_DETAIL = `
+query GetOrderDetail($input: Input_fstock_order_GetForeignStockOrderDetailRequest, $inputStockSecurities: Input_fstock_securities_GetForeignStockSecuritiesRequest, $inputStockPrice: Input_information_marketprice_ListMarketPricesRequest) {
+  getForeignStockOrderDetail(input: $input) {
+    orderDetail {
+      cancelable correctable
+      order {
+        orderNo orderSubNo buySellCode specificAccountCode orderQuantity unexecutedQuantity
+        orderPriceKindCode stopPrice trailingStopAmount noLimitPrice orderLimitCode orderTerm
+        settlementMethodCode settlementCurrencyCode orderPrice executionAveragePrice orderInputDatetime
+        executionDatetime orderStatus tradeCurrencyCode expiredDatetime executionQuantity frnTradeDate
+        tradeDate valueDate frnCommissionAmount commissionAmount frnCommissionCtax commissionCtax
+        frnLocalCharge localCharge frnLocalNetAmount localNetAmount frnGrossAmount grossAmount
+        frnNetAmount netAmount executionNetAmount exchangeRate executionStatus workingStatus stockTradeType
+        market { marketCode marketName marketShortName timeZone }
+      }
+    }
+  }
+  getForeignStockSecurities(input: $inputStockSecurities) {
+    securities { countryCode securitiesCode securitiesName securitiesShortName ric }
+    market { marketCode marketName marketShortName timeZone }
+  }
+  listMarketPrices(input: $inputStockPrice) {
+    marketPrices { ask askSize bid bidSize price { last lastDatetime change changePercent } }
+  }
+  checkJrNisaOpen { opened }
+}`
+
+const TRADE_RECORD_LIST = `
+query GetTradeRecordList($input: Input_account_ListTradeRecordsRequest) {
+  listTradeRecords(input: $input) {
+    tradeRecords {
+      securities { countryCode securitiesCode securitiesName securitiesShortName ric }
+      tradeRecordTypeCode tradeCurrencyCode listedSecuritiesStatus orderPriceKindCode
+      specificAccountCode settlementCurrencyCode amount quantity price tradeDate valueDate marginCloseLimitType
+    }
+    page { hasNextPage }
+  }
+  checkJrNisaOpen { opened }
+}`
+
+const SECURITIES_BALANCE_DETAIL = `
+query GetSecuritiesBalanceDetail($inputSecuritiesBalance: Input_account_balance_GetSecuritiesBalanceRequest, $inputExchangeRate: Input_exchange_master_GetExchangeRateRequest, $inputStockSecurities: Input_fstock_securities_GetForeignStockSecuritiesRequest) {
+  getSecuritiesBalance(input: $inputSecuritiesBalance) {
+    securities { countryCode securitiesCode securitiesName securitiesShortName ric }
+    listedSecuritiesStatus stockPrice { last lastDatetime tickArrow change changePercent open high low prevClose volume }
+    evaluationProfitLoss {
+      frnEvaluationAmount frnEvaluationProfitLoss evaluationAmount evaluationProfitLoss evaluationProfitLossPercent frnEvaluationProfitLossPercent
+    }
+    specificAccountCode securitiesQuantity sellFixedOrderQuantity frnAcquisitionPrice acquisitionPrice
+    frnAcquisitionAmount acquisitionAmount countryCode currencyCode attentionSecurities
+    market { marketCode marketName marketShortName timeZone }
+  }
+  getExchangeRate(input: $inputExchangeRate) { rateDatetime exchangeRate }
+  getForeignStockSecurities(input: $inputStockSecurities) {
+    securities { countryCode securitiesCode securitiesName securitiesShortName ric }
+    market { marketCode marketName marketShortName timeZone }
+  }
+  checkJrNisaOpen { opened }
 }`

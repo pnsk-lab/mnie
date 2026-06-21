@@ -1,7 +1,16 @@
 export type TradeSide = 'buy' | 'sell'
 export type OrderKind = 'standard' | 's'
 export type CashOrderAccountType = 'specific' | 'general' | 'growthInvestment' | 'nisa'
-export type CashOrderMarket = 'auto' | 'XTKS' | 'XNAS' | 'XNYS' | 'ARCX' | 'STK'
+export type CashOrderMarket =
+  | 'auto'
+  | 'XTKS'
+  | 'XNGO'
+  | 'XFKA'
+  | 'XSAP'
+  | 'XNAS'
+  | 'XNYS'
+  | 'ARCX'
+  | 'STK'
 export type CashOrderPriceCondition =
   | 'limit'
   | 'limitAtOpen'
@@ -31,6 +40,11 @@ export type OrderPreview = {
   }
   side: string
   quantity: number
+  price?: {
+    value: number | null
+    text: string
+    currency?: string
+  }
   warnings: string[]
   confirmationId?: string
   message?: string
@@ -61,10 +75,24 @@ export type ChartNotice = {
   detail?: string
 }
 
+export type MarketIndex = {
+  code?: string
+  name: string
+  value: number | null
+  valueText: string
+  change: number | null
+  changeText: string
+  changeRate: number | null
+  changeRateText: string
+  sign: 'positive' | 'negative' | 'zero'
+  timestamp?: string
+}
+
 export type Stock = {
   code: string
   name: string
   symbol: string
+  searchText?: string
   country: string
   market: string
   sector: string
@@ -89,16 +117,45 @@ export type Stock = {
 
 export type OrderRow = {
   id: string
+  code: string
   date: string
   stock: string
   market: string
   side: TradeSide
   kind: OrderKind
   quantity: number | null
+  unexecutedQuantity?: number | null
+  executedQuantity?: number | null
   price: number | null
   status: '注文中' | '約定済' | '取消済'
   orderNumber?: string
+  orderSubNo?: string
   tradeId?: string
+  accountType?: string
+  cancelable?: boolean
+  correctable?: boolean
+}
+
+export type OrderDetail = OrderRow & {
+  expiresAt?: string
+  statusText?: string
+  depositType?: string
+  accountInformation?: string
+}
+
+export type TradeRecordRow = {
+  id: string
+  code: string
+  stock: string
+  market: string
+  type: string
+  quantity: number | null
+  price: number | null
+  amount: number | null
+  tradeDate?: string
+  valueDate?: string
+  accountType?: string
+  settlementCurrencyCode?: string
 }
 
 export type Position = {
@@ -107,8 +164,10 @@ export type Position = {
   market: string
   quantity: number
   avgPrice: number
+  currentPrice?: number | null
   marketValue: number
   profitLoss: number
   profitLossRate: number
   type?: string
+  accountType?: CashOrderAccountType | string
 }

@@ -17,6 +17,8 @@ import type {
   CashOrderTerm,
   CashOrderTriggerZone,
   JsonRpcResponse,
+  MarketIndex,
+  OrderDetail,
   OrderKind,
   OrderPreview,
   OrderRow,
@@ -24,6 +26,7 @@ import type {
   RealtimePricePoint,
   RpcMessage,
   Stock,
+  TradeRecordRow,
   TradeSide,
 } from '../../types/trading'
 import {
@@ -34,7 +37,9 @@ import {
   isOrderPreview,
   issueFrom,
   marketDateKey,
+  marketIndexFromApi,
   numberValue,
+  orderDetailFromApi,
   orderFromApi,
   orderHistoryKey,
   orderHistoryResultNotice,
@@ -44,6 +49,7 @@ import {
   stockFromBoard,
   stockFromIssue,
   stockFromPosition,
+  tradeRecordFromApi,
   textValue,
   type RecordLike,
 } from './trading-data'
@@ -157,6 +163,8 @@ const displayApkOrderTermDate = (value: string) => {
 }
 
 const usMarkets = new Set(['XNAS', 'XNYS', 'ARCX'])
+const isUsMarket = (market: string) => usMarkets.has(market)
+const usOrderMarkets = ['XNAS', 'XNYS', 'ARCX'] as const
 
 const parseApkExchangeMarkets = (value: string) => {
   const markets: CashOrderMarket[] = []
@@ -212,6 +220,7 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
   const holdingsMarketValue = ref(0)
   const totalProfitLoss = ref(0)
   const totalProfitLossRate = ref(0)
+  const marketIndexes = ref<MarketIndex[]>([])
   const orders = ref<OrderRow[]>([])
   const cancelingOrderKey = ref('')
   const orderHistoryLoaded = ref(false)
@@ -522,7 +531,8 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
           const matchesQuery =
             stock.name.toLowerCase().includes(query) ||
             stock.code.includes(query) ||
-            stock.symbol.toLowerCase().includes(query)
+            stock.symbol.toLowerCase().includes(query) ||
+            stock.searchText?.toLowerCase().includes(query)
           return matchesQuery && matchesFilters(stock)
         })
       : viewedStocks.value.filter(matchesFilters)
@@ -753,6 +763,7 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
         price: stock.price || current?.price || 0,
         change: stock.change || current?.change || 0,
         changeAmount: stock.changeAmount || current?.changeAmount || 0,
+        searchText: stock.searchText || current?.searchText || '',
         history: stock.price ? stock.history : (current?.history ?? stock.history),
         box: stock.price ? stock.box : (current?.box ?? stock.box),
       })
@@ -771,16 +782,19 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
   const loadOrderHistoryFromSdk = async () => {
     orderHistoryLoaded.value = false
     orderHistoryNotice.value = ''
-    const [openOrdersResult, executionsTodayResult] = await Promise.allSettled([
+    const orderResults = await Promise.allSettled([
       rpcCallOptional<RecordLike>('orders.inquiry.open'),
       rpcCallOptional<RecordLike>('orders.inquiry.executionsToday'),
-      rpcCallOptional<RecordLike>('orders.inquiry.open', { market: 'XNAS' }),
-      rpcCallOptional<RecordLike>('orders.inquiry.executionsToday', { market: 'XNAS' }),
+      ...usOrderMarkets.flatMap((market) => [
+        rpcCallOptional<RecordLike>('orders.inquiry.open', { market }),
+        rpcCallOptional<RecordLike>('orders.inquiry.executionsToday', { market }),
+      ]),
     ])
+    const [openOrdersResult, executionsTodayResult] = orderResults
     if (openOrdersResult.status === 'rejected' && executionsTodayResult.status === 'rejected') {
       throw openOrdersResult.reason
     }
-    const nextOrders = fulfilledValues([openOrdersResult, executionsTodayResult])
+    const nextOrders = fulfilledValues(orderResults)
       .flatMap((orderList) => asArray(orderList.orders))
       .map(orderFromApi)
       .filter((order): order is OrderRow => Boolean(order))
@@ -790,9 +804,7 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
     orders.value = [...deduped.values()]
     orderHistoryLoaded.value = true
     if (!orders.value.length) {
-      const notices = fulfilledValues([openOrdersResult, executionsTodayResult])
-        .map(orderHistoryResultNotice)
-        .filter(Boolean)
+      const notices = fulfilledValues(orderResults).map(orderHistoryResultNotice).filter(Boolean)
       orderHistoryNotice.value = [...new Set(notices)].join(' / ')
     }
   }
@@ -822,11 +834,25 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
   const loadTradingData = async () => {
     dataLoading.value = true
     try {
-      const [assetsResult, ...positionResults] = await Promise.allSettled([
+      const [assetsResult, indexResult, ...positionResults] = await Promise.allSettled([
         rpcCallOptional<RecordLike>('account.assets.current', undefined, 20_000),
+        rpcCallOptional<unknown[]>('market.index.major', undefined, 15_000),
         rpcCallOptional<RecordLike>('account.positions.cash', undefined, 15_000),
-        rpcCallOptional<RecordLike>('account.positions.cash', { market: 'XNAS' }, 15_000),
+        ...usOrderMarkets.map((market) =>
+          rpcCallOptional<RecordLike>('account.positions.cash', { market }, 15_000),
+        ),
       ])
+      if (indexResult.status === 'fulfilled') {
+        marketIndexes.value = asArray(indexResult.value)
+          .map(marketIndexFromApi)
+          .filter((index): index is MarketIndex => Boolean(index))
+      } else {
+        marketIndexes.value = []
+        reportDataError(
+          errorMessage(indexResult.reason, '指数の取得に失敗しました'),
+          indexResult.reason,
+        )
+      }
       const cashPositionLists = fulfilledValues(positionResults)
       const cashPositions = cashPositionLists[0] ?? {}
       const nextPositions = cashPositionLists
@@ -835,13 +861,26 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
         .filter((position): position is Position => Boolean(position))
       positions.value = nextPositions
       mergeStocks(nextPositions.map(stockFromPosition))
-      const nextHoldingsMarketValue = numberValue(
-        cashPositions.totalMarketValue,
-        nextPositions.reduce((sum, position) => sum + position.marketValue, 0),
+      const summedHoldingsMarketValue = nextPositions.reduce(
+        (sum, position) => sum + position.marketValue,
+        0,
       )
+      const summedProfitLoss = nextPositions.reduce((sum, position) => sum + position.profitLoss, 0)
+      const summedCostBasis = nextPositions.reduce(
+        (sum, position) => sum + (position.marketValue - position.profitLoss),
+        0,
+      )
+      const nextHoldingsMarketValue =
+        nextPositions.length > 0
+          ? summedHoldingsMarketValue
+          : numberValue(cashPositions.totalMarketValue)
       holdingsMarketValue.value = nextHoldingsMarketValue
-      totalProfitLoss.value = numberValue(cashPositions.totalProfitLoss)
-      totalProfitLossRate.value = numberValue(cashPositions.totalProfitLossRate)
+      totalProfitLoss.value =
+        nextPositions.length > 0 ? summedProfitLoss : numberValue(cashPositions.totalProfitLoss)
+      totalProfitLossRate.value =
+        nextPositions.length > 0 && summedCostBasis
+          ? (summedProfitLoss / summedCostBasis) * 100
+          : numberValue(cashPositions.totalProfitLossRate)
 
       const hasAccountAssets = assetsResult.status === 'fulfilled'
       if (hasAccountAssets) {
@@ -1011,7 +1050,7 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
     }
   }
 
-  const searchIssues = async (query: string) => {
+  const suggestIssues = async (query: string) => {
     if (!connected.value || query.trim().length < 2) return
     const marketsToSearch =
       marketFilter.value !== 'all'
@@ -1019,7 +1058,7 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
         : searchableMarkets.filter((market) => market !== 'auto')
     const results = await Promise.allSettled(
       marketsToSearch.map((market) =>
-        rpcCall<RecordLike>('market.issue.search', { query, market, limit: 12 }),
+        rpcCall<RecordLike>('market.issue.suggest', { query, market, limit: 12 }),
       ),
     )
     const issues = fulfilledValues(results)
@@ -1121,6 +1160,7 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
     orders.value = [
       {
         id: textValue(receipt.orderId, `ord-${Date.now()}`),
+        code: selectedStock.value.code,
         date: textValue(receipt.acceptedAt, new Date().toLocaleString('ja-JP')),
         stock: selectedStock.value.name,
         market: selectedStock.value.market,
@@ -1147,7 +1187,9 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
     try {
       const params = {
         orderNumber: order.orderNumber,
-        orderId: order.id,
+        orderId: order.orderSubNo || order.id,
+        issueCode: order.code,
+        market: order.market,
         tradeId: order.tradeId || undefined,
       }
       await rpcCall('orders.cash.placeCancel', {
@@ -1161,6 +1203,85 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
     } finally {
       cancelingOrderKey.value = ''
     }
+  }
+
+  const loadOrderDetail = async (order: OrderRow): Promise<OrderDetail> => {
+    if (!isUsMarket(order.market)) {
+      throw new Error('注文詳細は米国株のみ対応しています')
+    }
+    if (!order.orderNumber && !order.id && !order.orderSubNo) {
+      throw new Error('注文番号を取得できないため詳細を取得できません')
+    }
+    const detail = await rpcCall<RecordLike>('orders.inquiry.detail', {
+      orderNumber: order.orderNumber,
+      orderId: order.orderSubNo || order.id,
+      issueCode: order.code,
+      market: order.market,
+    })
+    const parsed = orderDetailFromApi(detail)
+    if (!parsed) throw new Error('注文詳細を読み取れませんでした')
+    return parsed
+  }
+
+  const loadTradeRecords = async (): Promise<TradeRecordRow[]> => {
+    const result = await rpcCall<RecordLike>('orders.inquiry.tradeRecords', { limit: 50 })
+    return asArray(result.records)
+      .map(tradeRecordFromApi)
+      .filter((record): record is TradeRecordRow => Boolean(record))
+  }
+
+  const loadPositionDetail = async (position: Position): Promise<Position> => {
+    if (!isUsMarket(position.market)) {
+      throw new Error('保有詳細は米国株のみ対応しています')
+    }
+    const detail = await rpcCall<RecordLike>('account.positions.cashDetail', {
+      issueCode: position.code,
+      market: position.market,
+      accountType: position.accountType,
+      limit: 1,
+    })
+    const parsed = asArray(detail.positions).map(positionFromApi)[0]
+    if (!parsed) throw new Error('保有詳細を読み取れませんでした')
+    return parsed
+  }
+
+  const orderCorrectionParams = (
+    order: OrderRow,
+    draft: { quantity: number; priceCondition: 'market' | 'limit'; price?: number },
+  ) => ({
+    orderNumber: order.orderNumber,
+    orderId: order.orderSubNo || order.id,
+    issueCode: order.code,
+    market: order.market,
+    quantity: draft.quantity,
+    priceCondition: draft.priceCondition,
+    price: draft.priceCondition === 'limit' ? draft.price : undefined,
+    orderMethod: 'normal',
+  })
+
+  const estimateOrderCorrection = async (
+    order: OrderRow,
+    draft: { quantity: number; priceCondition: 'market' | 'limit'; price?: number },
+  ): Promise<OrderPreview> => {
+    if (!isUsMarket(order.market)) throw new Error('注文訂正は米国株のみ対応しています')
+    const preview = await rpcCall<unknown>(
+      'orders.cash.estimateCorrection',
+      orderCorrectionParams(order, draft),
+    )
+    if (!isOrderPreview(preview)) throw new Error('注文訂正の見積を読み取れませんでした')
+    return preview
+  }
+
+  const placeOrderCorrection = async (
+    order: OrderRow,
+    draft: { quantity: number; priceCondition: 'market' | 'limit'; price?: number },
+  ) => {
+    if (!isUsMarket(order.market)) throw new Error('注文訂正は米国株のみ対応しています')
+    await rpcCall('orders.cash.placeCorrection', {
+      ...orderCorrectionParams(order, draft),
+      allowTrading: true,
+    })
+    await loadTradingData()
   }
 
   const downloadCsv = () => {
@@ -1284,7 +1405,7 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
     searchTimer = setTimeout(async () => {
       const requestId = ++searchRequestId
       try {
-        await searchIssues(query)
+        await suggestIssues(query)
       } catch (cause) {
         reportDataError(errorMessage(cause, '銘柄検索に失敗しました'), cause)
       } finally {
@@ -1337,6 +1458,7 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
     holdingsMarketValue,
     totalProfitLoss,
     totalProfitLossRate,
+    marketIndexes,
     orders,
     cancelingOrderKey,
     orderHistoryLoaded,
@@ -1379,6 +1501,11 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
     askPlaceOrder,
     placeCashOrder,
     cancelOrder,
+    loadOrderDetail,
+    loadTradeRecords,
+    loadPositionDetail,
+    estimateOrderCorrection,
+    placeOrderCorrection,
     downloadCsv,
     openTradeForStock,
     openTradeForPosition,

@@ -4,6 +4,9 @@ export type MarketRegion = 'domestic' | 'us'
 
 const DOMESTIC_TO_MTS = {
   XTKS: 'TKY',
+  XNGO: 'NGY',
+  XFKA: 'FKO',
+  XSAP: 'SPR',
 } as const satisfies Record<string, string>
 
 const MTS_TO_DOMESTIC = Object.fromEntries(

@@ -1,28 +1,30 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { AnimatePresence } from 'motion-v'
-import { ArrowLeft, Ban, Plug } from 'lucide-vue-next'
+import { ArrowLeft, Ban, FileText, Plug } from 'lucide-vue-next'
 import Spinner from '../../components/ui/Spinner.vue'
 import UiButton from '../../components/ui/UiButton.vue'
 import UiModal from '../../components/ui/UiModal.vue'
 import { ui } from '../../styles/ui'
-import type { OrderRow, Position } from '../../types/trading'
+import type { MarketIndex, OrderRow, Position } from '../../types/trading'
 import {
   currency,
   currencyForMarket,
+  number as formatNumber,
   signedCurrency,
   signedCurrencyForMarket,
   signedPercent,
 } from '../../utils/format'
 import { orderAmountText, orderHistoryKey, orderQuantityText } from '../trading/trading-data'
 
-defineProps<{
+const props = defineProps<{
   showPortfolioSpinner: boolean
   totalAssetValue: number
   buyingPower: number
   holdingsMarketValue: number
   totalProfitLoss: number
   totalProfitLossRate: number
+  marketIndexes: MarketIndex[]
   stockAssetRatio: number
   cashAssetRatio: number
   positions: Position[]
@@ -32,6 +34,7 @@ defineProps<{
   connected: boolean
   orderHistoryLoaded: boolean
   orderHistoryNotice: string
+  loadPositionDetail: (position: Position) => Promise<Position>
 }>()
 
 const emit = defineEmits<{
@@ -41,12 +44,47 @@ const emit = defineEmits<{
 }>()
 
 const usMarkets = new Set(['XNAS', 'XNYS', 'ARCX'])
+const isUsMarket = (market: string) => usMarkets.has(market)
 const canCancel = (order: OrderRow) =>
-  order.status === '注文中' && Boolean(order.orderNumber) && !usMarkets.has(order.market)
+  order.status === '注文中' && Boolean(order.orderNumber) && order.cancelable !== false
 const isCanceling = (order: OrderRow, cancelingOrderKey: string) =>
   orderHistoryKey(order) === cancelingOrderKey
 const cancelCandidate = ref<OrderRow | null>(null)
+const positionDetail = ref<Position | null>(null)
+const positionDetailLoadingKey = ref('')
+const positionDetailError = ref('')
 const cancelTitle = computed(() => cancelCandidate.value?.stock ?? '')
+const indexValueText = (index: MarketIndex) =>
+  index.valueText || (index.value == null ? '-' : formatNumber(index.value))
+const indexChangeText = (index: MarketIndex) => {
+  const change = index.changeText || (index.change == null ? '' : formatNumber(index.change))
+  const rate =
+    index.changeRateText || (index.changeRate == null ? '' : signedPercent(index.changeRate))
+  return [change, rate].filter(Boolean).join(' / ') || '-'
+}
+const indexTone = (index: MarketIndex) => {
+  if (index.sign === 'positive') return ui.positive
+  if (index.sign === 'negative') return ui.negative
+  return ui.muted
+}
+const positionKey = (position: Position) =>
+  [position.market, position.code, position.accountType].filter(Boolean).join(':')
+const canLoadPositionDetail = (position: Position) => isUsMarket(position.market)
+
+const showPositionDetail = async (position: Position) => {
+  if (!canLoadPositionDetail(position) || positionDetailLoadingKey.value) return
+  const key = positionKey(position)
+  positionDetailLoadingKey.value = key
+  positionDetailError.value = ''
+  try {
+    positionDetail.value = await props.loadPositionDetail(position)
+  } catch (cause) {
+    positionDetailError.value =
+      cause instanceof Error ? cause.message : '保有詳細の取得に失敗しました'
+  } finally {
+    positionDetailLoadingKey.value = ''
+  }
+}
 
 const askCancel = (order: OrderRow) => {
   if (!canCancel(order)) return
@@ -69,6 +107,13 @@ const confirmCancel = () => {
           <template v-if="!showPortfolioSpinner">{{ currency(totalAssetValue) }}</template>
           <Spinner v-else size="lg" />
         </strong>
+        <small :class="[ui.assetOverviewSubtext, totalProfitLoss >= 0 ? ui.positive : ui.negative]">
+          通算評価損益:
+          <template v-if="!showPortfolioSpinner">
+            {{ signedCurrency(totalProfitLoss) }} · {{ signedPercent(totalProfitLossRate) }}
+          </template>
+          <Spinner v-else size="sm" />
+        </small>
         <small :class="ui.assetOverviewSubtext">
           余力:
           <template v-if="!showPortfolioSpinner">{{ currency(buyingPower) }}</template>
@@ -120,17 +165,6 @@ const confirmCancel = () => {
       </div>
     </article>
 
-    <article :class="ui.metricPanel">
-      <span :class="ui.metricLabel">通算評価損益</span>
-      <strong :class="[ui.metricValue, totalProfitLoss >= 0 ? ui.positive : ui.negative]">
-        <template v-if="!showPortfolioSpinner">
-          {{ signedCurrency(totalProfitLoss) }}
-          <small> · {{ signedPercent(totalProfitLossRate) }}</small>
-        </template>
-        <Spinner v-else size="lg" />
-      </strong>
-    </article>
-
     <article :class="ui.holdingsPanel">
       <div :class="ui.panelHead">
         <h2>保有銘柄</h2>
@@ -151,19 +185,18 @@ const confirmCancel = () => {
           <span>数量</span>
           <span>評価額</span>
           <span>評価損益</span>
+          <span>操作</span>
         </div>
         <div v-if="positions.length" :class="ui.holdingsRows">
-          <button
-            v-for="position in positions"
-            :key="position.code"
-            :class="ui.holdingRow"
-            type="button"
-            @click="emit('openPosition', position.code)"
-          >
-            <span class="grid gap-1">
+          <div v-for="position in positions" :key="positionKey(position)" :class="ui.holdingRow">
+            <button
+              class="grid gap-1 text-left text-[#e3e3e9]"
+              type="button"
+              @click="emit('openPosition', position.code)"
+            >
               <strong>{{ position.name }}</strong>
               <small>{{ position.code }}</small>
-            </span>
+            </button>
             <b :class="ui.typePill">{{
               position.type ?? (position.quantity >= 100 ? '単元' : 'S株')
             }}</b>
@@ -178,12 +211,27 @@ const confirmCancel = () => {
               <strong>{{ signedCurrencyForMarket(position.profitLoss, position.market) }}</strong>
               <small>{{ signedPercent(position.profitLossRate) }}</small>
             </span>
-          </button>
+            <span :class="ui.rowActions">
+              <button
+                v-if="canLoadPositionDetail(position)"
+                :class="ui.ghostButton"
+                class="min-h-8 px-3 text-xs"
+                type="button"
+                :disabled="Boolean(positionDetailLoadingKey)"
+                @click="showPositionDetail(position)"
+              >
+                <Spinner v-if="positionDetailLoadingKey === positionKey(position)" size="sm" />
+                <FileText v-else class="h-3.5 w-3.5" aria-hidden="true" />
+                詳細
+              </button>
+            </span>
+          </div>
         </div>
         <div v-else-if="dataLoading" :class="[ui.muted, ui.emptyState]">
           <Spinner />
         </div>
         <p v-else :class="[ui.muted, ui.emptyState]">SBIに接続すると保有銘柄を表示します</p>
+        <p v-if="positionDetailError" :class="ui.dialogNote">{{ positionDetailError }}</p>
       </div>
     </article>
 
@@ -234,7 +282,84 @@ const confirmCancel = () => {
         </p>
       </div>
     </article>
+
+    <article :class="ui.marketIndexPanel">
+      <div :class="ui.panelHead">
+        <h2>指数</h2>
+      </div>
+      <div v-if="marketIndexes.length" :class="ui.marketIndexGrid">
+        <div
+          v-for="index in marketIndexes"
+          :key="index.code ?? index.name"
+          :class="ui.marketIndexCard"
+        >
+          <span :class="ui.metricLabel">{{ index.name }}</span>
+          <strong :class="ui.marketIndexValue">{{ indexValueText(index) }}</strong>
+          <small :class="indexTone(index)">{{ indexChangeText(index) }}</small>
+        </div>
+      </div>
+      <div v-else-if="dataLoading" :class="[ui.muted, ui.emptyState]">
+        <Spinner />
+      </div>
+      <p v-else :class="[ui.muted, ui.emptyState]">SBIに接続すると指数を表示します</p>
+    </article>
   </section>
+
+  <AnimatePresence>
+    <UiModal
+      v-if="positionDetail"
+      key="position-detail-dialog"
+      eyebrow="保有詳細"
+      :title="positionDetail.name"
+      @close="positionDetail = null"
+    >
+      <dl :class="ui.confirmList">
+        <div :class="ui.confirmRow">
+          <dt>銘柄</dt>
+          <dd>{{ positionDetail.code }} / {{ positionDetail.market }}</dd>
+        </div>
+        <div :class="ui.confirmRow">
+          <dt>預り区分</dt>
+          <dd>{{ positionDetail.type ?? positionDetail.accountType ?? '-' }}</dd>
+        </div>
+        <div :class="ui.confirmRow">
+          <dt>数量</dt>
+          <dd>{{ positionDetail.quantity }}</dd>
+        </div>
+        <div :class="ui.confirmRow">
+          <dt>現在値</dt>
+          <dd>
+            {{
+              positionDetail.currentPrice == null
+                ? '-'
+                : currencyForMarket(positionDetail.currentPrice, positionDetail.market)
+            }}
+          </dd>
+        </div>
+        <div :class="ui.confirmRow">
+          <dt>平均取得単価</dt>
+          <dd>{{ currencyForMarket(positionDetail.avgPrice, positionDetail.market) }}</dd>
+        </div>
+        <div :class="ui.confirmRow">
+          <dt>評価額</dt>
+          <dd>{{ currencyForMarket(positionDetail.marketValue, positionDetail.market) }}</dd>
+        </div>
+        <div :class="ui.confirmRow">
+          <dt>評価損益</dt>
+          <dd :class="positionDetail.profitLoss >= 0 ? ui.positive : ui.negative">
+            {{ signedCurrencyForMarket(positionDetail.profitLoss, positionDetail.market) }} /
+            {{ signedPercent(positionDetail.profitLossRate) }}
+          </dd>
+        </div>
+      </dl>
+      <div :class="ui.actions">
+        <UiButton variant="ghost" @click="positionDetail = null">
+          <ArrowLeft class="h-4 w-4" aria-hidden="true" />
+          閉じる
+        </UiButton>
+      </div>
+    </UiModal>
+  </AnimatePresence>
 
   <AnimatePresence>
     <UiModal

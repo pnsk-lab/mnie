@@ -34,12 +34,23 @@ export const cashOrderMarketOptions: Array<{
 }> = [
   { label: '自動', value: 'auto' },
   { label: '東証', value: 'XTKS' },
+  { label: '名証', value: 'XNGO' },
+  { label: '福証', value: 'XFKA' },
+  { label: '札証', value: 'XSAP' },
   { label: 'NASDAQ', value: 'XNAS' },
   { label: 'NYSE', value: 'XNYS' },
   { label: 'NYSE Arca', value: 'ARCX' },
 ]
 
-export const searchableMarkets: CashOrderMarket[] = ['XTKS', 'XNAS', 'XNYS', 'ARCX']
+export const searchableMarkets: CashOrderMarket[] = [
+  'XTKS',
+  'XNGO',
+  'XFKA',
+  'XSAP',
+  'XNAS',
+  'XNYS',
+  'ARCX',
+]
 
 export const tradeRouteIdFromStockId = (id: string) => {
   const separator = id.indexOf(':')

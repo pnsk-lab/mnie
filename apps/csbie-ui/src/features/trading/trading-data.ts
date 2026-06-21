@@ -1,19 +1,29 @@
 import type {
   ChartNotice,
+  MarketIndex,
+  OrderDetail,
   OrderPreview,
   OrderRow,
   Position,
   RealtimePricePoint,
   Stock,
+  TradeRecordRow,
 } from '../../types/trading'
 import { currency } from '../../utils/format'
 
 export type RecordLike = Record<string, unknown>
+type IssueLike = {
+  code: string
+  market: string
+  name: string
+  searchText?: string
+}
 
 export const emptyStock: Stock = {
   code: '',
   name: '未選択',
   symbol: '',
+  searchText: '',
   country: '日本',
   market: '',
   sector: '',
@@ -75,13 +85,27 @@ const countryFromMarket = (market: string) =>
 
 export const issueFrom = (value: unknown) => {
   const issue = asRecord(value)
+  const code = textValue(issue.code, textValue(issue.issueCode))
+  const market = textValue(issue.market, textValue(issue.marketCode, ''))
+  const name = textValue(
+    issue.name,
+    textValue(issue.issueName, textValue(issue.stockName, textValue(issue.displayName))),
+  )
+  const searchText = [
+    code,
+    market,
+    name,
+    textValue(issue.extract),
+    textValue(issue.extractWord),
+    textValue(issue.hitString),
+  ]
+    .filter(Boolean)
+    .join(' ')
   return {
-    code: textValue(issue.code, textValue(issue.issueCode)),
-    market: textValue(issue.market, textValue(issue.marketCode, '')),
-    name: textValue(
-      issue.name,
-      textValue(issue.issueName, textValue(issue.stockName, textValue(issue.displayName))),
-    ),
+    code,
+    market,
+    name,
+    searchText,
   }
 }
 
@@ -112,10 +136,11 @@ const boxFromHistory = (history: number[]) => {
   return { min: at(0), q1: at(0.25), median: at(0.5), q3: at(0.75), max: at(1) }
 }
 
-export const stockFromIssue = (issue: ReturnType<typeof issueFrom>): Stock => ({
+export const stockFromIssue = (issue: IssueLike): Stock => ({
   code: issue.code,
   name: issue.name || issue.code,
   symbol: issue.code ? issueSymbol(issue.code, issue.market) : '',
+  searchText: issue.searchText,
   country: countryFromMarket(issue.market),
   market: issue.market,
   sector: '',
@@ -146,10 +171,16 @@ export const stockFromPosition = (position: Position): Stock => {
   }
 }
 
-export const stockFromBoard = (
-  value: unknown,
-  fallbackIssue?: ReturnType<typeof issueFrom>,
-): Stock => {
+const accountTypeLabels: Record<string, string> = {
+  specific: '特定',
+  general: '一般',
+  growthInvestment: 'NISA成長投資枠',
+  nisa: 'NISA',
+}
+
+const accountTypeLabel = (value: string) => accountTypeLabels[value] ?? value
+
+export const stockFromBoard = (value: unknown, fallbackIssue?: IssueLike): Stock => {
   const board = asRecord(value)
   const quoteRecord = asRecord(board.quote)
   const boardIssue = issueFrom(board.issue)
@@ -158,6 +189,7 @@ export const stockFromBoard = (
     code: quoteIssue.code || boardIssue.code || fallbackIssue?.code || '',
     market: quoteIssue.market || boardIssue.market || fallbackIssue?.market || '',
     name: quoteIssue.name || boardIssue.name || fallbackIssue?.name || '',
+    searchText: quoteIssue.searchText || boardIssue.searchText || fallbackIssue?.searchText || '',
   }
   const quote = quoteFrom(quoteRecord)
   const codeAsNumber = Number(issue.code)
@@ -169,6 +201,7 @@ export const stockFromBoard = (
     code: issue.code,
     name: issue.name,
     symbol: issue.code ? issueSymbol(issue.code, issue.market) : '',
+    searchText: issue.searchText,
     country: countryFromMarket(issue.market),
     market: issue.market,
     sector: '',
@@ -183,6 +216,53 @@ export const stockFromBoard = (
     sShare: true,
     history,
     box: boxFromHistory(history),
+  }
+}
+
+const signedValueFrom = (value: unknown) => {
+  const record = asRecord(value)
+  const parsedValue = nullableNumberValue(record.value)
+  const text = textValue(record.text, parsedValue == null ? '' : String(parsedValue))
+  const rawSign = textValue(record.sign)
+  const sign: MarketIndex['sign'] =
+    rawSign === 'positive' || rawSign === 'negative' || rawSign === 'zero'
+      ? rawSign
+      : parsedValue == null || parsedValue === 0
+        ? 'zero'
+        : parsedValue > 0
+          ? 'positive'
+          : 'negative'
+  return { value: parsedValue, text, sign }
+}
+
+const percentValueFrom = (value: unknown) => {
+  const record = asRecord(value)
+  const parsedValue = nullableNumberValue(record.value)
+  return {
+    value: parsedValue,
+    text: textValue(record.text, parsedValue == null ? '' : `${parsedValue}%`),
+  }
+}
+
+export const marketIndexFromApi = (value: unknown): MarketIndex | null => {
+  const index = asRecord(value)
+  const name = textValue(index.name)
+  if (!name) return null
+
+  const parsedValue = nullableNumberValue(index.value)
+  const change = signedValueFrom(index.change)
+  const changeRate = percentValueFrom(index.changeRate)
+  return {
+    code: textValue(index.code) || undefined,
+    name,
+    value: parsedValue,
+    valueText: textValue(index.valueText, parsedValue == null ? '' : String(parsedValue)),
+    change: change.value,
+    changeText: change.text,
+    changeRate: changeRate.value,
+    changeRateText: changeRate.text,
+    sign: change.sign,
+    timestamp: textValue(index.timestamp) || undefined,
   }
 }
 
@@ -357,16 +437,20 @@ export const positionFromApi = (value: unknown): Position | null => {
   const costBasis = avgPrice * quantity
   const profitLossRate =
     numberValue(item.profitLossRate) || (costBasis ? (profitLoss / costBasis) * 100 : 0)
+  const accountType = textValue(item.accountType, textValue(item.depositType))
   return {
     code: issue.code,
     name: issue.name,
     market: issue.market,
     quantity,
     avgPrice,
+    currentPrice: nullableNumberValue(item.currentPrice),
     marketValue: numberValue(item.marketValue ?? item.valuationPrice),
     profitLoss,
     profitLossRate,
-    type: textValue(item.depositTypeText) || undefined,
+    type:
+      textValue(item.depositTypeText) || (accountType ? accountTypeLabel(accountType) : undefined),
+    accountType: accountType || undefined,
   }
 }
 
@@ -396,16 +480,59 @@ export const orderFromApi = (value: unknown): OrderRow | null => {
       : (nullableNumberValue(item.price) ?? nullableNumberValue(item.executedPrice))
   return {
     id: textValue(item.id, textValue(item.orderNumber, `${issue.code}-${item.orderedAt ?? ''}`)),
+    code: issue.code,
     date: textValue(item.orderedAt, textValue(item.expiresAt)),
     stock: issue.name || issue.code,
     market: issue.market,
     side,
     kind,
     quantity,
+    unexecutedQuantity,
+    executedQuantity,
     price,
     status,
     orderNumber: textValue(item.orderNumber),
+    orderSubNo: textValue(item.orderSubNo),
     tradeId: textValue(item.tradeId),
+    accountType: textValue(item.accountType, textValue(item.depositType)),
+    cancelable: typeof item.cancelable === 'boolean' ? item.cancelable : undefined,
+    correctable: typeof item.correctable === 'boolean' ? item.correctable : undefined,
+  }
+}
+
+export const orderDetailFromApi = (value: unknown): OrderDetail | null => {
+  const row = orderFromApi(value)
+  if (!row) return null
+  const item = asRecord(value)
+  return {
+    ...row,
+    expiresAt: textValue(item.expiresAt) || undefined,
+    statusText: textValue(item.statusText) || undefined,
+    depositType: textValue(item.depositType) || undefined,
+    accountInformation: textValue(item.accountInformation) || undefined,
+  }
+}
+
+export const tradeRecordFromApi = (value: unknown): TradeRecordRow | null => {
+  const item = asRecord(value)
+  const issue = issueFrom(item.issue)
+  if (!issue.code) return null
+  const tradeDate = textValue(item.tradeDate)
+  const valueDate = textValue(item.valueDate)
+  const type = textValue(item.tradeRecordTypeCode, textValue(item.type, '取引'))
+  return {
+    id: textValue(item.id, [issue.code, tradeDate, valueDate, type].filter(Boolean).join(':')),
+    code: issue.code,
+    stock: issue.name || issue.code,
+    market: issue.market,
+    type,
+    quantity: nullableNumberValue(item.quantity),
+    price: nullableNumberValue(item.price),
+    amount: nullableNumberValue(item.amount),
+    tradeDate: tradeDate || undefined,
+    valueDate: valueDate || undefined,
+    accountType: textValue(item.accountType) || undefined,
+    settlementCurrencyCode: textValue(item.settlementCurrencyCode) || undefined,
   }
 }
 

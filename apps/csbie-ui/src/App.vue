@@ -105,6 +105,7 @@ const {
   holdingsMarketValue,
   totalProfitLoss,
   totalProfitLossRate,
+  marketIndexes,
   orders,
   cancelingOrderKey,
   orderHistoryLoaded,
@@ -146,6 +147,11 @@ const {
   askPlaceOrder,
   placeCashOrder,
   cancelOrder,
+  loadOrderDetail,
+  loadTradeRecords,
+  loadPositionDetail,
+  estimateOrderCorrection,
+  placeOrderCorrection,
   downloadCsv,
   openTradeForStock,
   openTradeForPosition,
@@ -232,6 +238,7 @@ onMounted(async () => {
           :holdings-market-value="holdingsMarketValue"
           :total-profit-loss="totalProfitLoss"
           :total-profit-loss-rate="totalProfitLossRate"
+          :market-indexes="marketIndexes"
           :stock-asset-ratio="stockAssetRatio"
           :cash-asset-ratio="cashAssetRatio"
           :positions="positions"
@@ -241,6 +248,7 @@ onMounted(async () => {
           :connected="connected"
           :order-history-loaded="orderHistoryLoaded"
           :order-history-notice="orderHistoryNotice"
+          :load-position-detail="loadPositionDetail"
           @connect="connect"
           @open-position="
             (code) =>
@@ -304,6 +312,10 @@ onMounted(async () => {
           :canceling-order-key="cancelingOrderKey"
           :order-history-loaded="orderHistoryLoaded"
           :order-history-notice="orderHistoryNotice"
+          :load-order-detail="loadOrderDetail"
+          :load-trade-records="loadTradeRecords"
+          :estimate-order-correction="estimateOrderCorrection"
+          :place-order-correction="placeOrderCorrection"
           @refresh="loadTradingData"
           @cancel="cancelOrder"
         />
