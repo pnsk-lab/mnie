@@ -2,10 +2,13 @@
   "name": "@repo/mnie-cli",
   "private": true,
   "bin": {
-    "mnie": "./src/index.ts"
+    "mnie": "./dist/index.mjs"
   },
   "type": "module",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "scripts": {
+    "build": "cd ../.. && vp run @repo/mnie-sdk#build && cd packages/mnie-cli && vp pack",
     "clean": "rm -rf dist",
     "typecheck": "tsc"
   },

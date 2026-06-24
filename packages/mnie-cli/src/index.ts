@@ -1,6 +1,8 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
+import { spawn } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createMnieClient } from '@repo/mnie-sdk'
@@ -191,27 +193,34 @@ const listenForOAuthCallback = async () => {
     resolveCode = resolve
     rejectCode = reject
   })
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch(request) {
-      const url = new URL(request.url)
-      const error = url.searchParams.get('error')
-      const value = url.searchParams.get('code')
-      queueMicrotask(() => server.stop(true))
-      if (error) {
-        rejectCode(new Error(error))
-        return new Response('Mnie login failed. You can close this tab.', { status: 400 })
-      }
-      if (!value) {
-        rejectCode(new Error('oauth callback did not include a code'))
-        return new Response('Mnie login failed. You can close this tab.', { status: 400 })
-      }
-      resolveCode(value)
-      return new Response('Mnie login complete. You can close this tab.')
-    },
+  const server = createServer((request, response) => {
+    const url = new URL(request.url ?? '/', 'http://127.0.0.1')
+    const error = url.searchParams.get('error')
+    const value = url.searchParams.get('code')
+    queueMicrotask(() => server.close())
+    if (error) {
+      rejectCode(new Error(error))
+      response.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' })
+      response.end('Mnie login failed. You can close this tab.')
+      return
+    }
+    if (!value) {
+      rejectCode(new Error('oauth callback did not include a code'))
+      response.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' })
+      response.end('Mnie login failed. You can close this tab.')
+      return
+    }
+    resolveCode(value)
+    response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+    response.end('Mnie login complete. You can close this tab.')
   })
-  return { port: server.port, code }
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => resolve())
+  })
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('failed to bind oauth callback')
+  return { port: address.port, code }
 }
 
 const registerOAuthClient = async (origin: string, redirectUri: string) => {
@@ -254,7 +263,7 @@ const openBrowser = (url: string) => {
   const command =
     process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open'
   const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url]
-  Bun.spawn({ cmd: [command, ...args], stdout: 'ignore', stderr: 'ignore' })
+  spawn(command, args, { detached: true, stdio: 'ignore' }).unref()
 }
 
 const rpc = async (args: string[]) => {
@@ -285,7 +294,7 @@ const rpc = async (args: string[]) => {
 }
 
 const main = async () => {
-  const [command, subcommand, ...rest] = Bun.argv.slice(2)
+  const [command, subcommand, ...rest] = process.argv.slice(2)
   if (!command || command === '--help' || command === '-h') {
     console.log(help)
     return

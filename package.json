@@ -15,6 +15,7 @@
     "db:push": "vp run server:db:push",
     "env:check": "vp run env:doctor",
     "fmt": "vp check --fix",
+    "sdk:build": "vp run sdk-build",
     "typecheck": "vp run typecheck:all"
   },
   "devDependencies": {

@@ -15,7 +15,15 @@ export default defineConfig({
       },
       'app:build': {
         command: 'vp run @repo/mnie-app#build',
-        dependsOn: ['typecheck:all'],
+        dependsOn: ['typecheck:all', 'sdk-build'],
+      },
+      'sdk-build': {
+        command: [
+          'vp run @repo/mnie-types#build',
+          'vp run @repo/client-sbi#build',
+          'vp run @repo/mnie-sdk#build',
+          'vp run @repo/mnie-cli#build',
+        ],
       },
       'app:start': {
         command: 'vp run @repo/mnie-app#start',
