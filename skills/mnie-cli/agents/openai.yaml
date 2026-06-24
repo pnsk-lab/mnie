@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Mnie CLI'
+  short_description: 'Operate installed mnie safely'
+  default_prompt: 'Use $mnie-cli to run the installed mnie command for a Mnie task.'
