@@ -78,6 +78,7 @@ export const createDb = (path: string) => {
     ['max_order_price_jpy', 'INTEGER'],
     ['max_order_amount_jpy', 'INTEGER'],
     ['allowed_methods', 'TEXT'],
+    ['scopes', 'TEXT'],
   ] as const) {
     if (!apiKeyColumns.includes(name)) sqlite.run(`ALTER TABLE api_keys ADD COLUMN ${name} ${type}`)
   }
