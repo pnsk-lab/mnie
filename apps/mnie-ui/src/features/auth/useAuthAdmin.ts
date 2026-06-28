@@ -19,7 +19,7 @@ import {
 import { defaultApiKeyPolicy } from './api-key-policy'
 
 export const useAuthAdmin = () => {
-  const status = ref<AuthStatus>({ configured: false, authenticated: false })
+  const status = ref<AuthStatus>({ configured: true, authenticated: false })
   const apiKeys = ref<ApiKey[]>([])
   const sbiPasskeys = ref<SbiPasskey[]>([])
   const selectedPasskeyId = ref('')

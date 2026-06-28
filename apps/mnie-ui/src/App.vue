@@ -202,7 +202,7 @@ onMounted(async () => {
   try {
     await refreshAndMaybeConnect()
   } catch {
-    status.value = { configured: false, authenticated: false }
+    status.value = { configured: true, authenticated: false }
   } finally {
     authReady.value = true
   }
