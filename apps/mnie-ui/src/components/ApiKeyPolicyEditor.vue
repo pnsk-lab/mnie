@@ -131,8 +131,9 @@ const ui = {
     'min-h-9 rounded-full bg-[#263141] px-4 text-sm font-extrabold text-[#d3e3fd] transition hover:bg-[#303b4d]',
   methodGrid: 'mt-3 grid grid-cols-1 gap-2 xl:grid-cols-2',
   methodToggle:
-    'flex min-h-10 items-center gap-2 rounded-[16px] bg-[#111418] p-3 text-xs text-[#c3c7cf]',
+    'flex min-h-10 min-w-0 items-center gap-2 rounded-[16px] bg-[#111418] p-3 text-xs text-[#c3c7cf]',
   checkbox: 'h-4 min-h-4 w-4',
+  methodName: 'min-w-0 break-all',
 }
 </script>
 
@@ -146,7 +147,7 @@ const ui = {
           :checked="settings.scopes?.includes(scope)"
           @change="toggleScope(scope)"
         />
-        <span>{{ scope }}</span>
+        <span :class="ui.methodName">{{ scope }}</span>
       </label>
     </div>
 
@@ -205,7 +206,7 @@ const ui = {
             :checked="methodAllowed(method)"
             @change="toggleMethod(method)"
           />
-          <span>{{ method }}</span>
+          <span :class="ui.methodName">{{ method }}</span>
         </label>
       </div>
     </details>

@@ -208,10 +208,10 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main :class="ui.appShell">
+  <main :class="isOAuthRoute ? ui.oauthShell : ui.appShell">
     <AppSidebar v-if="!isOAuthRoute" :active-tab="activeTab" @navigate="navigate" />
 
-    <section :class="ui.workspace">
+    <section :class="isOAuthRoute ? ui.oauthWorkspace : ui.workspace">
       <AppHeader v-if="!isOAuthRoute && activeTab !== 'settings'" :active-tab="activeTab" />
 
       <OAuthApprovalPanel

@@ -18,7 +18,7 @@ const emit = defineEmits<{
 
 <template>
   <section :class="ui.authPanel">
-    <article :class="ui.panel">
+    <article :class="[ui.panel, ui.oauthPanel]">
       <div :class="ui.panelHead">
         <div>
           <p :class="ui.eyebrow">OAuth approval</p>
