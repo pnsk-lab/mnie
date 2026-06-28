@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { AnimatePresence } from 'motion-v'
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { revokeApiKey } from './api'
 import AppHeader from './components/layout/AppHeader.vue'
@@ -27,6 +27,7 @@ const activeTab = computed<RouteName>(() => {
 })
 const isOAuthRoute = computed(() => route.name === 'oauthAuthorize')
 const showAuthGate = computed(() => true)
+const authReady = ref(false)
 const decodedRouteParam = (value: string) => {
   try {
     return decodeURIComponent(value)
@@ -202,6 +203,8 @@ onMounted(async () => {
     await refreshAndMaybeConnect()
   } catch {
     status.value = { configured: false, authenticated: false }
+  } finally {
+    authReady.value = true
   }
   await loadOAuthApproval()
 })
@@ -222,7 +225,7 @@ onMounted(async () => {
       />
 
       <AuthGate
-        v-else-if="showAuthGate && !status.authenticated"
+        v-else-if="authReady && showAuthGate && !status.authenticated"
         v-model:setup-password="setupPassword"
         :status="status"
         :auth-busy="authBusy"
