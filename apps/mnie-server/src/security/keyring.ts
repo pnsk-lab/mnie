@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path'
 import { Database } from 'bun:sqlite'
 
 const SERVICE = 'mnie'
+const LEGACY_SERVICES = ['csbie'] as const
 const SQLITE_BACKEND = 'sqlite'
 const PLATFORM_BACKEND = 'platform'
 
@@ -112,15 +113,19 @@ export const readSecret = async <T>(account: string): Promise<T> => {
     return JSON.parse(secret) as T
   }
 
-  const row = keyringDb()
-    .query<{ nonce: string; tag: string; ciphertext: string }, [string, string]>(
+  const query = keyringDb().query<{ nonce: string; tag: string; ciphertext: string }, [
+    string,
+    string,
+  ]>(
       `
         SELECT nonce, tag, ciphertext
         FROM keyring_secrets
         WHERE service = ? AND account = ?
       `,
     )
-    .get(SERVICE, account)
+  const row =
+    query.get(SERVICE, account) ??
+    LEGACY_SERVICES.map((service) => query.get(service, account)).find(Boolean)
   const secret = row ? decrypt(row) : undefined
   if (!secret) throw new Error(`secret not found: ${account}`)
   return JSON.parse(secret) as T
