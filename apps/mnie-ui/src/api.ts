@@ -39,6 +39,7 @@ export type SbiPasskey = {
 
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(`/api${path}`, {
+    cache: 'no-store',
     credentials: 'include',
     headers: {
       'content-type': 'application/json',
