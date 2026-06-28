@@ -150,7 +150,7 @@ const login = async (args: string[]) => {
   if (!origin) throw new Error('login requires --origin')
   const profileName = option(options, 'profile') ?? 'default'
   const scopes = option(options, 'scopes') ?? 'mcp read write trade'
-  const storage = option(options, 'storage') ?? 'keyring'
+  const storage = option(options, 'storage') ?? 'file'
   if (storage !== 'file' && storage !== 'keyring')
     throw new Error('--storage must be file or keyring')
 
