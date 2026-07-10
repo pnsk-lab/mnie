@@ -15,7 +15,7 @@ import {
 import { AnimatePresence } from 'motion-v'
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { ApiKey, ApiKeySettings, SbiPasskey } from '../../api'
+import type { AccountProfile, ApiKey, ApiKeySettings, SbiPasskey } from '../../api'
 import ApiKeyPolicyEditor from '../../components/ApiKeyPolicyEditor.vue'
 import UiModal from '../../components/ui/UiModal.vue'
 import { ui } from '../../styles/ui'
@@ -23,6 +23,9 @@ import { ui } from '../../styles/ui'
 defineProps<{
   apiKeys: ApiKey[]
   sbiPasskeys: SbiPasskey[]
+  profiles: AccountProfile[]
+  smbcQrUrl: string
+  smbcBalance: { amount: number; displayValue: string } | null
 }>()
 
 const apiKeyLabel = defineModel<string>('apiKeyLabel', { required: true })
@@ -32,7 +35,11 @@ const sbiLabel = defineModel<string>('sbiLabel', { required: true })
 const sbiCredentialJson = defineModel<string>('sbiCredentialJson', { required: true })
 const tradePassword = defineModel<string>('tradePassword', { required: true })
 const sbiDeviceId = defineModel<string>('sbiDeviceId', { required: true })
-const selectedPasskeyId = defineModel<string>('selectedPasskeyId', { required: true })
+const selectedProfileId = defineModel<string>('selectedProfileId', { required: true })
+const smbcLabel = defineModel<string>('smbcLabel', { required: true })
+const smbcUser = defineModel<string>('smbcUser', { required: true })
+const smbcPassword = defineModel<string>('smbcPassword', { required: true })
+const smbcAccountItemCode = defineModel<string>('smbcAccountItemCode', { required: true })
 
 const emit = defineEmits<{
   addApiKey: []
@@ -40,6 +47,8 @@ const emit = defineEmits<{
   saveApiKeySettings: [key: ApiKey]
   revokeApiKey: [id: string]
   addSbiPasskey: []
+  addSmbcDirectProfile: []
+  finishSmbc2fa: []
   connect: []
   removeSbiPasskey: [id: string]
 }>()
@@ -75,7 +84,7 @@ const settingsGroups = [
     items: [
       {
         id: 'passkeys',
-        label: 'SBI パスキー',
+        label: '口座プロフィール',
         description: '接続プロフィールを管理',
         icon: UserRoundCog,
       },
@@ -96,7 +105,7 @@ const sectionTitle = computed(() =>
     ? 'API Key 発行'
     : activeSection.value === 'api-keys'
       ? 'API キー'
-      : 'SBI パスキー',
+      : '口座プロフィール',
 )
 
 const openApiKeyEditor = (key: ApiKey) => {
@@ -293,6 +302,56 @@ const saveEditingApiKey = () => {
           </div>
         </article>
 
+        <article
+          v-if="smbcQrUrl || smbcBalance"
+          class="grid min-w-0 content-start gap-4 overflow-hidden bg-transparent"
+        >
+          <template v-if="smbcQrUrl">
+            <h3 class="text-lg font-black">SMBC Direct の承認</h3>
+            <img
+              :src="smbcQrUrl"
+              alt="SMBC Direct 生体認証 QR コード"
+              class="h-56 w-56 rounded-lg bg-white p-2"
+            />
+            <p class="text-sm text-[#9aa0a9]">
+              SMBC アプリで読み取り、生体認証を完了してから続行してください。
+            </p>
+            <button :class="ui.primaryButton" type="button" @click="emit('finishSmbc2fa')">
+              承認完了
+            </button>
+          </template>
+          <template v-else-if="smbcBalance">
+            <h3 class="text-lg font-black">SMBC Direct 残高</h3>
+            <p class="text-2xl font-black">{{ smbcBalance.displayValue }}</p>
+          </template>
+        </article>
+
+        <article class="grid min-w-0 content-start gap-4 overflow-hidden bg-transparent">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h3 class="text-lg font-black">SMBC Direct 追加</h3>
+            <button :class="ui.primaryButton" type="button" @click="emit('addSmbcDirectProfile')">
+              <Save class="h-4 w-4" aria-hidden="true" />保存
+            </button>
+          </div>
+          <label :class="ui.label">名前<input v-model="smbcLabel" :class="ui.input" /></label>
+          <label :class="ui.label"
+            >支店-口座番号<input v-model="smbcUser" :class="ui.input" placeholder="0000-0000000"
+          /></label>
+          <label :class="ui.label"
+            >ログインパスワード<input
+              v-model="smbcPassword"
+              :class="ui.input"
+              type="password"
+              autocomplete="off"
+          /></label>
+          <label :class="ui.label"
+            >口座種別コード（任意）<input
+              v-model="smbcAccountItemCode"
+              :class="ui.input"
+              placeholder="2206"
+          /></label>
+        </article>
+
         <article class="grid min-w-0 content-start gap-4 overflow-hidden bg-transparent">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -303,25 +362,25 @@ const saveEditingApiKey = () => {
               接続
             </button>
           </div>
-          <div v-if="sbiPasskeys.length" :class="ui.list">
-            <label v-for="passkey in sbiPasskeys" :key="passkey.id" :class="ui.profileRow">
+          <div v-if="profiles.length" :class="ui.list">
+            <label v-for="profile in profiles" :key="profile.id" :class="ui.profileRow">
               <input
-                v-model="selectedPasskeyId"
+                v-model="selectedProfileId"
                 type="radio"
-                :value="passkey.id"
+                :value="profile.id"
                 @change="emit('connect')"
               />
               <span class="grid min-w-0 gap-1">
-                <strong class="truncate">{{ passkey.label }}</strong>
+                <strong class="truncate">{{ profile.label }} ({{ profile.provider }})</strong>
                 <small class="truncate text-[#8f949d]">
-                  {{ new Date(passkey.createdAt).toLocaleString() }}
+                  {{ new Date(profile.createdAt).toLocaleString() }}
                 </small>
               </span>
               <button
                 :class="ui.dangerButton"
                 type="button"
                 title="Delete passkey"
-                @click.prevent="emit('removeSbiPasskey', passkey.id)"
+                @click.prevent="emit('removeSbiPasskey', profile.id)"
               >
                 <Trash2 class="h-4 w-4" aria-hidden="true" />
                 削除

@@ -24,6 +24,8 @@ export interface ServerConfig {
   mainSiteExchangeOrderPasswordPath?: string
   mainSiteExchangeOrderConfirmPath?: string
   mainSiteExchangeOrderCompletePath?: string
+  smbcDirectBaseUrl?: string
+  smbcDirectLoginBaseUrl?: string
 }
 
 const optionalUrl = (value: string | undefined) => {
@@ -62,5 +64,7 @@ export const loadConfig = (): ServerConfig => {
     mainSiteExchangeOrderPasswordPath: process.env.SBI_MAIN_SITE_EXCHANGE_ORDER_PASSWORD_PATH,
     mainSiteExchangeOrderConfirmPath: process.env.SBI_MAIN_SITE_EXCHANGE_ORDER_CONFIRM_PATH,
     mainSiteExchangeOrderCompletePath: process.env.SBI_MAIN_SITE_EXCHANGE_ORDER_COMPLETE_PATH,
+    smbcDirectBaseUrl: optionalUrl(process.env.SMBC_DIRECT_BASE_URL),
+    smbcDirectLoginBaseUrl: optionalUrl(process.env.SMBC_DIRECT_LOGIN_BASE_URL),
   }
 }

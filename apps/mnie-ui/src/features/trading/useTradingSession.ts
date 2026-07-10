@@ -1,5 +1,5 @@
 import { computed, ref, watch, type Ref } from 'vue'
-import { createRpcSocket } from '../../api'
+import { createRpcSocket, type AccountProfile } from '../../api'
 import {
   cashOrderAccountTypeOptions as defaultCashOrderAccountTypeOptions,
   cashOrderMarketOptions as defaultCashOrderMarketOptions,
@@ -180,7 +180,10 @@ const priceMatchesStep = (price: number, step: number) => {
   return Math.abs(price / step - Math.round(price / step)) < 1e-8
 }
 
-export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
+export const useTradingSession = (
+  selectedProfileId: Ref<string>,
+  profiles: Ref<AccountProfile[]>,
+) => {
   const selectedStockCode = ref('')
   const selectedStockId = ref('')
   const viewedStockCodes = ref<string[]>([])
@@ -213,6 +216,8 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
   const ws = ref<WebSocket | null>(null)
   const rpcPending = new Map<number, RpcResolver>()
   const sbiConnected = ref(false)
+  const smbcQrUrl = ref('')
+  const smbcBalance = ref<{ amount: number; displayValue: string } | null>(null)
   const dataLoading = ref(false)
   const searchLoading = ref(false)
   const totalAssetValueFromAssets = ref<number | null>(null)
@@ -241,6 +246,10 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
   const errorMessage = (cause: unknown, fallback: string) =>
     cause instanceof Error ? cause.message : fallback
 
+  const isExpectedRpcInterruption = (cause: unknown) =>
+    cause instanceof Error &&
+    (cause.message === 'RPC socket reconnecting' || cause.message === 'RPC socket closed')
+
   const stockId = (stock: Pick<Stock, 'code' | 'market'>) =>
     stock.market ? `${stock.market}:${stock.code}` : stock.code
 
@@ -260,6 +269,7 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
   const codeFromStockId = (id: string) => stockRefFromId(id).code
 
   const reportDataError = (message: string, cause?: unknown) => {
+    if (isExpectedRpcInterruption(cause)) return
     if (cause) {
       console.error(`[mnie-ui] データ取得エラー: ${message}`, cause)
       return
@@ -946,16 +956,27 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
     stopBoardPolling()
     previousSocket?.close()
     sbiConnected.value = false
+    smbcQrUrl.value = ''
+    smbcBalance.value = null
     dataLoading.value = true
-    if (!selectedPasskeyId.value) {
+    const selectedProfile = profiles.value.find((profile) => profile.id === selectedProfileId.value)
+    if (!selectedProfile) {
       dataLoading.value = false
-      reportDataError('SBIパスキーを選択してください')
+      reportDataError('口座プロフィールを選択してください')
       return
     }
     const socket = createRpcSocket()
     socket.addEventListener('open', async () => {
       try {
-        await rpcCall('sbi.connect', { passkeyId: selectedPasskeyId.value })
+        const connection = (await rpcCall('provider.connect', {
+          provider: selectedProfile.provider,
+          profileId: selectedProfile.id,
+        })) as { requires2fa?: boolean; qrurl?: string }
+        if (connection.requires2fa) {
+          if (!connection.qrurl) throw new Error('SMBC Direct QR code was not returned')
+          smbcQrUrl.value = connection.qrurl
+          return
+        }
         sbiConnected.value = true
         await loadTradingData()
       } catch (cause) {
@@ -984,6 +1005,23 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
       dataLoading.value = false
     })
     ws.value = socket
+  }
+
+  const finishSmbc2fa = async () => {
+    if (!smbcQrUrl.value) throw new Error('SMBC Direct QR approval is not pending')
+    dataLoading.value = true
+    try {
+      await rpcCall('provider.finish2fa')
+      smbcBalance.value = (await rpcCall('account.balance')) as {
+        amount: number
+        displayValue: string
+      }
+      smbcQrUrl.value = ''
+    } catch (cause) {
+      reportDataError(errorMessage(cause, 'SMBC Direct の認証に失敗しました'), cause)
+    } finally {
+      dataLoading.value = false
+    }
   }
 
   const startBoardPolling = async () => {
@@ -1426,6 +1464,9 @@ export const useTradingSession = (selectedPasskeyId: Ref<string>) => {
   )
 
   return {
+    smbcQrUrl,
+    smbcBalance,
+    finishSmbc2fa,
     selectedStockCode,
     selectedStockId,
     tradeSide,

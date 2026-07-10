@@ -4,15 +4,18 @@ import {
   createApiKey,
   createLoginOptions,
   createSetupOptions,
-  deleteSbiPasskey,
+  deleteAccountProfile,
   getStatus,
   listApiKeys,
   listSbiPasskeys,
+  listAccountProfiles,
   saveSbiPasskey,
+  saveSmbcDirectProfile,
   updateApiKeySettings,
   verifyLogin,
   verifySetup,
   type ApiKey,
+  type AccountProfile,
   type AuthStatus,
   type SbiPasskey,
 } from '../../api'
@@ -22,7 +25,8 @@ export const useAuthAdmin = () => {
   const status = ref<AuthStatus>({ configured: true, authenticated: false })
   const apiKeys = ref<ApiKey[]>([])
   const sbiPasskeys = ref<SbiPasskey[]>([])
-  const selectedPasskeyId = ref('')
+  const profiles = ref<AccountProfile[]>([])
+  const selectedProfileId = ref('')
   const setupPassword = ref('')
   const authBusy = ref(false)
   const apiKeyLabel = ref('Fine-grained API key')
@@ -32,14 +36,19 @@ export const useAuthAdmin = () => {
   const sbiCredentialJson = ref('')
   const tradePassword = ref('')
   const sbiDeviceId = ref('')
+  const smbcLabel = ref('SMBC Direct')
+  const smbcUser = ref('')
+  const smbcPassword = ref('')
+  const smbcAccountItemCode = ref('')
 
   const refresh = async (options?: { autoConnect?: boolean; connect?: () => void }) => {
     status.value = await getStatus()
     if (status.value.authenticated) {
       apiKeys.value = (await listApiKeys()).apiKeys.filter((key) => !key.revokedAt)
       sbiPasskeys.value = (await listSbiPasskeys()).passkeys
-      selectedPasskeyId.value ||= sbiPasskeys.value[0]?.id ?? ''
-      if (options?.autoConnect && selectedPasskeyId.value) options.connect?.()
+      profiles.value = (await listAccountProfiles()).profiles
+      selectedProfileId.value ||= profiles.value[0]?.id ?? ''
+      if (options?.autoConnect && selectedProfileId.value) options.connect?.()
     }
   }
 
@@ -93,7 +102,7 @@ export const useAuthAdmin = () => {
       tradePassword: tradePassword.value || undefined,
       deviceId: sbiDeviceId.value || undefined,
     })
-    selectedPasskeyId.value = passkey.id
+    selectedProfileId.value = passkey.id
     sbiCredentialJson.value = ''
     tradePassword.value = ''
     sbiDeviceId.value = ''
@@ -101,8 +110,20 @@ export const useAuthAdmin = () => {
   }
 
   const removeSbiPasskey = async (id: string) => {
-    await deleteSbiPasskey(id)
-    if (selectedPasskeyId.value === id) selectedPasskeyId.value = ''
+    await deleteAccountProfile(id)
+    if (selectedProfileId.value === id) selectedProfileId.value = ''
+    await refresh()
+  }
+
+  const addSmbcDirectProfile = async () => {
+    const { profile } = await saveSmbcDirectProfile({
+      label: smbcLabel.value,
+      user: smbcUser.value,
+      password: smbcPassword.value,
+      accountItemCode: smbcAccountItemCode.value || undefined,
+    })
+    selectedProfileId.value = profile.id
+    smbcPassword.value = ''
     await refresh()
   }
 
@@ -110,7 +131,8 @@ export const useAuthAdmin = () => {
     status,
     apiKeys,
     sbiPasskeys,
-    selectedPasskeyId,
+    profiles,
+    selectedProfileId,
     setupPassword,
     authBusy,
     apiKeyLabel,
@@ -120,12 +142,17 @@ export const useAuthAdmin = () => {
     sbiCredentialJson,
     tradePassword,
     sbiDeviceId,
+    smbcLabel,
+    smbcUser,
+    smbcPassword,
+    smbcAccountItemCode,
     refresh,
     addApiKey,
     saveApiKeySettings,
     setupOwnerPasskey,
     loginWithPasskey,
     addSbiPasskey,
+    addSmbcDirectProfile,
     removeSbiPasskey,
   }
 }

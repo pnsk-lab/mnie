@@ -11,9 +11,9 @@ import { effectiveSbiDeviceId, effectiveSbiTradePassword } from '../security/sbi
 export const connectSbi = async (
   db: Db,
   config: ServerConfig,
-  passkeyId: string,
+  profileId: string,
 ): Promise<SbiClientMethods> => {
-  const [row] = await db.select().from(sbiPasskeys).where(eq(sbiPasskeys.id, passkeyId)).limit(1)
+  const [row] = await db.select().from(sbiPasskeys).where(eq(sbiPasskeys.id, profileId)).limit(1)
   if (!row) throw new Error('SBI passkey not found')
 
   const secret = await readSecret<StoredSbiPasskeySecret>(row.keyringAccount)

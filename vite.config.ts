@@ -22,6 +22,7 @@ export default defineConfig({
           'vp run @repo/mnie-types#build',
           'vp run @repo/client-sbi#build',
           'vp run @repo/client-mnie#build',
+          'vp run @repo/client-smbc-direct#build',
           'vp run @repo/mnie-cli#build',
         ],
       },
@@ -55,6 +56,13 @@ export default defineConfig({
       'docker:tag':
         'docker tag git.yutakobayashi.com/nakasyou/mnie:latest git.yutakobayashi.com/nakasyou/mnie:latest',
       'docker:push': 'docker push git.yutakobayashi.com/nakasyou/mnie:latest',
+      'docs:dev': {
+        command: 'vp run @repo/docs#dev',
+        cache: false,
+      },
+      'docs:build': {
+        command: 'vp run @repo/docs#build',
+      },
     },
   },
 })

@@ -31,12 +31,12 @@ Usage:
   mnie profile list
   mnie profile use <name>
   mnie rpc methods [--profile <name>]
-  mnie rpc call <method> [json-params] [--profile <name>] [--passkey-id <id>]
+  mnie rpc call <method> [json-params] [--profile <name>] [--provider sbisec|smbc-direct] [--profile-id <id>]
   mnie login --origin <origin> [--profile <name>] [--scopes <scopes>] [--storage file|keyring]
 
 Examples:
   mnie profile add local --origin http://127.0.0.1:8787 --api-key mnie_xxx
-  mnie rpc call account.profile --passkey-id sbi_xxx
+  mnie rpc call account.profile --provider sbisec --profile-id sbi_xxx
 `
 
 const parseOptions = (args: string[]) => {
@@ -278,8 +278,21 @@ const rpc = async (args: string[]) => {
     }
     if (positionals[0] !== 'call' || !positionals[1])
       throw new Error('rpc requires methods or call')
-    const passkeyId = option(options, 'passkey-id')
-    if (passkeyId) await client.call('sbi.connect', { passkeyId })
+    const provider = option(options, 'provider')
+    const profileId = option(options, 'profile-id')
+    if (provider || profileId) {
+      if (!provider || !profileId)
+        throw new Error('--provider and --profile-id are required together')
+      const connection = (await client.connectProvider(
+        provider as 'sbisec' | 'smbc-direct',
+        profileId,
+      )) as { requires2fa?: boolean }
+      if (connection.requires2fa) {
+        throw new Error(
+          'SMBC Direct requires QR approval and is not available through this non-interactive CLI command',
+        )
+      }
+    }
     const params = positionals[2] ? JSON.parse(positionals[2]) : undefined
     const method = positionals[1]
     const result = await method.split('.').reduce<unknown>((target, key) => {

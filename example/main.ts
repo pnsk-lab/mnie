@@ -4,7 +4,8 @@ import { connectMnie } from '@repo/client-mnie'
 const profile = await connectMnie({
   baseURL: 'https://mnie.example.com',
   token: 'your-token-here',
-  passkeyId: 'your-sbi-passkey-id',
+  provider: 'sbisec',
+  profileId: 'your-sbi-profile-id',
 })
 
 const _balance = await getBalance({

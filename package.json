@@ -4,7 +4,8 @@
   "workspaces": [
     "apps/*",
     "packages/*",
-    "example/"
+    "example/",
+    "docs/"
   ],
   "type": "module",
   "module": "index.ts",

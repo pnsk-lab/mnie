@@ -52,6 +52,20 @@ export const createDb = (path: string) => {
     )
   `)
   sqlite.run(`
+    CREATE TABLE IF NOT EXISTS account_profiles (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      label TEXT NOT NULL,
+      keyring_account TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `)
+  sqlite.run(`
+    INSERT OR IGNORE INTO account_profiles (id, provider, label, keyring_account, created_at, updated_at)
+    SELECT id, 'sbisec', label, keyring_account, created_at, updated_at FROM sbi_passkeys
+  `)
+  sqlite.run(`
     CREATE TABLE IF NOT EXISTS api_keys (
       id TEXT PRIMARY KEY,
       label TEXT NOT NULL,

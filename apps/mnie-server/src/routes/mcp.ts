@@ -6,7 +6,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { eq } from 'drizzle-orm'
 import * as z from 'zod/v4'
 import type { AppBindings, AuthContext } from '../context'
-import { sbiPasskeys } from '../db/schema'
+import { accountProfiles, sbiPasskeys } from '../db/schema'
 import { invokeSbiMethod, isCashOrderMethod, isTradingMethod, type RpcMethod } from '../rpc/methods'
 import { connectSbi } from '../rpc/sbi-session'
 import type { StoredSbiPasskeySecret } from './admin'
@@ -33,7 +33,7 @@ const requireAuthenticated = (auth: AuthContext) => {
 const ORDER_SUBMIT_TICKET_TTL_MS = 10 * 60 * 1000
 
 interface OrderSubmitTicket {
-  passkeyId: string
+  profileId: string
   estimateMethod: RpcMethod
   submitMethod: RpcMethod
   params: unknown
@@ -769,7 +769,7 @@ const getActions = Object.keys(getActionToMethod) as Array<keyof typeof getActio
 const changeActions = Object.keys(changeActionToEstimateMethod) as Array<
   keyof typeof changeActionToEstimateMethod
 >
-const getActionDescription = `Available actions: capabilities, passkeys, ${getActions
+const getActionDescription = `Available actions: capabilities, profiles, ${getActions
   .map((action) => `${action}=${getActionToMethod[action]}`)
   .join(
     ', ',
@@ -782,14 +782,14 @@ const changeActionDescription = `Available actions: ${changeActions
 
 const getToolInputSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('capabilities') }).strict(),
-  z.object({ action: z.literal('passkeys') }).strict(),
+  z.object({ action: z.literal('profiles') }).strict(),
   ...getActions.map((action) => {
     const method = getActionToMethod[action]
     const paramsSchema = methodParamSchemas[method]
     return z
       .object({
         action: z.literal(action),
-        passkeyId: z.string().describe('Saved SBI passkey id'),
+        profileId: z.string().describe('Saved SBI profile id'),
         ...(paramsSchema ? { input: paramsSchema.describe(`${method} input`) } : {}),
       })
       .strict()
@@ -805,7 +805,7 @@ const changeToolInputSchema = z.discriminatedUnion(
     return z
       .object({
         action: z.literal(action),
-        passkeyId: z.string().describe('Saved SBI passkey id'),
+        profileId: z.string().describe('Saved SBI profile id'),
         input: paramsSchema.describe(`${method} input`),
       })
       .strict()
@@ -814,10 +814,10 @@ const changeToolInputSchema = z.discriminatedUnion(
 
 type GetToolArgs =
   | { action: 'capabilities' }
-  | { action: 'passkeys' }
+  | { action: 'profiles' }
   | {
       action: keyof typeof getActionToMethod
-      passkeyId: string
+      profileId: string
       input?: unknown
     }
 
@@ -842,19 +842,21 @@ const createMcpServer = (c: Context<AppBindings>) => {
     version: '0.1.0',
   })
 
-  const listPasskeys = async () => {
+  const listProfiles = async () => {
     const rows = await db
       .select({
-        id: sbiPasskeys.id,
-        label: sbiPasskeys.label,
-        keyringAccount: sbiPasskeys.keyringAccount,
-        createdAt: sbiPasskeys.createdAt,
-        updatedAt: sbiPasskeys.updatedAt,
+        id: accountProfiles.id,
+        provider: accountProfiles.provider,
+        label: accountProfiles.label,
+        keyringAccount: accountProfiles.keyringAccount,
+        createdAt: accountProfiles.createdAt,
+        updatedAt: accountProfiles.updatedAt,
       })
-      .from(sbiPasskeys)
-      .orderBy(sbiPasskeys.createdAt)
+      .from(accountProfiles)
+      .orderBy(accountProfiles.createdAt)
     return Promise.all(
       rows.map(async ({ keyringAccount, ...row }) => {
+        if (row.provider !== 'sbisec') return row
         const secret = await readSecret<StoredSbiPasskeySecret>(keyringAccount)
         const hasDeviceId = Boolean(effectiveSbiDeviceId(secret))
         const hasTradePassword = Boolean(effectiveSbiTradePassword(secret))
@@ -868,7 +870,7 @@ const createMcpServer = (c: Context<AppBindings>) => {
     )
   }
 
-  const invokeCheckedSbiMethod = async (method: RpcMethod, passkeyId: string, params: unknown) => {
+  const invokeCheckedSbiMethod = async (method: RpcMethod, profileId: string, params: unknown) => {
     requireAuthenticated(auth)
 
     if (auth.type === 'apiKey') {
@@ -895,7 +897,7 @@ const createMcpServer = (c: Context<AppBindings>) => {
       const [passkey] = await db
         .select({ keyringAccount: sbiPasskeys.keyringAccount })
         .from(sbiPasskeys)
-        .where(eq(sbiPasskeys.id, passkeyId))
+        .where(eq(sbiPasskeys.id, profileId))
         .limit(1)
       if (!passkey) throw new Error('SBI passkey not found')
       const secret = await readSecret<StoredSbiPasskeySecret>(passkey.keyringAccount)
@@ -911,13 +913,13 @@ const createMcpServer = (c: Context<AppBindings>) => {
       }
     }
 
-    const client = await connectSbi(db, config, passkeyId)
+    const client = await connectSbi(db, config, profileId)
     return invokeSbiMethod(client, method, params)
   }
 
   const createChangeRequest = async (
     action: keyof typeof changeActionToEstimateMethod,
-    passkeyId: string,
+    profileId: string,
     input: unknown,
   ) => {
     const estimateMethod = changeActionToEstimateMethod[action]
@@ -925,14 +927,14 @@ const createMcpServer = (c: Context<AppBindings>) => {
     if (!submitMethod) throw new Error(`${action} cannot create a confirmable request`)
 
     const params = parseMethodParams(estimateMethod, input)
-    const preview = await invokeCheckedSbiMethod(estimateMethod, passkeyId, params)
+    const preview = await invokeCheckedSbiMethod(estimateMethod, profileId, params)
 
     cleanupExpiredOrderSubmitTickets()
     const uuid = randomUUID()
     const expiresAt = new Date(Date.now() + ORDER_SUBMIT_TICKET_TTL_MS)
     const confirmationId = confirmationIdFromPreview(preview)
     orderSubmitTickets.set(uuid, {
-      passkeyId,
+      profileId,
       estimateMethod,
       submitMethod,
       params,
@@ -970,15 +972,15 @@ const createMcpServer = (c: Context<AppBindings>) => {
         })
       }
 
-      if (action === 'passkeys') return textResult({ passkeys: await listPasskeys() })
+      if (action === 'profiles') return textResult({ profiles: await listProfiles() })
 
       const method = getActionToMethod[action]
       if (!method) throw new Error(`unsupported get action: ${String(action)}`)
-      const { passkeyId, input } = parsedArgs
-      if (!passkeyId) throw new Error(`${action} requires passkeyId`)
+      const { profileId, input } = parsedArgs
+      if (!profileId) throw new Error(`${action} requires profileId`)
 
       const params = parseMethodParams(method, input)
-      return textResult(await invokeCheckedSbiMethod(method, passkeyId, params))
+      return textResult(await invokeCheckedSbiMethod(method, profileId, params))
     },
   )
 
@@ -990,12 +992,12 @@ const createMcpServer = (c: Context<AppBindings>) => {
       inputSchema: changeToolInputSchema,
     },
     async (args) => {
-      const { action, passkeyId, input } = changeToolInputSchema.parse(args) as {
+      const { action, profileId, input } = changeToolInputSchema.parse(args) as {
         action: keyof typeof changeActionToEstimateMethod
-        passkeyId: string
+        profileId: string
         input: unknown
       }
-      return textResult(await createChangeRequest(action, passkeyId, input))
+      return textResult(await createChangeRequest(action, profileId, input))
     },
   )
 
@@ -1022,7 +1024,7 @@ const createMcpServer = (c: Context<AppBindings>) => {
       orderSubmitTickets.delete(uuid)
       const result = await invokeCheckedSbiMethod(
         ticket.submitMethod,
-        ticket.passkeyId,
+        ticket.profileId,
         orderSubmitParams(ticket.params, ticket.confirmationId),
       )
       return textResult(result)

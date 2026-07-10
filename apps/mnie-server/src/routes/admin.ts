@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import type { MiddlewareHandler } from 'hono'
 import type { PlaintextStoredWebAuthnCredential } from '@repo/client-sbi'
 import type { AppBindings } from '../context'
-import { sbiPasskeys } from '../db/schema'
+import { accountProfiles, sbiPasskeys } from '../db/schema'
 import {
   createApiKey,
   listApiKeys,
@@ -18,6 +18,12 @@ export interface StoredSbiPasskeySecret {
   credential: PlaintextStoredWebAuthnCredential
   tradePassword?: string
   deviceId?: string
+}
+
+export interface StoredSmbcDirectSecret {
+  user: string
+  password: string
+  accountItemCode?: string
 }
 
 const requireOwnerSession: MiddlewareHandler<AppBindings> = async (c, next) => {
@@ -59,6 +65,55 @@ export const createAdminRoutes = () => {
     })
   })
 
+  app.get('/profiles', async (c) => {
+    const rows = await c.get('db').select().from(accountProfiles).orderBy(accountProfiles.createdAt)
+    return c.json({
+      profiles: rows.map(({ keyringAccount: _keyringAccount, ...profile }) => profile),
+    })
+  })
+
+  app.post('/profiles/smbc-direct', async (c) => {
+    const body = await c.req.json<{
+      label?: string
+      user?: string
+      password?: string
+      accountItemCode?: string
+    }>()
+    if (!body.label?.trim() || !body.user?.trim() || !body.password) {
+      return c.json({ error: 'label, user, and password are required' }, 400)
+    }
+    if (!/^\d+-\d+$/.test(body.user.trim()))
+      return c.json({ error: 'user must be <branch>-<account>' }, 400)
+    const now = new Date()
+    const id = randomId('smbc')
+    const keyringAccount = `smbc-direct:${id}`
+    await saveSecret(keyringAccount, {
+      user: body.user.trim(),
+      password: body.password,
+      accountItemCode: body.accountItemCode?.trim() || undefined,
+    } satisfies StoredSmbcDirectSecret)
+    await c.get('db').insert(accountProfiles).values({
+      id,
+      provider: 'smbc-direct',
+      label: body.label.trim(),
+      keyringAccount,
+      createdAt: now,
+      updatedAt: now,
+    })
+    return c.json(
+      {
+        profile: {
+          id,
+          provider: 'smbc-direct',
+          label: body.label.trim(),
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      201,
+    )
+  })
+
   app.post('/sbi-passkeys', async (c) => {
     const body = await c.req.json<{
       label?: string
@@ -85,6 +140,14 @@ export const createAdminRoutes = () => {
       createdAt: now,
       updatedAt: now,
     })
+    await c.get('db').insert(accountProfiles).values({
+      id,
+      provider: 'sbisec',
+      label: body.label.trim(),
+      keyringAccount,
+      createdAt: now,
+      updatedAt: now,
+    })
 
     return c.json(
       { passkey: { id, label: body.label.trim(), createdAt: now, updatedAt: now } },
@@ -101,6 +164,20 @@ export const createAdminRoutes = () => {
     if (!row) return c.json({ error: 'not found' }, 404)
     await deleteSecret(row.keyringAccount)
     await db.delete(sbiPasskeys).where(eq(sbiPasskeys.id, row.id))
+    await db.delete(accountProfiles).where(eq(accountProfiles.id, row.id))
+    return c.json({ ok: true })
+  })
+
+  app.delete('/profiles/:id', async (c) => {
+    const db = c.get('db')
+    const [row] = await db
+      .select()
+      .from(accountProfiles)
+      .where(eq(accountProfiles.id, c.req.param('id')))
+    if (!row) return c.json({ error: 'not found' }, 404)
+    await deleteSecret(row.keyringAccount)
+    await db.delete(accountProfiles).where(eq(accountProfiles.id, row.id))
+    if (row.provider === 'sbisec') await db.delete(sbiPasskeys).where(eq(sbiPasskeys.id, row.id))
     return c.json({ ok: true })
   })
 

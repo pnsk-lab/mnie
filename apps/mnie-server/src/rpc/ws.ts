@@ -1,6 +1,12 @@
 import type { MarketCode, SbiClientMethods } from '@repo/client-sbi'
+import {
+  loginWithPasskey as loginSmbcDirect,
+  type SmbcDirectLoginChallenge,
+  type SmbcDirectProfile,
+} from '@repo/client-smbc-direct'
 import { createBunWebSocket } from 'hono/bun'
 import type { WSContext } from 'hono/ws'
+import { eq } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { ServerConfig } from '../config'
 import type { Db } from '../db'
@@ -10,6 +16,9 @@ import {
 } from '../security/trade-limits'
 import { invokeSbiMethod, isRpcMethod, isTradingMethod, RPC_METHODS } from './methods'
 import { connectSbi } from './sbi-session'
+import { accountProfiles } from '../db/schema'
+import type { StoredSmbcDirectSecret } from '../routes/admin'
+import { readSecret } from '../security/keyring'
 
 interface JsonRpcRequest {
   jsonrpc?: '2.0'
@@ -20,7 +29,9 @@ interface JsonRpcRequest {
 
 interface RpcSocketState {
   client?: SbiClientMethods
-  sbiPasskeyId?: string
+  smbcProfile?: SmbcDirectProfile
+  smbcChallenge?: SmbcDirectLoginChallenge
+  provider?: 'sbisec' | 'smbc-direct'
   apiKeyId?: string
   scopes?: string[]
   boardPollingSubscriptions: Map<string, AbortController>
@@ -166,17 +177,111 @@ const handleRpc = async (
     return result(request.id, [...RPC_METHODS, ...BOARD_POLLING_METHODS])
   }
 
-  if (request.method === 'sbi.connect') {
+  if (request.method === 'provider.connect') {
     assertScope(state, 'read')
-    const passkeyId =
+    const params =
       request.params && typeof request.params === 'object'
-        ? (request.params as { passkeyId?: string }).passkeyId
+        ? (request.params as { provider?: string; profileId?: string })
         : undefined
-    if (!passkeyId) throw new Error('passkeyId is required')
+    if (!params?.profileId) throw new Error('profileId is required')
+    if (params.provider !== 'sbisec' && params.provider !== 'smbc-direct') {
+      throw new Error('provider must be sbisec or smbc-direct')
+    }
+    const [profile] = await db
+      .select()
+      .from(accountProfiles)
+      .where(eq(accountProfiles.id, params.profileId))
+      .limit(1)
+    if (!profile || profile.provider !== params.provider) throw new Error('profile not found')
     stopBoardPollingSubscriptions(state)
-    state.client = await connectSbi(db, config, passkeyId)
-    state.sbiPasskeyId = passkeyId
-    return result(request.id, { connected: true, passkeyId })
+    state.client = undefined
+    state.smbcProfile = undefined
+    state.smbcChallenge = undefined
+    state.provider = params.provider
+    if (params.provider === 'sbisec') {
+      state.client = await connectSbi(db, config, profile.id)
+      return result(request.id, {
+        connected: true,
+        provider: params.provider,
+        profileId: profile.id,
+      })
+    }
+    if (!config.smbcDirectBaseUrl || !config.smbcDirectLoginBaseUrl) {
+      throw new Error('SMBC_DIRECT_BASE_URL and SMBC_DIRECT_LOGIN_BASE_URL are required')
+    }
+    const secret = await readSecret<StoredSmbcDirectSecret>(profile.keyringAccount)
+    state.smbcChallenge = await loginSmbcDirect({
+      user: secret.user,
+      password: secret.password,
+      accountItemCode: secret.accountItemCode,
+      baseURL: config.smbcDirectBaseUrl,
+      loginURL: config.smbcDirectLoginBaseUrl,
+    })
+    return result(request.id, {
+      connected: false,
+      provider: params.provider,
+      profileId: profile.id,
+      requires2fa: true,
+      qrurl: state.smbcChallenge.qrurl,
+      url: state.smbcChallenge.url,
+    })
+  }
+
+  if (request.method === 'provider.finish2fa') {
+    if (state.provider !== 'smbc-direct' || !state.smbcChallenge) {
+      throw new Error('SMBC Direct two-factor authentication is not pending')
+    }
+    state.smbcProfile = await state.smbcChallenge.finished2fa()
+    state.smbcChallenge = undefined
+    return result(request.id, { connected: true, provider: 'smbc-direct' })
+  }
+
+  if (request.method === 'account.balance') {
+    assertScope(state, 'read')
+    if (!state.smbcProfile) throw new Error('SMBC Direct session is not connected')
+    return result(request.id, await state.smbcProfile.getBalance())
+  }
+
+  if (request.method === 'account.transactions') {
+    assertScope(state, 'read')
+    if (!state.smbcProfile) throw new Error('SMBC Direct session is not connected')
+    const params = request.params as { startDate?: string; endDate?: string } | undefined
+    if (!params?.startDate || !params.endDate) throw new Error('startDate and endDate are required')
+    return result(
+      request.id,
+      await state.smbcProfile.getTransactions({
+        startDate: params.startDate,
+        endDate: params.endDate,
+      }),
+    )
+  }
+
+  if (request.method === 'transfer.recipients') {
+    assertScope(state, 'read')
+    if (!state.smbcProfile) throw new Error('SMBC Direct session is not connected')
+    return result(request.id, await state.smbcProfile.getTransferRecipients())
+  }
+
+  if (request.method === 'transfer.recipient') {
+    assertScope(state, 'read')
+    if (!state.smbcProfile) throw new Error('SMBC Direct session is not connected')
+    const index =
+      request.params && typeof request.params === 'object'
+        ? (request.params as { index?: unknown }).index
+        : undefined
+    if (typeof index !== 'string' || !index) throw new Error('index is required')
+    return result(request.id, await state.smbcProfile.getTransferRecipient(index))
+  }
+
+  if (request.method === 'transfer.estimateFee') {
+    assertScope(state, 'read')
+    if (!state.smbcProfile) throw new Error('SMBC Direct session is not connected')
+    const params = request.params as { amount?: unknown } | undefined
+    if (!params || typeof params.amount !== 'number') throw new Error('amount is required')
+    return result(
+      request.id,
+      await state.smbcProfile.estimateTransferFee({ amount: params.amount }),
+    )
   }
 
   if (request.method === 'market.issue.pollBoard.subscribe') {
@@ -244,7 +349,22 @@ export const createRpcWebSocket = (db: Db, config: ServerConfig) => {
 
       return {
         onOpen(_event, ws) {
-          send(ws, result(null, { connected: true, methods: ['rpc.methods', 'sbi.connect'] }))
+          send(
+            ws,
+            result(null, {
+              connected: true,
+              methods: [
+                'rpc.methods',
+                'provider.connect',
+                'provider.finish2fa',
+                'account.balance',
+                'account.transactions',
+                'transfer.recipients',
+                'transfer.recipient',
+                'transfer.estimateFee',
+              ],
+            }),
+          )
         },
         async onMessage(event, ws) {
           let request: JsonRpcRequest | undefined

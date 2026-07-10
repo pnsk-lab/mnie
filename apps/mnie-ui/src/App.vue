@@ -55,7 +55,8 @@ const {
   status,
   apiKeys,
   sbiPasskeys,
-  selectedPasskeyId,
+  profiles,
+  selectedProfileId,
   setupPassword,
   authBusy,
   apiKeyLabel,
@@ -65,12 +66,17 @@ const {
   sbiCredentialJson,
   tradePassword,
   sbiDeviceId,
+  smbcLabel,
+  smbcUser,
+  smbcPassword,
+  smbcAccountItemCode,
   refresh,
   addApiKey,
   saveApiKeySettings,
   setupOwnerPasskey,
   loginWithPasskey,
   addSbiPasskey,
+  addSmbcDirectProfile,
   removeSbiPasskey,
 } = useAuthAdmin()
 
@@ -157,7 +163,10 @@ const {
   downloadCsv,
   openTradeForStock,
   openTradeForPosition,
-} = useTradingSession(selectedPasskeyId)
+  smbcQrUrl,
+  smbcBalance,
+  finishSmbc2fa,
+} = useTradingSession(selectedProfileId, profiles)
 
 const { oauthApproval, oauthSettings, loadOAuthApproval, approveOAuth } = useOAuthApproval()
 
@@ -333,14 +342,23 @@ onMounted(async () => {
           v-model:sbi-credential-json="sbiCredentialJson"
           v-model:trade-password="tradePassword"
           v-model:sbi-device-id="sbiDeviceId"
-          v-model:selected-passkey-id="selectedPasskeyId"
+          v-model:selected-profile-id="selectedProfileId"
+          v-model:smbc-label="smbcLabel"
+          v-model:smbc-user="smbcUser"
+          v-model:smbc-password="smbcPassword"
+          v-model:smbc-account-item-code="smbcAccountItemCode"
           :api-keys="apiKeys"
           :sbi-passkeys="sbiPasskeys"
+          :profiles="profiles"
+          :smbc-qr-url="smbcQrUrl"
+          :smbc-balance="smbcBalance"
           @add-api-key="addApiKey"
           @refresh="refresh"
           @save-api-key-settings="saveApiKeySettings"
           @revoke-api-key="revokeAndRefresh"
           @add-sbi-passkey="addSbiPasskeyAndConnect"
+          @add-smbc-direct-profile="addSmbcDirectProfile"
+          @finish-smbc-2fa="finishSmbc2fa"
           @connect="connect"
           @remove-sbi-passkey="removeSbiPasskey"
         />

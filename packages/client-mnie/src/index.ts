@@ -5,8 +5,10 @@ export interface ConnectMnieOptions {
   baseURL: string | URL
   /** API key or OAuth access token. */
   token: string
-  /** SBI passkey registered on the Mnie server. */
-  passkeyId?: string
+  /** Provider registered on the Mnie server. */
+  provider?: 'sbisec' | 'smbc-direct'
+  /** Provider-neutral profile ID registered on the Mnie server. */
+  profileId?: string
   /** WebSocket implementation for non-browser runtimes. */
   WebSocket?: typeof WebSocket
   /** Maximum time to wait for the WebSocket handshake. Defaults to 10 seconds. */
@@ -17,11 +19,27 @@ export interface MnieRpcError extends Error {
   code: number
 }
 
+export interface MnieProviderConnection {
+  connected: boolean
+  provider: 'sbisec' | 'smbc-direct'
+  profileId?: string
+  requires2fa?: boolean
+  qrurl?: string
+  url?: string
+}
+
 export interface MnieProfile extends SbiClientMethods {
   /** Calls an RPC method that is not yet represented by the typed SDK. */
   call(method: string, params?: unknown): Promise<unknown>
   /** Returns the RPC methods supported by the connected server. */
   methods(): Promise<string[]>
+  /** Selects a provider profile. SMBC Direct returns a QR challenge before connection. */
+  connectProvider(
+    provider: 'sbisec' | 'smbc-direct',
+    profileId: string,
+  ): Promise<MnieProviderConnection>
+  /** Completes a pending SMBC Direct QR approval. */
+  finish2fa(): Promise<MnieProviderConnection>
   /** Closes the WebSocket and rejects any in-flight calls. */
   close(): void
 }
@@ -164,6 +182,13 @@ const methodProxy = (rpc: JsonRpcConnection, path: string[] = []): unknown =>
       if (property === 'then') return undefined
       if (property === 'call') return rpc.call.bind(rpc)
       if (property === 'methods') return () => rpc.call('rpc.methods') as Promise<string[]>
+      if (property === 'connectProvider') {
+        return (provider: 'sbisec' | 'smbc-direct', profileId: string) =>
+          rpc.call('provider.connect', { provider, profileId }) as Promise<MnieProviderConnection>
+      }
+      if (property === 'finish2fa') {
+        return () => rpc.call('provider.finish2fa') as Promise<MnieProviderConnection>
+      }
       if (property === 'close') return rpc.close.bind(rpc)
       if (typeof property !== 'string') return undefined
       return methodProxy(rpc, [...path, property])
@@ -173,14 +198,19 @@ const methodProxy = (rpc: JsonRpcConnection, path: string[] = []): unknown =>
     },
   })
 
-/** Opens a Mnie RPC connection and returns the selected SBI session profile. */
+/** Opens a Mnie RPC connection and returns the selected provider profile. */
 export const connectMnie = async (options: ConnectMnieOptions): Promise<MnieProfile> => {
   const rpc = new JsonRpcConnection(options)
   const profile = methodProxy(rpc) as MnieProfile
   try {
     await profile.call('rpc.methods')
-    if (options.passkeyId) {
-      await profile.call('sbi.connect', { passkeyId: options.passkeyId })
+    if (options.provider || options.profileId) {
+      if (!options.provider || !options.profileId)
+        throw new Error('provider and profileId must be provided together')
+      const connection = await profile.connectProvider(options.provider, options.profileId)
+      if (connection.requires2fa) {
+        throw new Error('SMBC Direct requires QR approval; call connectProvider() and finish2fa()')
+      }
     }
     return profile
   } catch (cause) {

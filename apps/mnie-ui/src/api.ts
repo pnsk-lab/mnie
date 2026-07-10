@@ -37,6 +37,14 @@ export interface SbiPasskey {
   updatedAt: string
 }
 
+export interface AccountProfile {
+  id: string
+  provider: 'sbisec' | 'smbc-direct'
+  label: string
+  createdAt: string
+  updatedAt: string
+}
+
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(`/api${path}`, {
     cache: 'no-store',
@@ -108,6 +116,22 @@ export const saveSbiPasskey = (payload: {
 
 export const deleteSbiPasskey = (id: string) =>
   request<{ ok: true }>(`/admin/sbi-passkeys/${id}`, { method: 'DELETE' })
+
+export const listAccountProfiles = () => request<{ profiles: AccountProfile[] }>('/admin/profiles')
+
+export const saveSmbcDirectProfile = (payload: {
+  label: string
+  user: string
+  password: string
+  accountItemCode?: string
+}) =>
+  request<{ profile: AccountProfile }>('/admin/profiles/smbc-direct', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+
+export const deleteAccountProfile = (id: string) =>
+  request<{ ok: true }>(`/admin/profiles/${id}`, { method: 'DELETE' })
 
 export const createRpcSocket = () => {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
