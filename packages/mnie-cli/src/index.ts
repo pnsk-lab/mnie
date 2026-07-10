@@ -150,7 +150,7 @@ const login = async (args: string[]) => {
   if (!origin) throw new Error('login requires --origin')
   const profileName = option(options, 'profile') ?? 'default'
   const scopes = option(options, 'scopes') ?? 'mcp read write trade'
-  const storage = option(options, 'storage') ?? 'keyring'
+  const storage = option(options, 'storage') ?? 'file'
   if (storage !== 'file' && storage !== 'keyring')
     throw new Error('--storage must be file or keyring')
 
@@ -158,7 +158,7 @@ const login = async (args: string[]) => {
   const redirectUri = `http://127.0.0.1:${callback.port}/callback`
   const verifier = randomBytes(32).toString('base64url')
   const challenge = createHash('sha256').update(verifier).digest('base64url')
-  const client = await registerOAuthClient(new URL(origin).origin, redirectUri)
+  const client = await registerOAuthClient(new URL(origin).origin, redirectUri, scopes)
   const authorize = new URL('/authorize', origin)
   authorize.searchParams.set('response_type', 'code')
   authorize.searchParams.set('client_id', client.client_id)
@@ -223,7 +223,7 @@ const listenForOAuthCallback = async () => {
   return { port: address.port, code }
 }
 
-const registerOAuthClient = async (origin: string, redirectUri: string) => {
+const registerOAuthClient = async (origin: string, redirectUri: string, scopes: string) => {
   const response = await fetch(new URL('/register', origin), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -233,6 +233,7 @@ const registerOAuthClient = async (origin: string, redirectUri: string) => {
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
       token_endpoint_auth_method: 'none',
+      scope: scopes,
     }),
   })
   if (!response.ok) throw new Error(await response.text())

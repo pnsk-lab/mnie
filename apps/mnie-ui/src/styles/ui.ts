@@ -1,6 +1,7 @@
 export const ui = {
   appShell:
     'grid h-dvh grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-[#101418] text-[#e3e3e9] lg:grid-cols-[7rem_minmax(0,1fr)] lg:grid-rows-none',
+  oauthShell: 'grid min-h-dvh overflow-x-hidden bg-[#101418] text-[#e3e3e9]',
   sidebar:
     'order-2 flex h-20 min-h-0 items-center overflow-x-auto border-t border-[#2f3338] bg-[#191c20] px-2 py-2 lg:order-none lg:h-full lg:flex-col lg:overflow-visible lg:border-t-0 lg:border-r lg:px-0 lg:py-4',
   brandMark:
@@ -14,12 +15,15 @@ export const ui = {
   navIconActive: 'bg-[#263141] text-[#d3e3fd]',
   workspace:
     'order-1 flex min-h-0 min-w-0 flex-col gap-5 overflow-y-auto px-4 pt-4 pb-5 sm:px-6 sm:pt-6 lg:order-none lg:gap-7 lg:px-8 lg:pt-8 lg:pb-8',
+  oauthWorkspace:
+    'flex min-h-dvh min-w-0 items-start justify-center overflow-y-auto overflow-x-hidden px-4 py-5 sm:px-6 sm:py-8',
   topbar: 'flex shrink-0 flex-wrap items-center justify-between gap-4',
   tradeTopbar: 'hidden',
 
-  authPanel: 'grid justify-center pt-6 sm:pt-12',
+  authPanel: 'grid w-full min-w-0 justify-items-center',
   panel:
     'grid content-start gap-4 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-4 shadow-lg shadow-black/15 sm:p-6',
+  oauthPanel: 'w-full min-w-0 max-w-[52rem]',
   loginPanel: 'w-full max-w-[28rem]',
   panelHead: 'flex flex-wrap items-center justify-between gap-3',
   eyebrow: 'mb-1 text-xs font-black uppercase text-[#9aa0a9]',

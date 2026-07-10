@@ -4,7 +4,7 @@ export default defineConfig({
   pack: {
     entry: ['src/index.ts'],
     deps: {
-      alwaysBundle: [/^@repo\//, /^@napi-rs\/keyring/],
+      alwaysBundle: [/^@repo\//],
       onlyBundle: false,
     },
     dts: true,

@@ -94,6 +94,7 @@ export const createAuthRoutes = () => {
 
   app.get('/status', async (c) => {
     const db = c.get('db')
+    c.header('cache-control', 'no-store')
     return c.json({
       configured: await getConfigured(db),
       authenticated: await verifySessionCookie(c, db, c.get('config')),

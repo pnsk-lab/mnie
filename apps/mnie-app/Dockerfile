@@ -13,6 +13,11 @@ RUN bun install --frozen-lockfile
 FROM deps AS build
 COPY . .
 RUN bun --filter @repo/mnie-app build
+RUN mkdir -p /keyring-node-modules/@napi-rs \
+  && cp -R /app/node_modules/.bun/@napi-rs+keyring@*/node_modules/@napi-rs/keyring /keyring-node-modules/@napi-rs/keyring \
+  && for package in /app/node_modules/.bun/@napi-rs+keyring-linux-*@*/node_modules/@napi-rs/keyring-linux-*; do \
+    cp -R "$package" "/keyring-node-modules/@napi-rs/$(basename "$package")"; \
+  done
 
 FROM oven/bun:1-slim AS runtime
 ENV NODE_ENV=production
@@ -22,8 +27,7 @@ ENV MNIE_KEYRING_SQLITE_PATH=/app/data/mnie-app.keyring.sqlite
 WORKDIR /app
 COPY --from=build /app/apps/mnie-app/dist ./apps/mnie-app/dist
 COPY --from=build /app/apps/mnie-ui/dist ./apps/mnie-ui/dist
-COPY --from=build /app/node_modules/.bun/@napi-rs+keyring@*/node_modules/@napi-rs/keyring ./node_modules/@napi-rs/keyring
-COPY --from=build /app/node_modules/.bun/@napi-rs+keyring-linux-x64-gnu@*/node_modules/@napi-rs/keyring-linux-x64-gnu ./node_modules/@napi-rs/keyring-linux-x64-gnu
+COPY --from=build /keyring-node-modules ./node_modules
 WORKDIR /app/apps/mnie-app/dist
 EXPOSE 8787
 CMD ["bun", "index.js"]

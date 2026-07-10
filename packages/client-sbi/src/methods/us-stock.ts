@@ -90,9 +90,12 @@ export const createUsStockAdapter = (session: SbiSession) => ({
   chart: async (options: IssueChartOptions): Promise<IssueChart> => {
     requireUsMarket(options.market, 'market.issue.chart')
     const normalized = normalizedUsChartOptions(options)
+    const detail = await fetchStockDetail(session, options, 'market.issue.chart')
+    const quote = quoteFromDetail(detail, options)
+    const ric = ricFromDetail(detail) || usRic(options.issueCode, options.market)
     const data = await callUsRest(
       session,
-      `information/chart/rics/${encodeURIComponent(usRic(options.issueCode, options.market))}/candles:listLatestCandles`,
+      `information/chart/rics/${encodeURIComponent(ric)}/candles:listLatestCandles`,
       {
         count: String(normalized.count),
         interval: normalized.interval,
@@ -104,8 +107,6 @@ export const createUsStockAdapter = (session: SbiSession) => ({
       .map(usChartPrice)
       .filter((price): price is ChartPrice => price != null)
       .reverse()
-    const detail = await fetchStockDetail(session, options, 'market.issue.chart')
-    const quote = quoteFromDetail(detail, options)
     return {
       issue: quote.issue,
       period: normalized.period,
@@ -327,13 +328,23 @@ export const createUsStockAdapter = (session: SbiSession) => ({
 
 const fetchStockDetail = async (session: SbiSession, options: IssueOptions, methodName: string) => {
   requireUsMarket(options.market, methodName)
+  const fallbackRic = usRic(options.issueCode, options.market)
   const data = await callUsGraphql(session, 'GetStockDetail', STOCK_DETAIL, {
     countryCode: COUNTRY_US,
     securitiesCode: options.issueCode,
-    rics: [usRic(options.issueCode, options.market)],
+    rics: [fallbackRic],
   })
   const stock = objectAt(data, ['getForeignStockSecurities'])
-  const marketPrice = arrayAt(data, ['listMarketPrices', 'marketPrices'])[0]
+  let marketPrice = arrayAt(data, ['listMarketPrices', 'marketPrices'])[0]
+  const actualRic = stringAt(stock, ['securities', 'ric'])
+  if (actualRic && actualRic !== fallbackRic && !hasMarketPrice(marketPrice)) {
+    const priceData = await callUsGraphql(session, 'GetStockDetail', STOCK_DETAIL, {
+      countryCode: COUNTRY_US,
+      securitiesCode: options.issueCode,
+      rics: [actualRic],
+    })
+    marketPrice = arrayAt(priceData, ['listMarketPrices', 'marketPrices'])[0] ?? marketPrice
+  }
   return { stock, marketPrice }
 }
 
@@ -625,6 +636,13 @@ const quoteFromDetail = (
     timestamp: stringAt(price, ['lastDatetime']),
   }
 }
+
+const ricFromDetail = (detail: { stock: unknown }) => stringAt(detail.stock, ['securities', 'ric'])
+
+const hasMarketPrice = (marketPrice: unknown) =>
+  stringAt(marketPrice, ['price', 'last']) != null ||
+  stringAt(marketPrice, ['price', 'prevClose']) != null ||
+  stringAt(marketPrice, ['price', 'lastDatetime']) != null
 
 const usChartPrice = (value: unknown): ChartPrice | undefined => {
   const candle = value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined
