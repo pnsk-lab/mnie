@@ -155,11 +155,9 @@
     },
     "packages/mnie-sdk": {
       "name": "mnie",
-      "dependencies": {
-        "@repo/client-mnie": "workspace:*",
-        "@repo/mnie-types": "workspace:*",
-      },
+      "version": "0.0.0-alpha.0",
       "devDependencies": {
+        "@repo/mnie-types": "workspace:*",
         "@repo/tsconfig": "workspace:*",
         "@types/bun": "latest",
       },
@@ -169,6 +167,7 @@
     },
     "packages/mnie-types": {
       "name": "@repo/mnie-types",
+      "version": "0.0.0",
       "devDependencies": {
         "@repo/tsconfig": "workspace:*",
         "@types/bun": "latest",

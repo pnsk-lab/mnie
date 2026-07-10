@@ -1,5 +1,6 @@
 {
-  "name": "mnie",
+  "name": "@mnie/sdk",
+  "version": "0.0.0-alpha.0",
   "type": "module",
   "module": "./dist/index.mjs",
   "types": "./src/index.ts",
@@ -14,11 +15,9 @@
     "clean": "rm -rf dist",
     "typecheck": "tsc"
   },
-  "dependencies": {
-    "@repo/client-mnie": "workspace:*",
-    "@repo/mnie-types": "workspace:*"
-  },
+  "dependencies": {},
   "devDependencies": {
+    "@repo/mnie-types": "workspace:*",
     "@repo/tsconfig": "workspace:*",
     "@types/bun": "latest"
   },

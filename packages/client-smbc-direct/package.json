@@ -1,5 +1,5 @@
 {
-  "name": "@repo/client-smbc-direct",
+  "name": "@mnie/client-smbc-direct",
   "type": "module",
   "module": "./dist/index.mjs",
   "types": "./src/index.ts",

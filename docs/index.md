@@ -15,7 +15,11 @@ description: Self-hosted finance infrastructure.
     </div>
     <p class="mnie-kicker"><span></span> OPEN SOURCE / SELF-HOSTED</p>
     <h1>Mnie<span>.</span></h1>
-    <p class="mnie-statement">Your money.<br>Your machine.</p>
+    <p class="mnie-statement" aria-label="Your money. Your machine.">
+      <span aria-hidden="true">Your money.<br>Your machine.</span>
+      <span aria-hidden="true">Unified financial interface</span>
+      <span aria-hidden="true">Accessible finance,<br>for AI agents</span>
+    </p>
     <nav class="mnie-actions" aria-label="Get started">
       <a class="mnie-primary" href="/docs/">Start building <span>↗</span></a>
       <a class="mnie-github" href="https://github.com/pnsk-lab/mnie">GitHub <span>⌁</span></a>
@@ -139,12 +143,27 @@ body {
 .mnie-home h1 span { color: var(--mnie-pink); }
 
 .mnie-statement {
+  display: grid;
+  min-height: 1.88em;
   margin: clamp(28px, 5vw, 58px) 0 0;
   font-size: clamp(30px, 5vw, 68px);
   font-weight: 650;
   line-height: 0.94;
   letter-spacing: -0.055em;
 }
+
+.mnie-statement span {
+  grid-area: 1 / 1;
+  align-self: start;
+  opacity: 0;
+  filter: blur(6px);
+  transform: translateY(0.45em);
+  animation: mnie-statement-cycle 9s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  will-change: transform, opacity, filter;
+}
+
+.mnie-statement span:nth-child(2) { animation-delay: 3s; }
+.mnie-statement span:nth-child(3) { animation-delay: 6s; }
 
 .mnie-actions {
   display: flex;
@@ -248,6 +267,26 @@ body {
   50% { transform: translateY(-14px) rotate(2deg); }
 }
 
+@keyframes mnie-statement-cycle {
+  0% {
+    opacity: 0;
+    filter: blur(6px);
+    transform: translateY(0.45em);
+  }
+
+  6%, 27% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+
+  33%, 100% {
+    opacity: 0;
+    filter: blur(6px);
+    transform: translateY(-0.35em);
+  }
+}
+
 @media (max-width: 700px) {
   .mnie-orbit { top: 7%; right: -36vw; opacity: 0.82; }
   .mnie-home h1 { line-height: 0.82; }
@@ -259,5 +298,12 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .mnie-orbit,
   .mnie-kicker span { animation: none; }
+
+  .mnie-statement span {
+    filter: none;
+    transform: none;
+    animation: none;
+  }
+  .mnie-statement span:first-child { opacity: 1; }
 }
 </style>
