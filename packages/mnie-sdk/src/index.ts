@@ -1,113 +1,291 @@
-import type { SbiClientMethods } from '@repo/mnie-types'
+import type {
+  MnieOperation,
+  MnieOperationRequest,
+  MnieOperationResponse,
+  MnieProfile,
+} from '@repo/mnie-types'
 
-export interface MnieSdkOptions {
-  origin: string
-  apiKey: string
-  WebSocket?: typeof WebSocket
-}
+export type { MnieProfile } from '@repo/mnie-types'
 
-export interface JsonRpcError {
-  code: number
-  message: string
-}
+type Method = (...args: any[]) => any
 
-export type MnieClient = SbiClientMethods & {
-  connect(options: { passkeyId: string }): Promise<{ connected: true; passkeyId: string }>
-  methods(): Promise<string[]>
-  close(): void
-}
-
-interface JsonRpcResponse {
-  jsonrpc?: '2.0'
-  id?: string | number | null
-  result?: unknown
-  error?: JsonRpcError
-}
-
-interface PendingCall {
-  resolve: (value: unknown) => void
-  reject: (error: Error) => void
-}
-
-const websocketUrl = (origin: string, apiKey: string) => {
-  const url = new URL('/api/ws', origin)
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  url.searchParams.set('key', apiKey)
-  return url.toString()
-}
-
-class MnieJsonRpcClient {
-  readonly #socket: WebSocket
-  readonly #pending = new Map<string, PendingCall>()
-  #nextId = 1
-  #opened: Promise<void>
-
-  constructor(options: MnieSdkOptions) {
-    const WebSocketCtor = options.WebSocket ?? WebSocket
-    this.#socket = new WebSocketCtor(websocketUrl(options.origin, options.apiKey))
-    this.#opened = new Promise((resolve, reject) => {
-      this.#socket.addEventListener('open', () => resolve(), { once: true })
-      this.#socket.addEventListener(
-        'error',
-        () => reject(new Error('failed to connect to Mnie RPC')),
-        { once: true },
-      )
-    })
-    this.#socket.addEventListener('message', (event) => this.#handleMessage(event))
-    this.#socket.addEventListener('close', () => this.#rejectPending('Mnie RPC socket closed'))
+/**
+ * Converts a profile method into a high-level operation. Options are flattened
+ * with `profile`, so `profile.account.positions.cash({ market: 'XTKS' })`
+ * becomes `getCashPositions({ profile, market: 'XTKS' })`.
+ */
+const operation =
+  <Operation extends MnieOperation, F extends Method>(
+    _operation: Operation,
+    select: (profile: MnieProfile) => F,
+  ) =>
+  (request: MnieOperationRequest<Operation>): MnieOperationResponse<Operation> => {
+    const { profile, ...options } = request
+    const method = select(profile) as (options?: unknown) => MnieOperationResponse<Operation>
+    return method(Object.keys(options).length === 0 ? undefined : options)
   }
 
-  close() {
-    this.#socket.close()
-  }
+// Session and account
+export const getSessionProfile = operation('session.profile', (profile) => profile.session.profile)
+export const getAccountProfile = operation('account.profile', (profile) => profile.account.profile)
+export const getBalance = operation(
+  'account.assets.current',
+  (profile) => profile.account.assets.current,
+)
+export const getBuyingPower = operation(
+  'account.power.buyingPower',
+  (profile) => profile.account.power.buyingPower,
+)
+export const getCollateralRatio = operation(
+  'account.power.collateralRatio',
+  (profile) => profile.account.power.collateralRatio,
+)
+export const getCashPositions = operation(
+  'account.positions.cash',
+  (profile) => profile.account.positions.cash,
+)
+export const getCashPositionDetails = operation(
+  'account.positions.cashDetail',
+  (profile) => profile.account.positions.cashDetail,
+)
+export const getCashPositionsForIssue = operation(
+  'account.positions.cashForIssue',
+  (profile) => profile.account.positions.cashForIssue,
+)
+export const getMarginPositions = operation(
+  'account.positions.margin',
+  (profile) => profile.account.positions.margin,
+)
+export const getMarginPositionDetails = operation(
+  'account.positions.marginDetail',
+  (profile) => profile.account.positions.marginDetail,
+)
+export const getMarginPositionsForIssue = operation(
+  'account.positions.marginForIssue',
+  (profile) => profile.account.positions.marginForIssue,
+)
+export const getMarginPositionSummaryForIssue = operation(
+  'account.positions.marginSummaryForIssue',
+  (profile) => profile.account.positions.marginSummaryForIssue,
+)
+export const getMarginPositionDetailsForIssue = operation(
+  'account.positions.marginDetailsForIssue',
+  (profile) => profile.account.positions.marginDetailsForIssue,
+)
+export const getCloseableMarginPositions = operation(
+  'account.positions.closeableMargin',
+  (profile) => profile.account.positions.closeableMargin,
+)
+export const getDeliverableMarginPositions = operation(
+  'account.positions.deliverableMargin',
+  (profile) => profile.account.positions.deliverableMargin,
+)
+export const getUnrealizedProfitLoss = operation(
+  'account.profitLoss.unrealized',
+  (profile) => profile.account.profitLoss.unrealized,
+)
 
-  async call(method: string, params?: unknown) {
-    await this.#opened
-    const id = String(this.#nextId++)
-    const response = new Promise((resolve, reject) => {
-      this.#pending.set(id, { resolve, reject })
-    })
-    this.#socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
-    return response
-  }
+// Market data
+export const searchIssues = operation(
+  'market.issue.search',
+  (profile) => profile.market.issue.search,
+)
+export const suggestIssues = operation(
+  'market.issue.suggest',
+  (profile) => profile.market.issue.suggest,
+)
+export const getAllowedPrices = operation(
+  'market.issue.allowedPrices',
+  (profile) => profile.market.issue.allowedPrices,
+)
+export const getIssueBoard = operation(
+  'market.issue.board',
+  (profile) => profile.market.issue.board,
+)
+export const pollIssueBoard = operation(
+  'market.issue.pollBoard',
+  (profile) => profile.market.issue.pollBoard,
+)
+export const getIssueChart = operation(
+  'market.issue.chart',
+  (profile) => profile.market.issue.chart,
+)
+export const getIssueOpenOrders = operation(
+  'market.issue.openOrders',
+  (profile) => profile.market.issue.openOrders,
+)
+export const getIssueTradingInfo = operation(
+  'market.issue.tradingInfo',
+  (profile) => profile.market.issue.tradingInfo,
+)
+export const getMajorMarketIndexes = operation(
+  'market.index.major',
+  (profile) => profile.market.index.major,
+)
+export const getMarketOverview = operation('market.overview', (profile) => profile.market.overview)
+export const getMarketRankings = operation(
+  'market.ranking.market',
+  (profile) => profile.market.ranking.market,
+)
+export const getSectorRankings = operation(
+  'market.ranking.sector',
+  (profile) => profile.market.ranking.sector,
+)
+export const getSbiRankings = operation(
+  'market.ranking.sbi',
+  (profile) => profile.market.ranking.sbi,
+)
+export const getNews = operation('news.list', (profile) => profile.news.list)
+export const getWatchlists = operation('watchlist.list', (profile) => profile.watchlist.list)
 
-  #handleMessage(event: MessageEvent) {
-    const message = JSON.parse(String(event.data)) as JsonRpcResponse
-    if (message.id == null) return
-    const pending = this.#pending.get(String(message.id))
-    if (!pending) return
-    this.#pending.delete(String(message.id))
-    if (message.error) {
-      pending.reject(new Error(message.error.message))
-      return
-    }
-    pending.resolve(message.result)
-  }
+// Order inquiry
+export const getTodayExecutions = operation(
+  'orders.inquiry.executionsToday',
+  (profile) => profile.orders.inquiry.executionsToday,
+)
+export const getOpenOrders = operation(
+  'orders.inquiry.open',
+  (profile) => profile.orders.inquiry.open,
+)
+export const getOrderDetail = operation(
+  'orders.inquiry.detail',
+  (profile) => profile.orders.inquiry.detail,
+)
+export const getTradeRecords = operation(
+  'orders.inquiry.tradeRecords',
+  (profile) => profile.orders.inquiry.tradeRecords,
+)
 
-  #rejectPending(message: string) {
-    for (const pending of this.#pending.values()) pending.reject(new Error(message))
-    this.#pending.clear()
-  }
-}
+// Cash orders
+export const getCashOrderPreOrder = operation(
+  'orders.cash.preOrder',
+  (profile) => profile.orders.cash.preOrder,
+)
+export const estimateCashOrder = operation(
+  'orders.cash.estimate',
+  (profile) => profile.orders.cash.estimate,
+)
+export const placeCashOrder = operation('orders.cash.place', (profile) => profile.orders.cash.place)
+export const estimateCashOrderCorrection = operation(
+  'orders.cash.estimateCorrection',
+  (profile) => profile.orders.cash.estimateCorrection,
+)
+export const estimateCashOrderCorrectionConfirmation = operation(
+  'orders.cash.estimateCorrectionConfirm',
+  (profile) => profile.orders.cash.estimateCorrectionConfirm,
+)
+export const placeCashOrderCorrection = operation(
+  'orders.cash.placeCorrection',
+  (profile) => profile.orders.cash.placeCorrection,
+)
+export const estimateCashOrderCancellation = operation(
+  'orders.cash.estimateCancel',
+  (profile) => profile.orders.cash.estimateCancel,
+)
+export const placeCashOrderCancellation = operation(
+  'orders.cash.placeCancel',
+  (profile) => profile.orders.cash.placeCancel,
+)
 
-const methodProxy = (rpc: MnieJsonRpcClient, path: string[] = []): unknown =>
-  new Proxy(() => undefined, {
-    get(_target, property) {
-      if (property === 'then') return undefined
-      if (property === 'connect') {
-        return (params: { passkeyId: string }) => rpc.call('sbi.connect', params)
-      }
-      if (property === 'methods') return () => rpc.call('rpc.methods')
-      if (property === 'close') return () => rpc.close()
-      if (typeof property !== 'string') return undefined
-      return methodProxy(rpc, [...path, property])
-    },
-    apply(_target, _thisArg, args) {
-      return rpc.call(path.join('.'), args.length > 1 ? args : args[0])
-    },
-  })
+// Margin orders and delivery
+export const getMarginOpenPreOrder = operation(
+  'orders.margin.preOrderOpen',
+  (profile) => profile.orders.margin.preOrderOpen,
+)
+export const estimateMarginOpenOrder = operation(
+  'orders.margin.estimateOpen',
+  (profile) => profile.orders.margin.estimateOpen,
+)
+export const placeMarginOpenOrder = operation(
+  'orders.margin.open',
+  (profile) => profile.orders.margin.open,
+)
+export const getMarginClosePreOrder = operation(
+  'orders.margin.preOrderClose',
+  (profile) => profile.orders.margin.preOrderClose,
+)
+export const estimateMarginCloseOrder = operation(
+  'orders.margin.estimateClose',
+  (profile) => profile.orders.margin.estimateClose,
+)
+export const placeMarginCloseOrder = operation(
+  'orders.margin.close',
+  (profile) => profile.orders.margin.close,
+)
+export const estimateMarginCloseSummaryOrder = operation(
+  'orders.margin.estimateCloseSummary',
+  (profile) => profile.orders.margin.estimateCloseSummary,
+)
+export const placeMarginCloseSummaryOrder = operation(
+  'orders.margin.closeSummary',
+  (profile) => profile.orders.margin.closeSummary,
+)
+export const estimateMarginSummaryOrder = operation(
+  'orders.margin.estimateSummary',
+  (profile) => profile.orders.margin.estimateSummary,
+)
+export const placeMarginSummaryOrder = operation(
+  'orders.margin.placeSummary',
+  (profile) => profile.orders.margin.placeSummary,
+)
+export const getActualDeliveryPreOrder = operation(
+  'orders.margin.preOrderActualDelivery',
+  (profile) => profile.orders.margin.preOrderActualDelivery,
+)
+export const estimateActualDeliveryOrder = operation(
+  'orders.margin.estimateActualDelivery',
+  (profile) => profile.orders.margin.estimateActualDelivery,
+)
+export const placeActualDeliveryOrder = operation(
+  'orders.margin.actualDelivery',
+  (profile) => profile.orders.margin.actualDelivery,
+)
 
-export const createMnieClient = (options: MnieSdkOptions) =>
-  methodProxy(new MnieJsonRpcClient(options)) as MnieClient
+// IFD, theme investment, and currency exchange orders
+export const estimateIfdOrder = operation(
+  'orders.ifd.estimate',
+  (profile) => profile.orders.ifd.estimate,
+)
+export const placeIfdOrder = operation('orders.ifd.place', (profile) => profile.orders.ifd.place)
+export const estimateIfdOrderCorrection = operation(
+  'orders.ifd.estimateCorrection',
+  (profile) => profile.orders.ifd.estimateCorrection,
+)
+export const placeIfdOrderCorrection = operation(
+  'orders.ifd.placeCorrection',
+  (profile) => profile.orders.ifd.placeCorrection,
+)
+export const estimateIfdOrderCancellation = operation(
+  'orders.ifd.estimateCancel',
+  (profile) => profile.orders.ifd.estimateCancel,
+)
+export const placeIfdOrderCancellation = operation(
+  'orders.ifd.placeCancel',
+  (profile) => profile.orders.ifd.placeCancel,
+)
+export const getThemeInvestmentPreOrder = operation(
+  'orders.themeInvestment.list',
+  (profile) => profile.orders.themeInvestment.list,
+)
+export const estimateThemeInvestmentOrder = operation(
+  'orders.themeInvestment.estimate',
+  (profile) => profile.orders.themeInvestment.estimate,
+)
+export const placeThemeInvestmentOrder = operation(
+  'orders.themeInvestment.place',
+  (profile) => profile.orders.themeInvestment.place,
+)
+export const getExchangeRate = operation(
+  'orders.exchange.rate',
+  (profile) => profile.orders.exchange.rate,
+)
+export const estimateExchangeOrder = operation(
+  'orders.exchange.estimate',
+  (profile) => profile.orders.exchange.estimate,
+)
+export const placeExchangeOrder = operation(
+  'orders.exchange.place',
+  (profile) => profile.orders.exchange.place,
+)
 
 export type * from '@repo/mnie-types'

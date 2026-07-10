@@ -1,5 +1,5 @@
 {
-  "name": "mnie",
+  "name": "@repo/client-mnie",
   "type": "module",
   "module": "./dist/index.mjs",
   "types": "./src/index.ts",
@@ -10,12 +10,11 @@
     }
   },
   "scripts": {
-    "build": "cd ../.. && vp run @repo/mnie-types#build && cd packages/mnie-sdk && vp pack",
+    "build": "cd ../.. && vp run @repo/mnie-types#build && cd packages/client-mnie && vp pack",
     "clean": "rm -rf dist",
     "typecheck": "tsc"
   },
   "dependencies": {
-    "@repo/client-mnie": "workspace:*",
     "@repo/mnie-types": "workspace:*"
   },
   "devDependencies": {

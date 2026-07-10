@@ -1,9 +1,10 @@
 {
-  "name": "mnie",
+  "name": "@repo/csbi",
   "private": true,
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "example/"
   ],
   "type": "module",
   "module": "index.ts",

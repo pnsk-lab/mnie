@@ -5,7 +5,7 @@ import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { createMnieClient } from '@repo/mnie-sdk'
+import { connectMnie } from '@repo/client-mnie'
 
 interface Profile {
   origin: string
@@ -270,7 +270,7 @@ const openBrowser = (url: string) => {
 const rpc = async (args: string[]) => {
   const { positionals, options } = parseOptions(args)
   const { name, profile, apiKey } = await requireProfile(option(options, 'profile'))
-  const client = createMnieClient({ origin: profile.origin, apiKey })
+  const client = await connectMnie({ baseURL: profile.origin, token: apiKey })
   try {
     if (positionals[0] === 'methods') {
       printJson(await client.methods())
@@ -279,7 +279,7 @@ const rpc = async (args: string[]) => {
     if (positionals[0] !== 'call' || !positionals[1])
       throw new Error('rpc requires methods or call')
     const passkeyId = option(options, 'passkey-id')
-    if (passkeyId) await client.connect({ passkeyId })
+    if (passkeyId) await client.call('sbi.connect', { passkeyId })
     const params = positionals[2] ? JSON.parse(positionals[2]) : undefined
     const method = positionals[1]
     const result = await method.split('.').reduce<unknown>((target, key) => {

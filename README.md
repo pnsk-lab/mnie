@@ -6,20 +6,38 @@ Self-host finance management for running your own portfolio, trading, API key, O
 
 ## Mnie SDK
 
-`@repo/mnie-sdk` connects to a Mnie server with an API key and exposes typed finance methods from `@repo/mnie-types`.
+`@repo/client-mnie` opens an authenticated Mnie connection. `mnie` provides high-level
+finance operations that accept either that connection or a direct SBI client as a profile.
+
+```ts
+import { getCashPositions, getIssueBoard } from 'mnie'
+
+const positions = await getCashPositions({ profile })
+const board = await getIssueBoard({ profile, issueCode: '7203', market: 'XTKS' })
+```
+
+The high-level SDK exposes the complete typed API as profile-injected operations: session
+and account data, positions, market search/boards/charts/rankings, news/watchlists, and every
+order estimate or placement operation. Live operations retain the required
+`allowTrading: true` type guard.
+
+`@repo/mnie-types` also exports `MnieOperationMap`, per-operation
+`MnieOperationRequest` / `MnieOperationResponse`, and the discriminated `MnieRequest` /
+`MnieResponse` unions for routers, logging, and transport layers.
 
 ## Apps
 
 - `apps/mnie-app`: bundled server plus UI runtime
-- `apps/mnie-server`: API, OAuth, MCP, RPC, storage, and provider session management
+- `apps/mnie-server`: API, OAuth, MCP, RPC, storage, and profile session management
 - `apps/mnie-ui`: web UI
 
 ## Packages
 
 - `packages/mnie-types`: shared finance SDK interfaces
-- `packages/mnie-sdk`: API-key SDK for Mnie
-- `packages/mnie-cli`: CLI using `mnie-sdk`
-- `packages/client-sbi`: SBI provider client
+- `packages/client-mnie`: authenticated Mnie connection client
+- `packages/mnie-sdk`: high-level `mnie` SDK
+- `packages/mnie-cli`: CLI using `client-mnie`
+- `packages/client-sbi`: SBI profile client
 
 ### Install
 

@@ -1,0 +1,14 @@
+{
+  "name": "example",
+  "private": true,
+  "dependencies": {
+    "@repo/client-mnie": "workspace:*",
+    "mnie": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

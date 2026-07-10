@@ -805,3 +805,162 @@ export interface SbiClientMethods {
   /** Methods for order history, estimates, live placement, and corrections. */
   orders: SbiClientMethodOrders
 }
+
+/** A direct SBI client or an authenticated Mnie profile. */
+export type MnieProfile = SbiClientMethods
+
+interface MnieOperationDefinition<Request, Response> {
+  request: Request
+  response: Response
+}
+
+/** The complete contract for every high-level Mnie SDK operation. */
+export interface MnieOperationMap {
+  'session.profile': MnieOperationDefinition<{}, AccountProfile>
+  'account.profile': MnieOperationDefinition<{}, AccountProfile>
+  'account.assets.current': MnieOperationDefinition<{}, AccountAssetsValuations>
+  'account.power.buyingPower': MnieOperationDefinition<AccountPowerOptions, BuyingPower>
+  'account.power.collateralRatio': MnieOperationDefinition<AccountPowerOptions, BuyingPower>
+  'account.positions.cash': MnieOperationDefinition<CashPositionOptions, CashPositionList>
+  'account.positions.cashDetail': MnieOperationDefinition<CashPositionOptions, CashPositionList>
+  'account.positions.cashForIssue': MnieOperationDefinition<IssueOptions, CashPositionList>
+  'account.positions.margin': MnieOperationDefinition<MarginPositionOptions, MarginPositionList>
+  'account.positions.marginDetail': MnieOperationDefinition<
+    MarginPositionOptions,
+    MarginPositionList
+  >
+  'account.positions.marginForIssue': MnieOperationDefinition<IssueOptions, MarginPositionList>
+  'account.positions.marginSummaryForIssue': MnieOperationDefinition<
+    IssueOptions,
+    MarginPositionList
+  >
+  'account.positions.marginDetailsForIssue': MnieOperationDefinition<
+    IssueOptions,
+    MarginPositionList
+  >
+  'account.positions.closeableMargin': MnieOperationDefinition<
+    MarginPositionOptions,
+    MarginPositionList
+  >
+  'account.positions.deliverableMargin': MnieOperationDefinition<
+    MarginPositionOptions,
+    MarginPositionList
+  >
+  'account.profitLoss.unrealized': MnieOperationDefinition<ProfitLossOptions, ProfitLossSummary>
+  'market.issue.search': MnieOperationDefinition<IssueSearchOptions, IssueSearchResult>
+  'market.issue.suggest': MnieOperationDefinition<IssueSearchOptions, IssueSearchResult>
+  'market.issue.allowedPrices': MnieOperationDefinition<IssueOptions, Quote>
+  'market.issue.board': MnieOperationDefinition<IssueOptions, Board>
+  'market.issue.pollBoard': MnieOperationDefinition<
+    MarketIssueBoardPollingOptions,
+    AsyncIterableIterator<Board>
+  >
+  'market.issue.chart': MnieOperationDefinition<IssueChartOptions, IssueChart>
+  'market.issue.openOrders': MnieOperationDefinition<IssueOptions, OrderList>
+  'market.issue.tradingInfo': MnieOperationDefinition<BoardOptions, Board>
+  'market.index.major': MnieOperationDefinition<{}, MarketIndex[]>
+  'market.overview': MnieOperationDefinition<{}, DomesticMarket>
+  'market.ranking.market': MnieOperationDefinition<{}, Ranking>
+  'market.ranking.sector': MnieOperationDefinition<{}, Ranking>
+  'market.ranking.sbi': MnieOperationDefinition<{}, Ranking>
+  'news.list': MnieOperationDefinition<{}, NewsList>
+  'watchlist.list': MnieOperationDefinition<{}, Watchlist[]>
+  'orders.inquiry.executionsToday': MnieOperationDefinition<OrderInquiryOptions, OrderList>
+  'orders.inquiry.open': MnieOperationDefinition<OrderInquiryOptions, OrderList>
+  'orders.inquiry.detail': MnieOperationDefinition<OrderDetailOptions, Order>
+  'orders.inquiry.tradeRecords': MnieOperationDefinition<TradeRecordInquiryOptions, TradeRecordList>
+  'orders.cash.preOrder': MnieOperationDefinition<CashOrderPreOrderOptions, StockOrderPreOrder>
+  'orders.cash.estimate': MnieOperationDefinition<CashOrderOptions, OrderPreview>
+  'orders.cash.place': MnieOperationDefinition<PlaceCashOrderOptions, OrderReceipt>
+  'orders.cash.estimateCorrection': MnieOperationDefinition<OrderCorrectionOptions, OrderPreview>
+  'orders.cash.estimateCorrectionConfirm': MnieOperationDefinition<
+    OrderCorrectionOptions,
+    OrderPreview
+  >
+  'orders.cash.placeCorrection': MnieOperationDefinition<PlaceOrderCorrectionOptions, OrderReceipt>
+  'orders.cash.estimateCancel': MnieOperationDefinition<OrderCancelOptions, OrderPreview>
+  'orders.cash.placeCancel': MnieOperationDefinition<PlaceOrderCancelOptions, OrderReceipt>
+  'orders.margin.preOrderOpen': MnieOperationDefinition<
+    MarginOpenOrderPreOrderOptions,
+    StockOrderPreOrder
+  >
+  'orders.margin.estimateOpen': MnieOperationDefinition<MarginOpenOrderOptions, OrderPreview>
+  'orders.margin.open': MnieOperationDefinition<PlaceMarginOpenOrderOptions, OrderReceipt>
+  'orders.margin.preOrderClose': MnieOperationDefinition<
+    MarginCloseOrderPreOrderOptions,
+    StockOrderPreOrder
+  >
+  'orders.margin.estimateClose': MnieOperationDefinition<MarginCloseOrderOptions, OrderPreview>
+  'orders.margin.close': MnieOperationDefinition<PlaceMarginCloseOrderOptions, OrderReceipt>
+  'orders.margin.estimateCloseSummary': MnieOperationDefinition<
+    MarginCloseOrderOptions,
+    OrderPreview
+  >
+  'orders.margin.closeSummary': MnieOperationDefinition<PlaceMarginCloseOrderOptions, OrderReceipt>
+  'orders.margin.estimateSummary': MnieOperationDefinition<
+    MarginCloseSummaryOrderOptions,
+    OrderPreview
+  >
+  'orders.margin.placeSummary': MnieOperationDefinition<
+    PlaceMarginCloseSummaryOrderOptions,
+    OrderReceipt
+  >
+  'orders.margin.preOrderActualDelivery': MnieOperationDefinition<
+    ActualDeliveryOrderPreOrderOptions,
+    StockOrderPreOrder
+  >
+  'orders.margin.estimateActualDelivery': MnieOperationDefinition<
+    ActualDeliveryOrderOptions,
+    OrderPreview
+  >
+  'orders.margin.actualDelivery': MnieOperationDefinition<
+    PlaceActualDeliveryOrderOptions,
+    OrderReceipt
+  >
+  'orders.ifd.estimate': MnieOperationDefinition<IfdOrderOptions, OrderPreview>
+  'orders.ifd.place': MnieOperationDefinition<PlaceIfdOrderOptions, OrderReceipt>
+  'orders.ifd.estimateCorrection': MnieOperationDefinition<OrderCorrectionOptions, OrderPreview>
+  'orders.ifd.placeCorrection': MnieOperationDefinition<PlaceOrderCorrectionOptions, OrderReceipt>
+  'orders.ifd.estimateCancel': MnieOperationDefinition<OrderCancelOptions, OrderPreview>
+  'orders.ifd.placeCancel': MnieOperationDefinition<PlaceOrderCancelOptions, OrderReceipt>
+  'orders.themeInvestment.list': MnieOperationDefinition<
+    ThemeInvestmentPreOrderOptions,
+    ThemeInvestmentList
+  >
+  'orders.themeInvestment.estimate': MnieOperationDefinition<
+    ThemeInvestmentOrderOptions,
+    OrderPreview
+  >
+  'orders.themeInvestment.place': MnieOperationDefinition<
+    PlaceThemeInvestmentOrderOptions,
+    OrderReceipt
+  >
+  'orders.exchange.rate': MnieOperationDefinition<ExchangeRateOptions, ExchangeRateInfo>
+  'orders.exchange.estimate': MnieOperationDefinition<ExchangeOrderOptions, ExchangeOrderPreview>
+  'orders.exchange.place': MnieOperationDefinition<PlaceExchangeOrderOptions, ExchangeOrderReceipt>
+}
+
+export type MnieOperation = keyof MnieOperationMap
+
+export type MnieOperationRequest<Operation extends MnieOperation> = {
+  profile: MnieProfile
+} & MnieOperationMap[Operation]['request']
+
+export type MnieOperationResponse<Operation extends MnieOperation> =
+  MnieOperationMap[Operation]['response']
+
+/** Discriminated union for every high-level SDK request. */
+export type MnieRequest = {
+  [Operation in MnieOperation]: {
+    method: Operation
+    request: MnieOperationRequest<Operation>
+  }
+}[MnieOperation]
+
+/** Discriminated union for every high-level SDK response. */
+export type MnieResponse = {
+  [Operation in MnieOperation]: {
+    method: Operation
+    response: MnieOperationResponse<Operation>
+  }
+}[MnieOperation]

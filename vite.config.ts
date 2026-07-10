@@ -21,7 +21,7 @@ export default defineConfig({
         command: [
           'vp run @repo/mnie-types#build',
           'vp run @repo/client-sbi#build',
-          'vp run @repo/mnie-sdk#build',
+          'vp run @repo/client-mnie#build',
           'vp run @repo/mnie-cli#build',
         ],
       },
