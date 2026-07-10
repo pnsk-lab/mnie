@@ -17,6 +17,7 @@
     "@repo/mnie-sdk": "workspace:*"
   },
   "devDependencies": {
+    "@repo/tsconfig": "workspace:*",
     "@types/bun": "latest"
   },
   "peerDependencies": {

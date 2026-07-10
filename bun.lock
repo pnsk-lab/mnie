@@ -5,6 +5,7 @@
     "": {
       "name": "csbi",
       "devDependencies": {
+        "@repo/tsconfig": "workspace:*",
         "@types/bun": "latest",
         "vite-plus": "^0.1.24",
       },
@@ -19,6 +20,7 @@
         "hono": "^4.8.3",
       },
       "devDependencies": {
+        "@repo/tsconfig": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5",
       },
@@ -36,6 +38,7 @@
         "zod": "^4.4.3",
       },
       "devDependencies": {
+        "@repo/tsconfig": "workspace:*",
         "@types/bun": "latest",
         "drizzle-kit": "^0.31.1",
         "typescript": "^5",
@@ -54,6 +57,7 @@
         "vue-router": "^5.1.0",
       },
       "devDependencies": {
+        "@repo/tsconfig": "workspace:*",
         "@tailwindcss/vite": "^4.3.1",
         "@types/d3": "^7.4.3",
         "@vitejs/plugin-vue": "^6.0.7",
@@ -68,6 +72,7 @@
         "iconv-lite": "^0.7.2",
       },
       "devDependencies": {
+        "@repo/tsconfig": "workspace:*",
         "@types/bun": "latest",
       },
       "peerDependencies": {
@@ -77,13 +82,14 @@
     "packages/mnie-cli": {
       "name": "@repo/mnie-cli",
       "bin": {
-        "mnie": "./src/index.ts",
+        "mnie": "./dist/index.mjs",
       },
       "dependencies": {
         "@napi-rs/keyring": "^1.2.0",
         "@repo/mnie-sdk": "workspace:*",
       },
       "devDependencies": {
+        "@repo/tsconfig": "workspace:*",
         "@types/bun": "latest",
       },
       "peerDependencies": {
@@ -96,6 +102,7 @@
         "@repo/mnie-types": "workspace:*",
       },
       "devDependencies": {
+        "@repo/tsconfig": "workspace:*",
         "@types/bun": "latest",
       },
       "peerDependencies": {
@@ -105,11 +112,16 @@
     "packages/mnie-types": {
       "name": "@repo/mnie-types",
       "devDependencies": {
+        "@repo/tsconfig": "workspace:*",
         "@types/bun": "latest",
       },
       "peerDependencies": {
         "typescript": "^5",
       },
+    },
+    "packages/tsconfig": {
+      "name": "@repo/tsconfig",
+      "version": "0.0.0",
     },
   },
   "packages": {
@@ -370,6 +382,8 @@
     "@repo/mnie-types": ["@repo/mnie-types@workspace:packages/mnie-types"],
 
     "@repo/mnie-ui": ["@repo/mnie-ui@workspace:apps/mnie-ui"],
+
+    "@repo/tsconfig": ["@repo/tsconfig@workspace:packages/tsconfig"],
 
     "@rolldown/binding-android-arm64": ["@rolldown/binding-android-arm64@1.0.3", "", { "os": "android", "cpu": "arm64" }, "sha512-454rs7jHngixp/NMxd5srYD57OnzSlZ/eFTETjORQHLwJG1lRtmNOJcBerZlfu4GjKqeq8aCCIQrMdHyhI51Hw=="],
 

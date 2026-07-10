@@ -19,6 +19,7 @@
     "typecheck": "vp run typecheck:all"
   },
   "devDependencies": {
+    "@repo/tsconfig": "workspace:*",
     "@types/bun": "latest",
     "vite-plus": "^0.1.24"
   },

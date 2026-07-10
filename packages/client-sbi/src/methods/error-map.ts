@@ -99,7 +99,7 @@ export const SBI_SERVER_ERROR_MESSAGES: Record<string, string> = {
   E_0083: 'An error occurred. Wait a while and try again.',
 }
 
-export type SbiServerErrorOptions = {
+export interface SbiServerErrorOptions {
   code: string
   status?: string
   serverMessage?: string

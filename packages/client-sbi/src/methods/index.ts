@@ -125,7 +125,7 @@ const CHART_DEFAULT_UNITS = {
 } as const satisfies Record<ChartPeriod, number>
 const CHART_MINUTE_UNITS = new Set([1, 5, 10, 15])
 
-type MtsHeader = {
+interface MtsHeader {
   sessionId: string
   trCode: string
   resultCode: string
@@ -134,7 +134,7 @@ type MtsHeader = {
   maintenance: string
 }
 
-type MtsResponse = {
+interface MtsResponse {
   status: number
   requestUrl: string
   header: MtsHeader
@@ -142,14 +142,14 @@ type MtsResponse = {
   text: string
 }
 
-type FixedField = {
+interface FixedField {
   width: number
   value?: string | number | null
   align?: 'left' | 'right'
   pad?: string
 }
 
-type OrderPreviewInput = {
+interface OrderPreviewInput {
   issueCode: string
   market?: MarketCode
   side: TradeSide
@@ -157,7 +157,7 @@ type OrderPreviewInput = {
   price?: number
 }
 
-type CashPreOrderInfo = {
+interface CashPreOrderInfo {
   issueCode?: string
   market?: string
   issueName?: string
@@ -170,7 +170,7 @@ const cashCorrectionPreviewInput = {
 
 type TradeAuthenticationStatus = 'success' | 'needDial' | 'excessivelyRequested' | 'unexpected'
 
-type TradeAuthenticationInfo = {
+interface TradeAuthenticationInfo {
   status: TradeAuthenticationStatus
   statusCode: string
   telNo?: string
@@ -258,7 +258,7 @@ const publicDomesticMarket = (market: string | undefined, methodName: string) =>
   return publicMarket
 }
 
-type IzanagiIssueSearchItem = {
+interface IzanagiIssueSearchItem {
   stockName?: string | null
   stockCode?: string | null
   mkt?: string | null
@@ -269,7 +269,7 @@ type IzanagiIssueSearchItem = {
   hitString?: string | null
 }
 
-type IzanagiIssueSearchResponse = {
+interface IzanagiIssueSearchResponse {
   status?: string | null
   stocks?: IzanagiIssueSearchItem[] | null
 }
@@ -4100,7 +4100,7 @@ const isCashPreOrderInput = (
   options: StockOrderPreOrderInput,
 ): options is CashOrderOptions | CashOrderPreOrderOptions => 'kind' in options
 
-type AppStockOrderTrinOptions = {
+interface AppStockOrderTrinOptions {
   issueCode: string
   market: string
   quantity: number
@@ -4122,7 +4122,7 @@ type AppStockOrderTrinOptions = {
   methodName: string
 }
 
-type OmitConfirmationOption = {
+interface OmitConfirmationOption {
   omitConfirmation?: boolean
 }
 

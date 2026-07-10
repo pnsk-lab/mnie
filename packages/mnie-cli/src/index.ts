@@ -7,14 +7,14 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createMnieClient } from '@repo/mnie-sdk'
 
-type Profile = {
+interface Profile {
   origin: string
   apiKeyStorage: 'file' | 'keyring'
   apiKey?: string
   keyringAccount?: string
 }
 
-type ProfilesFile = {
+interface ProfilesFile {
   defaultProfile?: string
   profiles: Record<string, Profile>
 }

@@ -12,7 +12,7 @@ import type {
 import { currency } from '../../utils/format'
 
 export type RecordLike = Record<string, unknown>
-type IssueLike = {
+interface IssueLike {
   code: string
   market: string
   name: string

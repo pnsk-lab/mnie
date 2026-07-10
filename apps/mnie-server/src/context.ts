@@ -1,7 +1,7 @@
 import type { ServerConfig } from './config'
 import type { Db } from './db'
 
-export type AppBindings = {
+export interface AppBindings {
   Variables: {
     db: Db
     config: ServerConfig

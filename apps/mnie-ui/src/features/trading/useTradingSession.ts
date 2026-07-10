@@ -54,27 +54,27 @@ import {
   type RecordLike,
 } from './trading-data'
 
-type RpcResolver = {
+interface RpcResolver {
   resolve: (value: unknown) => void
   reject: (reason: Error) => void
 }
 
-type CashOrderTermOption = {
+interface CashOrderTermOption {
   label: string
   value: CashOrderTerm
 }
 
-type CashOrderAccountTypeOption = {
+interface CashOrderAccountTypeOption {
   label: string
   value: CashOrderAccountType
 }
 
-type CashOrderMarketOption = {
+interface CashOrderMarketOption {
   label: string
   value: CashOrderMarket
 }
 
-type CashOrderDateOption = {
+interface CashOrderDateOption {
   label: string
   value: string
 }

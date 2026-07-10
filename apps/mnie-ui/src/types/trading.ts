@@ -27,13 +27,13 @@ export type CashOrderTriggerZone = 'above' | 'below'
 export type ChartMode = 'line' | 'box'
 export type ChartRange = '1D' | '3D' | '3M' | '1Y' | 'ALL'
 
-export type RpcMessage = {
+export interface RpcMessage {
   id: number
   method: string
   params?: unknown
 }
 
-export type OrderPreview = {
+export interface OrderPreview {
   issue: {
     code: string
     market: string
@@ -50,7 +50,7 @@ export type OrderPreview = {
   message?: string
 }
 
-export type JsonRpcResponse = {
+export interface JsonRpcResponse {
   id?: number
   method?: string
   params?: unknown
@@ -60,7 +60,7 @@ export type JsonRpcResponse = {
   }
 }
 
-export type RealtimePricePoint = {
+export interface RealtimePricePoint {
   at: string
   price: number
   open?: number
@@ -70,12 +70,12 @@ export type RealtimePricePoint = {
   volume?: number | null
 }
 
-export type ChartNotice = {
+export interface ChartNotice {
   title: string
   detail?: string
 }
 
-export type MarketIndex = {
+export interface MarketIndex {
   code?: string
   name: string
   value: number | null
@@ -88,7 +88,7 @@ export type MarketIndex = {
   timestamp?: string
 }
 
-export type Stock = {
+export interface Stock {
   code: string
   name: string
   symbol: string
@@ -115,7 +115,7 @@ export type Stock = {
   }
 }
 
-export type OrderRow = {
+export interface OrderRow {
   id: string
   code: string
   date: string
@@ -143,7 +143,7 @@ export type OrderDetail = OrderRow & {
   accountInformation?: string
 }
 
-export type TradeRecordRow = {
+export interface TradeRecordRow {
   id: string
   code: string
   stock: string
@@ -158,7 +158,7 @@ export type TradeRecordRow = {
   settlementCurrencyCode?: string
 }
 
-export type Position = {
+export interface Position {
   code: string
   name: string
   market: string

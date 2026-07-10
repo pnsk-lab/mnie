@@ -3,7 +3,7 @@ import type { Db } from '../db'
 import { apiKeys } from '../db/schema'
 import { randomId, randomToken, sha256 } from './crypto'
 
-export type ApiKeySettings = {
+export interface ApiKeySettings {
   maxTradesPerHour?: number | null
   maxTradesPer6Hours?: number | null
   maxTradesPerDay?: number | null

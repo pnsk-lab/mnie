@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.json",
+  "extends": "@repo/tsconfig/tsconfig.json",
   "compilerOptions": {
     "types": ["bun"],
     "rootDir": "src",

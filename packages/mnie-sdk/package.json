@@ -1,6 +1,5 @@
 {
-  "name": "@repo/mnie-sdk",
-  "private": true,
+  "name": "mnie",
   "type": "module",
   "module": "./dist/index.mjs",
   "types": "./src/index.ts",
@@ -19,6 +18,7 @@
     "@repo/mnie-types": "workspace:*"
   },
   "devDependencies": {
+    "@repo/tsconfig": "workspace:*",
     "@types/bun": "latest"
   },
   "peerDependencies": {

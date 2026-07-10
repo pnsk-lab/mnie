@@ -19,6 +19,7 @@
     "vue-router": "^5.1.0"
   },
   "devDependencies": {
+    "@repo/tsconfig": "workspace:*",
     "@tailwindcss/vite": "^4.3.1",
     "@types/d3": "^7.4.3",
     "@vitejs/plugin-vue": "^6.0.7",

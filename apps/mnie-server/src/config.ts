@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
-export type ServerConfig = {
+export interface ServerConfig {
   port: number
   databasePath: string
   corsOrigin: string

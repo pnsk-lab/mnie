@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import type { ApiKeySettings } from '../../api'
 import { defaultApiKeyPolicy } from '../auth/api-key-policy'
 
-export type OAuthApprovalState = {
+export interface OAuthApprovalState {
   active: boolean
   clientId: string
   clientName: string

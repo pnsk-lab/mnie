@@ -14,7 +14,7 @@ import {
 import { randomId } from '../security/crypto'
 import { deleteSecret, saveSecret } from '../security/keyring'
 
-export type StoredSbiPasskeySecret = {
+export interface StoredSbiPasskeySecret {
   credential: PlaintextStoredWebAuthnCredential
   tradePassword?: string
   deviceId?: string

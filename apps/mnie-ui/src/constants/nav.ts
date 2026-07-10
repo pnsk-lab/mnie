@@ -2,7 +2,7 @@ import { ArrowLeftRight, History, Settings, WalletCards } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import type { RouteName } from '../router'
 
-export type PageMeta = {
+export interface PageMeta {
   title: string
   icon: Component
 }

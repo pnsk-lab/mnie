@@ -24,24 +24,24 @@ import type {
 } from '../types'
 import type { SbiClientMethods } from '../methods/types'
 
-type PasskeyLoginStart = {
+interface PasskeyLoginStart {
   url: string
   privateKeyPem: string
   publicKey: string
 }
 
-type PasskeyAccessToken = {
+interface PasskeyAccessToken {
   callbackUrl: string
   accessToken: string
 }
 
-type CredentialRequest = {
+interface CredentialRequest {
   challenge: string
   rpId: string
   csrfToken?: string
 }
 
-type SbiEndpointConfig = {
+interface SbiEndpointConfig {
   authBaseUrl: string
   mtsBaseUrl: string
   izanagiBaseUrl?: string

@@ -5,7 +5,7 @@ import type { RpcMethod } from '../rpc/methods'
 
 type WindowName = '1h' | '3h' | '1d'
 
-type TradeLimitInput = {
+interface TradeLimitInput {
   apiKeyId: string
   params: unknown
 }

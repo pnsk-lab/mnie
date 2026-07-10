@@ -4,7 +4,7 @@ export type WebAuthnUserVerification = 'required' | 'preferred' | 'discouraged'
 
 export type WebAuthnTransport = 'ble' | 'hybrid' | 'internal' | 'nfc' | 'usb'
 
-export type WebAuthnJwk = {
+export interface WebAuthnJwk {
   kty: string
   crv?: string
   x?: string
@@ -17,7 +17,7 @@ export type WebAuthnJwk = {
   [key: string]: unknown
 }
 
-export type StoredWebAuthnCredentialSecret = {
+export interface StoredWebAuthnCredentialSecret {
   privateKey: {
     format: 'jwk'
     jwk: WebAuthnJwk
@@ -29,7 +29,7 @@ export type StoredWebAuthnCredentialSecret = {
   }
 }
 
-export type StoredWebAuthnCredential = {
+export interface StoredWebAuthnCredential {
   version: 1
   kind: 'webauthn-credential'
   provider: 'sbi-sec'
@@ -76,7 +76,7 @@ export type PlaintextStoredWebAuthnCredential = Omit<StoredWebAuthnCredential, '
   secretPlaintext: StoredWebAuthnCredentialSecret
 }
 
-export type PasskeyLoginResponse = {
+export interface PasskeyLoginResponse {
   type: 'passkey-login-response'
   requestUrl: string
   status: number
@@ -90,7 +90,7 @@ export type PasskeyLoginResponse = {
   } | null
 }
 
-export type ForeignStockEndpointConfig = {
+export interface ForeignStockEndpointConfig {
   baseUrl?: string
   restUrl: string
   graphqlBffUrl: string
@@ -98,7 +98,7 @@ export type ForeignStockEndpointConfig = {
   userAgent?: string
 }
 
-export type ForeignStockSession = {
+export interface ForeignStockSession {
   endpoints: ForeignStockEndpointConfig
   ssoToken?: string
   sessionId?: string
@@ -108,14 +108,14 @@ export type ForeignStockSession = {
   loginAuthenticated?: boolean
 }
 
-export type MainSiteAuthCache = {
+export interface MainSiteAuthCache {
   baseUrl: string
   assetsUrl: string
   cookieHeader: string
   authenticatedAt: string
 }
 
-export type MainSiteSession = {
+export interface MainSiteSession {
   baseUrl?: string
   etGatePath?: string
   assetsValuationsPath?: string
@@ -127,7 +127,7 @@ export type MainSiteSession = {
   authPromise?: Promise<MainSiteAuthCache>
 }
 
-export type SbiSession = {
+export interface SbiSession {
   mtsBaseUrl: string
   izanagiBaseUrl?: string
   foreignStock?: ForeignStockSession
@@ -139,7 +139,7 @@ export type SbiSession = {
   tradeAuthentication?: SbiTradeAuthenticationOptions
 }
 
-export type LoginWithPasskeyOptions = {
+export interface LoginWithPasskeyOptions {
   passkeyCredential: PlaintextStoredWebAuthnCredential
   authBaseUrl?: string
   mtsBaseUrl?: string
@@ -159,13 +159,13 @@ export type LoginWithPasskeyOptions = {
   mainSiteExchangeOrderCompletePath?: string
 }
 
-export type SbiClientOptions = {
+export interface SbiClientOptions {
   tradePassword?: string
   deviceId?: string
   tradeAuthentication?: SbiTradeAuthenticationOptions
 }
 
-export type SbiTradeAuthenticationRequest = {
+export interface SbiTradeAuthenticationRequest {
   type: 'phone'
   telNo?: string
   phoneNo?: string
@@ -173,7 +173,7 @@ export type SbiTradeAuthenticationRequest = {
   authLimitTime?: string
 }
 
-export type SbiTradeAuthenticationOptions = {
+export interface SbiTradeAuthenticationOptions {
   onRequired?: (request: SbiTradeAuthenticationRequest) => void | Promise<void>
   confirmAttempts?: number
   confirmIntervalMs?: number
@@ -189,24 +189,24 @@ export type WatchlistId = string
 export type PositionId = string
 export type ThemeId = string
 
-export type CurrencyAmount = {
+export interface CurrencyAmount {
   value: number | null
   text: string
   currency: 'JPY' | 'USD'
 }
 
-export type PercentValue = {
+export interface PercentValue {
   value: number | null
   text: string
 }
 
-export type SignedTextValue = {
+export interface SignedTextValue {
   value: number | null
   text: string
   sign?: 'positive' | 'negative' | 'zero'
 }
 
-export type AccountAssetsValuationSummary = {
+export interface AccountAssetsValuationSummary {
   assetsErrorType: unknown
   valuation: number | null
   netChange: number | null
@@ -223,7 +223,7 @@ export type AccountAssetsValuationDetail = AccountAssetsValuationSummary & {
   compositionRatio: number | null
 }
 
-export type AccountAssetsValuations = {
+export interface AccountAssetsValuations {
   fetchedAt: string
   summary: AccountAssetsValuationSummary
   summaryWithoutDeposit: AccountAssetsValuationSummary
@@ -276,7 +276,7 @@ export type IsaAccountType =
   | 'nisaTradePermitted'
   | 'unknown'
 
-export type IssueRef = {
+export interface IssueRef {
   code: IssueCode
   market?: MarketCode
   name?: string
@@ -292,7 +292,7 @@ export type IssueSearchItem = IssueRef & {
 
 export type IssueSearchStatus = 'success' | 'searchError' | 'tooManyResults' | 'unknown'
 
-export type IssueSearchResult = {
+export interface IssueSearchResult {
   status?: string
   statusText: IssueSearchStatus
   issues: IssueSearchItem[]
@@ -300,7 +300,7 @@ export type IssueSearchResult = {
 
 export type ChartPeriod = 'minute' | 'day' | 'week' | 'month'
 
-export type ChartPrice = {
+export interface ChartPrice {
   dateTime: string
   open: CurrencyAmount
   high: CurrencyAmount
@@ -309,7 +309,7 @@ export type ChartPrice = {
   volume?: number | null
 }
 
-export type IssueChart = {
+export interface IssueChart {
   issue: IssueRef
   period: ChartPeriod
   unit: number
@@ -322,13 +322,13 @@ export type IssueChart = {
   error?: SbiMethodError
 }
 
-export type SessionInfo = {
+export interface SessionInfo {
   sessionId: string
   loginType: LoginType
   resultCode: string
 }
 
-export type AccountProfile = {
+export interface AccountProfile {
   session: SessionInfo
   branchCode?: string
   butenCode?: string
@@ -391,7 +391,7 @@ export type AccountProfile = {
   }
 }
 
-export type BuyingPower = {
+export interface BuyingPower {
   cashBuyingPower?: CurrencyAmount
   marginBuyingPower?: CurrencyAmount
   withdrawableAmount?: CurrencyAmount
@@ -403,7 +403,7 @@ export type BuyingPower = {
   error?: SbiMethodError
 }
 
-export type CollateralRatioRecord = {
+export interface CollateralRatioRecord {
   marginRequirements?: CurrencyAmount
   referenceMarginRequirements?: CurrencyAmount
   collateralRatioCash?: CurrencyAmount
@@ -420,7 +420,7 @@ export type CollateralRatioRecord = {
   minimumCollateral?: CurrencyAmount
 }
 
-export type CashPosition = {
+export interface CashPosition {
   issue: IssueRef
   accountType?: AccountType
   depositType?: DepositType
@@ -449,7 +449,7 @@ export type CashPosition = {
   accountInformation?: string
 }
 
-export type CashPositionList = {
+export interface CashPositionList {
   positions: CashPosition[]
   index?: number
   totalCount?: number
@@ -461,7 +461,7 @@ export type CashPositionList = {
   error?: SbiMethodError
 }
 
-export type MarginPosition = {
+export interface MarginPosition {
   id?: PositionId
   issue: IssueRef
   side: MarginTradeSide
@@ -503,7 +503,7 @@ export type MarginPosition = {
   bargainMarket?: string
 }
 
-export type MarginPositionList = {
+export interface MarginPositionList {
   positions: MarginPosition[]
   index?: number
   totalCount?: number
@@ -515,7 +515,7 @@ export type MarginPositionList = {
   error?: SbiMethodError
 }
 
-export type ProfitLossSummary = {
+export interface ProfitLossSummary {
   cash?: SignedTextValue
   margin?: SignedTextValue
   total?: SignedTextValue
@@ -523,7 +523,7 @@ export type ProfitLossSummary = {
   error?: SbiMethodError
 }
 
-export type Quote = {
+export interface Quote {
   issue: IssueRef
   price?: CurrencyAmount
   change?: SignedTextValue
@@ -539,12 +539,12 @@ export type Quote = {
   error?: SbiMethodError
 }
 
-export type BoardPriceLevel = {
+export interface BoardPriceLevel {
   price: CurrencyAmount
   quantity?: number | null
 }
 
-export type Board = {
+export interface Board {
   issue: IssueRef
   bids: BoardPriceLevel[]
   asks: BoardPriceLevel[]
@@ -552,7 +552,7 @@ export type Board = {
   error?: SbiMethodError
 }
 
-export type MarketIndex = {
+export interface MarketIndex {
   code?: string
   categoryCode?: string
   name: string
@@ -568,13 +568,13 @@ export type MarketIndex = {
   previousClose?: CurrencyAmount
 }
 
-export type DomesticMarket = {
+export interface DomesticMarket {
   status?: string
   indexes: MarketIndex[]
   error?: SbiMethodError
 }
 
-export type RankingItem = {
+export interface RankingItem {
   rank: number
   issue: IssueRef
   value?: number | string | null
@@ -585,14 +585,14 @@ export type RankingItem = {
   colorFlag?: string
 }
 
-export type Ranking = {
+export interface Ranking {
   items: RankingItem[]
   category?: string
   updatedAt?: string
   error?: SbiMethodError
 }
 
-export type NewsItem = {
+export interface NewsItem {
   id?: string
   title: string
   source?: string
@@ -606,26 +606,26 @@ export type NewsItem = {
   pnac?: string
 }
 
-export type NewsList = {
+export interface NewsList {
   items: NewsItem[]
   error?: SbiMethodError
 }
 
-export type WatchlistItem = {
+export interface WatchlistItem {
   issue: IssueRef
   sortOrder?: number
   memo?: string
   quote?: Quote
 }
 
-export type Watchlist = {
+export interface Watchlist {
   id: WatchlistId
   name: string
   items: WatchlistItem[]
   error?: SbiMethodError
 }
 
-export type Order = {
+export interface Order {
   id: OrderId
   issue: IssueRef
   side: TradeSide
@@ -655,13 +655,13 @@ export type Order = {
   correctable?: boolean
 }
 
-export type OrderList = {
+export interface OrderList {
   orders: Order[]
   hasMore?: boolean
   error?: SbiMethodError
 }
 
-export type TradeRecord = {
+export interface TradeRecord {
   id: string
   issue: IssueRef
   tradeRecordTypeCode?: string
@@ -678,13 +678,13 @@ export type TradeRecord = {
   marginCloseLimitType?: string
 }
 
-export type TradeRecordList = {
+export interface TradeRecordList {
   records: TradeRecord[]
   hasMore?: boolean
   error?: SbiMethodError
 }
 
-export type OrderCorrectionPreOrderDetail = {
+export interface OrderCorrectionPreOrderDetail {
   exchangeName?: string
   marketLoanKbn?: string
   marketIppanLoanKbn?: string
@@ -697,7 +697,7 @@ export type OrderCorrectionPreOrderDetail = {
   volumeText?: string
 }
 
-export type OrderCorrectionPreOrder = {
+export interface OrderCorrectionPreOrder {
   issue: IssueRef
   tradeTitle?: string
   buyingPowerTotal?: CurrencyAmount
@@ -753,7 +753,7 @@ export type OrderCorrectionPreOrder = {
   exchangeList?: string
 }
 
-export type OrderPreview = {
+export interface OrderPreview {
   issue: IssueRef
   side: TradeSide
   quantity?: number
@@ -768,12 +768,12 @@ export type OrderPreview = {
   error?: SbiMethodError
 }
 
-export type StockOrderPreOrderPriceStep = {
+export interface StockOrderPreOrderPriceStep {
   from?: CurrencyAmount
   to?: CurrencyAmount
 }
 
-export type StockOrderPreOrderPaymentLimit = {
+export interface StockOrderPreOrderPaymentLimit {
   text?: string
   code?: string
 }
@@ -787,7 +787,7 @@ export type StockOrderPreOrderMarginTradeType =
   | 'day'
   | 'hyper'
 
-export type StockOrderPreOrder = {
+export interface StockOrderPreOrder {
   issue: IssueRef
   tradeTitle?: string
   buyingPowerTotal?: CurrencyAmount
@@ -850,7 +850,7 @@ export type StockOrderPreOrder = {
   error?: SbiMethodError
 }
 
-export type OrderReceipt = {
+export interface OrderReceipt {
   accepted: boolean
   orderId?: OrderId
   acceptedAt?: string
@@ -863,7 +863,7 @@ export type ExchangeSpecificMethod = 'foreign' | 'domestic'
 export type ExchangeAccountKind = 'GENERAL' | 'JR_NISA'
 export type ExchangeSellMethod = 'SELL_PART' | 'SELL_ALL'
 
-export type ExchangeOrderPreview = {
+export interface ExchangeOrderPreview {
   currencyCode: string
   currencyName?: string
   side: ExchangeOrderSide
@@ -882,7 +882,7 @@ export type ExchangeOrderPreview = {
   csrfToken: string
 }
 
-export type ExchangeOrderReceipt = {
+export interface ExchangeOrderReceipt {
   accepted: boolean
   currencyCode?: string
   side?: ExchangeOrderSide
@@ -891,7 +891,7 @@ export type ExchangeOrderReceipt = {
   rawTitle?: string
 }
 
-export type ExchangeRateInfo = {
+export interface ExchangeRateInfo {
   currencyCode: string
   side: ExchangeOrderSide
   referenceExchangeRate?: string
@@ -910,7 +910,7 @@ export type ExchangeRateInfo = {
   raw: Record<string, unknown>
 }
 
-export type ThemeInvestment = {
+export interface ThemeInvestment {
   id: ThemeId
   name: string
   issues: ThemeInvestmentIssue[]
@@ -933,7 +933,7 @@ export type ThemeInvestmentIssue = IssueRef & {
   tradeTime?: string
 }
 
-export type ThemeInvestmentList = {
+export interface ThemeInvestmentList {
   themes: ThemeInvestment[]
   buyingPowerTotal?: CurrencyAmount
   isaBuyLimit?: CurrencyAmount
@@ -944,7 +944,7 @@ export type ThemeInvestmentList = {
   error?: SbiMethodError
 }
 
-export type SbiMethodError = {
+export interface SbiMethodError {
   status?: string
   code?: string
   message?: string

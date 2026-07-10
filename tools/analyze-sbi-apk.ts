@@ -1,7 +1,7 @@
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
-type ApiClass = {
+interface ApiClass {
   file: string
   packageName: string | null
   className: string | null
@@ -15,7 +15,7 @@ type ApiClass = {
   responseReads: Array<{ line: number; setter: string | null; width: number }>
 }
 
-type Finding = {
+interface Finding {
   generatedAt: string
   input: {
     jadx: string

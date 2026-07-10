@@ -11,14 +11,14 @@ import {
 import { invokeSbiMethod, isRpcMethod, isTradingMethod, RPC_METHODS } from './methods'
 import { connectSbi } from './sbi-session'
 
-type JsonRpcRequest = {
+interface JsonRpcRequest {
   jsonrpc?: '2.0'
   id?: string | number | null
   method?: string
   params?: unknown
 }
 
-type RpcSocketState = {
+interface RpcSocketState {
   client?: SbiClientMethods
   sbiPasskeyId?: string
   apiKeyId?: string
@@ -26,7 +26,7 @@ type RpcSocketState = {
   boardPollingSubscriptions: Map<string, AbortController>
 }
 
-type BoardPollingParams = {
+interface BoardPollingParams {
   issueCode: string
   market: MarketCode
   intervalSeconds?: number

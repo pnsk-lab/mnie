@@ -32,7 +32,7 @@ const requireAuthenticated = (auth: AuthContext) => {
 
 const ORDER_SUBMIT_TICKET_TTL_MS = 10 * 60 * 1000
 
-type OrderSubmitTicket = {
+interface OrderSubmitTicket {
   passkeyId: string
   estimateMethod: RpcMethod
   submitMethod: RpcMethod

@@ -1,12 +1,12 @@
 import type { SbiClientMethods } from '@repo/mnie-types'
 
-export type MnieSdkOptions = {
+export interface MnieSdkOptions {
   origin: string
   apiKey: string
   WebSocket?: typeof WebSocket
 }
 
-export type JsonRpcError = {
+export interface JsonRpcError {
   code: number
   message: string
 }
@@ -17,14 +17,14 @@ export type MnieClient = SbiClientMethods & {
   close(): void
 }
 
-type JsonRpcResponse = {
+interface JsonRpcResponse {
   jsonrpc?: '2.0'
   id?: string | number | null
   result?: unknown
   error?: JsonRpcError
 }
 
-type PendingCall = {
+interface PendingCall {
   resolve: (value: unknown) => void
   reject: (error: Error) => void
 }

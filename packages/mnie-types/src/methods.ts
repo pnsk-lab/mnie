@@ -42,21 +42,21 @@ import type {
   Watchlist,
 } from './types'
 
-export type PagingOptions = {
+export interface PagingOptions {
   /** Start index for the result list. Defaults to the first item when omitted. */
   index?: number
   /** Maximum number of items to fetch. Uses the implementation default when omitted. */
   limit?: number
 }
 
-export type DateRangeOptions = {
+export interface DateRangeOptions {
   /** Start date for the inquiry range. */
   from?: string
   /** End date for the inquiry range. */
   to?: string
 }
 
-export type IssueOptions = {
+export interface IssueOptions {
   /** Issue code to request. */
   issueCode: IssueCode
   /** Market code to request. */
@@ -79,7 +79,7 @@ export type IssueChartOptions = IssueOptions & {
   count?: number
 }
 
-export type IssueSearchOptions = {
+export interface IssueSearchOptions {
   /** Search text, such as an issue code, name, or keyword. */
   query: string
   /** Market code to search. */
@@ -118,7 +118,7 @@ export type OrderInquiryOptions = PagingOptions &
     status?: OrderStatus
   }
 
-export type OrderDetailOptions = {
+export interface OrderDetailOptions {
   /** Order number shown in order inquiry. */
   orderNumber?: string
   /** Order ID from order inquiry. For US stocks this is often `orderSubNo`. */
@@ -149,7 +149,7 @@ export type BoardOptions = IssueOptions & {
     | 'marginCloseSell'
 }
 
-export type StockOrderBaseOptions = {
+export interface StockOrderBaseOptions {
   /** Issue code to order. */
   issueCode: IssueCode
   /** Market code to order on. */
@@ -185,7 +185,7 @@ export type CashOrderTriggerZone = 'above' | 'below'
 
 export type CashOrderMethod = 'normal' | 'stop' | 'oco'
 
-export type StockOrderMarginPosition = {
+export interface StockOrderMarginPosition {
   /** Open trade date from the margin position record, in yyyyMMdd or yyyy-MM-dd format. */
   openTradeDate: string
   /** Open price from the margin position record. Raw strings are accepted to preserve APK values. */
@@ -284,7 +284,7 @@ export type MarginClosePositionOrder =
 
 export type ActualDeliveryKind = 'genbiki' | 'genwatashi'
 
-export type ActualDeliveryOrderOptions = {
+export interface ActualDeliveryOrderOptions {
   /** Issue code to deliver. */
   issueCode: IssueCode
   /** Market code for the issue. */
@@ -339,7 +339,7 @@ export type PlaceActualDeliveryOrderOptions = ActualDeliveryOrderOptions & {
   allowTrading?: true
 }
 
-export type OrderCorrectionOptions = {
+export interface OrderCorrectionOptions {
   /** Order number shown in order inquiry. Required by the mobile pre-correction route. */
   orderNumber?: string
   /** Order ID to correct. */
@@ -397,7 +397,7 @@ export type PlaceOrderCorrectionOptions = OrderCorrectionOptions & {
   allowTrading?: true
 }
 
-export type OrderCancelOptions = {
+export interface OrderCancelOptions {
   /** Order number shown in order inquiry. */
   orderNumber: string
   /** Original order ID shown in order inquiry. */
@@ -419,7 +419,7 @@ export type PlaceOrderCancelOptions = OrderCancelOptions & {
   allowTrading?: true
 }
 
-export type ExchangeOrderOptions = {
+export interface ExchangeOrderOptions {
   /** Currency code, such as USD. */
   currencyCode: string
   /** Buy or sell the foreign currency. */
@@ -438,7 +438,7 @@ export type ExchangeOrderOptions = {
   tradePassword?: string
 }
 
-export type ExchangeRateOptions = {
+export interface ExchangeRateOptions {
   /** Currency code, such as USD. */
   currencyCode: string
   /** Buy or sell the foreign currency. */
@@ -513,7 +513,7 @@ export type PlaceIfdOrderOptions = IfdOrderOptions & {
   allowTrading?: true
 }
 
-export type ThemeInvestmentOrderOptions = {
+export interface ThemeInvestmentOrderOptions {
   /** Theme ID for the theme investment order. */
   themeId: ThemeId
   /** Theme set year/month (`theme_set_yyyymm`) from the mobile APK handoff. */
@@ -532,21 +532,21 @@ export type ThemeInvestmentOrderOptions = {
   amount?: number
 }
 
-export type ThemeInvestmentOrderComponent = {
+export interface ThemeInvestmentOrderComponent {
   /** Component stock issue code. */
   issueCode: IssueCode
   /** Component order quantity. */
   quantity: number | string
 }
 
-export type ThemeInvestmentPreOrderComponent = {
+export interface ThemeInvestmentPreOrderComponent {
   /** Component stock issue code selected by the mobile theme investment flow. */
   issueCode: IssueCode
   /** Component order quantity from the mobile handoff, when already selected. */
   quantity?: number | string
 }
 
-export type ThemeInvestmentPreOrderOptions = {
+export interface ThemeInvestmentPreOrderOptions {
   /** Theme ID for the theme investment order target. */
   themeId: ThemeId
   /** Theme name from the mobile theme investment flow, when available. */
@@ -562,12 +562,12 @@ export type PlaceThemeInvestmentOrderOptions = ThemeInvestmentOrderOptions & {
   allowTrading?: true
 }
 
-export type AccountPowerOptions = {
+export interface AccountPowerOptions {
   /** Fetches margin-account collateral details. Disable this for accounts without margin trading. */
   includeMarginAccount?: boolean
 }
 
-export type ProfitLossOptions = {
+export interface ProfitLossOptions {
   /** Market to fetch profit/loss for. Omit for domestic cash/margin summary. */
   market?: MarketCode
 }

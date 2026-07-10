@@ -1,9 +1,9 @@
-export type AuthStatus = {
+export interface AuthStatus {
   configured: boolean
   authenticated: boolean
 }
 
-export type ApiKey = {
+export interface ApiKey {
   id: string
   label: string
   maxTradesPerHour?: number | null
@@ -30,7 +30,7 @@ export type ApiKeySettings = Pick<
   | 'scopes'
 >
 
-export type SbiPasskey = {
+export interface SbiPasskey {
   id: string
   label: string
   createdAt: string

@@ -45,19 +45,19 @@ import { currency, currencyForMarket } from '../../utils/format'
 import RealtimePriceChart from './RealtimePriceChart.vue'
 
 type StockInfoTab = 'detail' | 'holding'
-type CashOrderAccountTypeOption = {
+interface CashOrderAccountTypeOption {
   label: string
   value: CashOrderAccountType
 }
-type CashOrderMarketOption = {
+interface CashOrderMarketOption {
   label: string
   value: CashOrderMarket
 }
-type CashOrderTermOption = {
+interface CashOrderTermOption {
   label: string
   value: CashOrderTerm
 }
-type CashOrderDateOption = {
+interface CashOrderDateOption {
   label: string
   value: string
 }
