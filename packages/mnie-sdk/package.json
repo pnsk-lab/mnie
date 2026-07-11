@@ -1,7 +1,7 @@
 {
   "name": "@mnie/sdk",
-  "license": "MIT",
   "version": "0.0.0-alpha.0",
+  "license": "MIT",
   "type": "module",
   "module": "./dist/index.mjs",
   "types": "./src/index.ts",
