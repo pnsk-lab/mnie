@@ -10,11 +10,12 @@
     }
   },
   "scripts": {
-    "build": "cd ../.. && cd packages/client-nissay-401k && vp pack",
+    "build": "cd ../.. && vp run @mnie/types#build && cd packages/client-nissay-401k && vp pack",
     "clean": "rm -rf dist",
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@mnie/types": "workspace:*",
     "iconv-lite": "^0.7.3",
     "node-html-parser": "^9.0.0"
   },

@@ -1,5 +1,17 @@
 import iconv from 'iconv-lite'
 import { parse, type HTMLElement } from 'node-html-parser'
+import type { FinancialProvider, PensionOperations } from '@mnie/types'
+
+export type {
+  PensionContribution,
+  PensionContributionAllocation,
+  PensionCurrentAssets,
+  PensionHistoricalAssetEntry,
+  PensionHistoricalAssets,
+  PensionHolding,
+  PensionOperations,
+  PensionParticipant,
+} from '@mnie/types'
 
 export interface Nissay401kClientOptions {
   /** Nissay 401k origin. Paths, queries, and fragments are rejected. */
@@ -71,7 +83,9 @@ export class Nissay401kAuthError extends Nissay401kError {
   override name = 'Nissay401kAuthError'
 }
 
-export interface Nissay401kProfile {
+export type Nissay401kOperations = PensionOperations
+
+export interface Nissay401kProfile extends FinancialProvider<Nissay401kOperations> {
   readonly baseURL: string
   readonly session: { export(): Nissay401kSession }
   getHeader(): Promise<NissayHeader>
@@ -134,6 +148,7 @@ const browserHeaders = {
   'user-agent':
     'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36',
 }
+
 const required = (element: HTMLElement | null, selector: string) => {
   if (!element) throw new Nissay401kError(`Element not found: ${selector}`)
   return element
@@ -256,7 +271,33 @@ export const createNissay401kClient = (options: Nissay401kClientOptions): Nissay
         lastLogin: date(required(paragraphs[1]!.querySelector('.date'), '.date').text, 'datetime'),
       }
     }
-    return {
+    const result: Nissay401kProfile = {
+      descriptor: { id: 'nissay-401k', name: 'Nissay 401k' },
+      accountId: 'primary',
+      capabilities: () => ['pensions:read'],
+      operations: () => [
+        'pension.participant.get',
+        'pension.assets.current.get',
+        'pension.contribution.get',
+        'pension.assets.history.list',
+      ],
+      checkAvailability: async () => {
+        try {
+          await result.getCurrentAssets()
+          return { ok: true }
+        } catch (message) {
+          return { ok: false, message }
+        }
+      },
+      invoke: async (name) => {
+        if (name === 'pension.participant.get') return result.getHeader() as never
+        if (name === 'pension.assets.current.get') return result.getCurrentAssets() as never
+        if (name === 'pension.contribution.get') return result.getContribution() as never
+        if (name === 'pension.assets.history.list') return result.getHistoricalAssets() as never
+        throw new Error(`unsupported Nissay 401k operation: ${name}`)
+      },
+      exportSession: () => ({ baseURL, ...values, cookies: jar.export() }),
+      close: () => result.logout(),
       baseURL,
       session: { export: () => ({ baseURL, ...values, cookies: jar.export() }) },
       async getHeader() {
@@ -344,6 +385,7 @@ export const createNissay401kClient = (options: Nissay401kClientOptions): Nissay
         await request(paths.logout)
       },
     }
+    return result
   }
   return {
     baseURL,

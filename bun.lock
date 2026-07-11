@@ -108,6 +108,7 @@
     "packages/client-nissay-401k": {
       "name": "@mnie/client-nissay-401k",
       "dependencies": {
+        "@mnie/types": "workspace:*",
         "iconv-lite": "^0.7.3",
         "node-html-parser": "^9.0.0",
       },
