@@ -26,7 +26,7 @@ const signedMoney = (value: { value: number | null } | undefined, currency: stri
  * Adapts SBI Securities' transport implementation to the provider-neutral
  * financial API. SBI-specific methods deliberately remain internal here.
  */
-export const createProvider = (client: SbiClientMethods): FinancialProvider<SbiSecOperations> => {
+const createProvider = (client: SbiClientMethods): FinancialProvider<SbiSecOperations> => {
   const profile = client.session.profile
   const account = async (): Promise<Account> => {
     const value = await profile()
@@ -46,6 +46,7 @@ export const createProvider = (client: SbiClientMethods): FinancialProvider<SbiS
     operations: () => [
       'accounts.list',
       'balances.list',
+      'assets.valuation.get',
       'transactions.list',
       'investments.positions.list',
       'investments.orders.list',
@@ -84,6 +85,28 @@ export const createProvider = (client: SbiClientMethods): FinancialProvider<SbiS
             : []
         })
         return balances as never
+      }
+      if (name === 'assets.valuation.get') {
+        const input = request as { accountId?: string }
+        if (input.accountId && input.accountId !== currentAccount.id) {
+          throw new Error('asset valuation account was not found')
+        }
+        const assets = await client.account.assets.current()
+        const valuation = assets.summary?.valuation
+        if (valuation == null) throw new Error('SBI Securities did not return an asset valuation')
+        const holdings = assets.summaryWithoutDeposit?.valuation
+        return {
+          amount: { currency: 'JPY', value: String(valuation) },
+          asOf: new Date().toISOString(),
+          ...(holdings == null
+            ? {}
+            : { holdingsAmount: { currency: 'JPY', value: String(holdings) } }),
+          ...(holdings == null
+            ? {}
+            : {
+                cashAmount: { currency: 'JPY', value: String(Math.max(valuation - holdings, 0)) },
+              }),
+        } as never
       }
       if (name === 'investments.positions.list') {
         const input = request as { accountId?: string; positionType?: 'cash' | 'margin' }

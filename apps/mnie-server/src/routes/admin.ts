@@ -9,17 +9,14 @@ import {
   type MobileSuicaSession,
   type MobileSuicaProfile,
 } from '../../../../packages/provider-mobile-suica/src'
-import { createProvider as createSbiSecProvider } from '@mnie/provider-sbi-sec'
 import {
   createProvider as createSmbcDirectProvider,
   exportSession as exportSmbcDirectSession,
   importSession as importSmbcDirectSession,
   type SmbcDirectSession,
 } from '@mnie/provider-smbc-direct'
-import type {
-  AvailabilityCheckResult,
-  PlaintextStoredWebAuthnCredential,
-} from '@mnie/provider-sbi-sec'
+import type { PlaintextStoredWebAuthnCredential } from '@mnie/provider-sbi-sec'
+import type { AvailabilityCheckResult } from '@mnie/types'
 import type { AppBindings } from '../context'
 import type { CronSystem } from '../cron'
 import { accountProfiles, sbiPasskeys } from '../db/schema'
@@ -34,6 +31,7 @@ import { randomId } from '../security/crypto'
 import { deleteSecret, saveSecret } from '../security/keyring'
 import { readSecret } from '../security/keyring'
 import { connectSbi } from '../rpc/sbi-session'
+import { ensureInitialAssetValuations, latestAssetValuations } from '../assets'
 
 export interface StoredSbiPasskeySecret {
   credential: PlaintextStoredWebAuthnCredential
@@ -152,6 +150,11 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
     })
   })
 
+  app.get('/asset-valuations/latest', async (c) => {
+    await ensureInitialAssetValuations(c.get('db'), c.get('config'))
+    return c.json({ valuations: await latestAssetValuations(c.get('db')) })
+  })
+
   let availabilityRequest:
     | Promise<{ availability: Record<string, AvailabilityCheckResult> }>
     | undefined
@@ -187,9 +190,7 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
                 profile.id,
                 await withAvailabilityTimeout(
                   serializableAvailability(
-                    createSbiSecProvider(
-                      await connectSbi(db, c.get('config'), profile.id),
-                    ).checkAvailability(),
+                    (await connectSbi(db, c.get('config'), profile.id)).checkAvailability(),
                   ),
                   `SBI Securities (${profile.label})`,
                 ),
@@ -447,6 +448,9 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
     }
     if (!/^\d{7}$/.test(body.accountNo.trim())) {
       return c.json({ error: 'accountNo must be seven digits' }, 400)
+    }
+    if (!/^[\x20-\x7e]{1,32}$/.test(body.password)) {
+      return c.json({ error: 'password must be 1–32 ASCII characters' }, 400)
     }
     const now = new Date()
     const id = randomId('paypay-bank')

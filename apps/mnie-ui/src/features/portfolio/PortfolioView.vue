@@ -27,6 +27,13 @@ const props = defineProps<{
   marketIndexes: MarketIndex[]
   stockAssetRatio: number
   cashAssetRatio: number
+  otherAssetBreakdown: Array<{
+    profileId: string
+    label: string
+    provider: string
+    value: number
+    ratio: number
+  }>
   positions: Position[]
   recentOrders: OrderRow[]
   cancelingOrderKey: string
@@ -127,6 +134,7 @@ const confirmCancel = () => {
           <b :class="ui.assetBreakdownCash" :style="{ width: `${cashAssetRatio}%` }"></b>
         </i>
         <div :class="ui.assetBreakdownRows">
+          <strong class="text-sm font-black text-[#e3e3e9]">SBI証券</strong>
           <div :class="ui.assetBreakdownRow">
             <span :class="ui.assetBreakdownLabel">
               <i :class="[ui.assetBreakdownSwatch, ui.assetBreakdownSwatchStocks]"></i>
@@ -160,6 +168,20 @@ const confirmCancel = () => {
                 <Spinner v-else size="sm" />
               </small>
             </span>
+          </div>
+          <div
+            v-for="item in otherAssetBreakdown"
+            :key="item.profileId"
+            class="mt-2 grid gap-2 border-t border-[#33383f] pt-3"
+          >
+            <strong class="text-sm font-black text-[#e3e3e9]">{{ item.label }}</strong>
+            <div :class="ui.assetBreakdownRow">
+              <span :class="ui.assetBreakdownLabel">残高</span>
+              <span :class="ui.assetBreakdownMeta">
+                <strong :class="ui.assetBreakdownAmount">{{ currency(item.value) }}</strong>
+                <small :class="ui.assetBreakdownRatio">{{ item.ratio.toFixed(1) }}%</small>
+              </span>
+            </div>
           </div>
         </div>
       </div>

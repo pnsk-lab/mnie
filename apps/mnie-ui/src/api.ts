@@ -45,6 +45,16 @@ export interface AccountProfile {
   updatedAt: string
 }
 
+export interface AssetValuation {
+  profileId: string
+  provider: AccountProfile['provider']
+  value: number
+  holdingsValue?: number | null
+  cashValue?: number | null
+  currency: string
+  capturedAt: string
+}
+
 export type ProfileAvailability =
   | { ok: true; checkedAt?: string }
   | { ok: false; message: unknown; checkedAt?: string }
@@ -141,6 +151,9 @@ export const deleteSbiPasskey = (id: string) =>
   request<{ ok: true }>(`/admin/sbi-passkeys/${id}`, { method: 'DELETE' })
 
 export const listAccountProfiles = () => request<{ profiles: AccountProfile[] }>('/admin/profiles')
+
+export const listLatestAssetValuations = () =>
+  request<{ valuations: AssetValuation[] }>('/admin/asset-valuations/latest')
 
 export const checkAccountProfileAvailability = () =>
   request<{ availability: Record<string, ProfileAvailability> }>('/admin/profiles/availability', {

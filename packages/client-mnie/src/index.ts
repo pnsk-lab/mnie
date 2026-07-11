@@ -1,4 +1,13 @@
-import type { FinancialProvider, OperationMap, ProviderDescriptor } from '@mnie/types'
+import type {
+  AvailabilityCheckResult,
+  Capability,
+  FinancialProvider,
+  FinancialWorkspace,
+  OperationMap,
+  ProfileDescriptor,
+  ProviderDescriptor,
+  WorkspaceOperations,
+} from '@mnie/types'
 
 export interface ConnectMnieOptions {
   /** Mnie server origin. A path is intentionally not accepted. */
@@ -28,15 +37,7 @@ export interface MnieProviderConnection {
   url?: string
 }
 
-export interface MnieProfile extends FinancialProvider<OperationMap> {
-  /** Selects a provider profile on the server. */
-  /** Selects a provider profile. SMBC Direct returns a QR challenge before connection. */
-  connectProvider(provider: string, profileId: string): Promise<MnieProviderConnection>
-  /** Completes a pending SMBC Direct QR approval. */
-  finish2fa(): Promise<MnieProviderConnection>
-  /** Closes the WebSocket and rejects any in-flight calls. */
-  close(): void
-}
+export interface MnieWorkspace extends FinancialWorkspace<WorkspaceOperations, OperationMap> {}
 
 interface JsonRpcResponse {
   jsonrpc?: '2.0'
@@ -170,57 +171,52 @@ class JsonRpcConnection {
   }
 }
 
-const methodProxy = (
+const profileProxy = (
   rpc: JsonRpcConnection,
-  descriptor: ProviderDescriptor,
-  profileId?: string,
-  path: string[] = [],
-): unknown =>
-  new Proxy(() => undefined, {
+  profileId: string,
+  descriptor: ProviderDescriptor = { id: 'remote', name: 'Remote provider' },
+): FinancialProvider<OperationMap> =>
+  new Proxy({} as FinancialProvider<OperationMap>, {
     get(_target, property) {
-      if (property === 'then') return undefined
       if (property === 'descriptor') return descriptor
-      if (property === 'accountId') return profileId ?? 'primary'
-      if (property === 'capabilities') return () => []
-      if (property === 'operations') return () => rpc.call('rpc.methods') as Promise<string[]>
-      if (property === 'invoke') return (name: string, request: unknown) => rpc.call(name, request)
-      if (property === 'connectProvider') {
-        return (provider: string, profileId: string) =>
-          rpc.call('provider.connect', { provider, profileId }) as Promise<MnieProviderConnection>
+      if (property === 'accountId') return profileId
+      if (property === 'capabilities') {
+        return () => rpc.call('profile.capabilities', { profileId }) as Promise<Capability[]>
       }
-      if (property === 'finish2fa') {
-        return () => rpc.call('provider.finish2fa') as Promise<MnieProviderConnection>
-      }
-      if (property === 'close') return rpc.close.bind(rpc)
-      if (typeof property !== 'string') return undefined
-      return methodProxy(rpc, descriptor, profileId, [...path, property])
-    },
-    apply(_target, _thisArg, args) {
-      return rpc.call(path.join('.'), args.length > 1 ? args : args[0])
+      if (property === 'operations') return () => rpc.call('profile.operations', { profileId })
+      if (property === 'invoke')
+        return (operation: string, input: unknown) =>
+          rpc.call('profile.invoke', { profileId, operation, input })
+      if (property === 'checkAvailability')
+        return () =>
+          rpc.call('profile.availability', { profileId }) as Promise<AvailabilityCheckResult>
+      if (property === 'exportSession')
+        return () => {
+          throw new Error('remote sessions cannot be exported')
+        }
+      if (property === 'close') return () => {}
+      return undefined
     },
   })
 
-/** Opens a Mnie RPC connection and returns the selected provider profile. */
-export const connectMnie = async (options: ConnectMnieOptions): Promise<MnieProfile> => {
+/** Opens a Mnie RPC connection and returns the remote financial workspace. */
+export const connectMnie = async (options: ConnectMnieOptions): Promise<MnieWorkspace> => {
   const rpc = new JsonRpcConnection(options)
-  const profile = methodProxy(
-    rpc,
-    { id: options.provider ?? 'unselected', name: options.provider ?? 'Unselected provider' },
-    options.profileId,
-  ) as MnieProfile
+  const workspace: MnieWorkspace = {
+    operations: async () => ['profiles.list', 'portfolio.valuation.get'] as const,
+    profiles: () =>
+      rpc.call('workspace.invoke', { operation: 'profiles.list', input: {} }) as Promise<
+        ProfileDescriptor[]
+      >,
+    profile: (profileId) => profileProxy(rpc, profileId),
+    invoke: (operation, input) => rpc.call('workspace.invoke', { operation, input }) as never,
+    close: () => rpc.close(),
+  }
   try {
-    await profile.operations()
-    if (options.provider || options.profileId) {
-      if (!options.provider || !options.profileId)
-        throw new Error('provider and profileId must be provided together')
-      const connection = await profile.connectProvider(options.provider, options.profileId)
-      if (connection.requires2fa) {
-        throw new Error('SMBC Direct requires QR approval; call connectProvider() and finish2fa()')
-      }
-    }
-    return profile
+    await workspace.operations()
+    return workspace
   } catch (cause) {
-    profile.close()
+    workspace.close()
     throw cause
   }
 }

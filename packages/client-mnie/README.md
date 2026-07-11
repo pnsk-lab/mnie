@@ -1,22 +1,25 @@
 # client-mnie
 
-Connection client for a Mnie server. It exposes the typed finance methods from
-`@repo/mnie-types` after selecting a provider profile session.
+Remote `FinancialWorkspace` client for a Mnie server.
 
 ```ts
 import { connectMnie } from '@repo/client-mnie'
 
-const client = await connectMnie({
+const workspace = await connectMnie({
   baseURL: 'https://mnie.example.com',
   token: 'mnie_xxx',
-  provider: 'sbisec',
-  profileId: 'sbi_xxx',
 })
 
 try {
-  const profile = await client.account.profile()
-  console.log(profile)
+  const valuation = await workspace.invoke('portfolio.valuation.get', {
+    baseCurrency: 'JPY',
+  })
+  const profiles = await workspace.profiles()
+  const transactions = await workspace.profile(profiles[0].id).invoke('transactions.list', {})
+  console.log({ valuation, transactions })
 } finally {
-  client.close()
+  workspace.close()
 }
 ```
+
+The client uses one WebSocket and explicitly scopes requests as `workspace.invoke` or `profile.invoke`.

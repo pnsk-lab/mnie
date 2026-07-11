@@ -278,29 +278,14 @@ const rpc = async (args: string[]) => {
     }
     if (positionals[0] !== 'call' || !positionals[1])
       throw new Error('rpc requires methods or call')
-    const provider = option(options, 'provider')
     const profileId = option(options, 'profile-id')
-    if (provider || profileId) {
-      if (!provider || !profileId)
-        throw new Error('--provider and --profile-id are required together')
-      const connection = (await client.connectProvider(
-        provider as 'sbisec' | 'smbc-direct',
-        profileId,
-      )) as { requires2fa?: boolean }
-      if (connection.requires2fa) {
-        throw new Error(
-          'SMBC Direct requires QR approval and is not available through this non-interactive CLI command',
-        )
-      }
-    }
     const params = positionals[2] ? JSON.parse(positionals[2]) : undefined
     const method = positionals[1]
-    const result = await method.split('.').reduce<unknown>((target, key) => {
-      if (!target || (typeof target !== 'object' && typeof target !== 'function')) return undefined
-      return (target as Record<string, unknown>)[key]
-    }, client)
-    if (typeof result !== 'function') throw new Error(`method is not callable: ${method}`)
-    printJson(await result(params))
+    printJson(
+      profileId
+        ? await client.profile(profileId).invoke(method, params ?? {})
+        : await client.invoke(method as 'portfolio.valuation.get', params ?? {}),
+    )
   } finally {
     client.close()
     console.error(`profile: ${name}`)

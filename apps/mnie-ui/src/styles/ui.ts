@@ -28,11 +28,11 @@ export const ui = {
   panelHead: 'flex flex-wrap items-center justify-between gap-3',
   eyebrow: 'mb-1 text-xs font-black uppercase text-[#9aa0a9]',
   dashboardGrid:
-    'grid min-h-0 flex-1 grid-cols-1 items-stretch gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)] lg:grid-rows-[auto_minmax(20rem,auto)_auto] lg:gap-6',
+    'grid min-h-0 flex-1 grid-cols-1 items-stretch gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)] lg:grid-rows-[max-content_minmax(20rem,auto)_auto] lg:gap-6',
   metricPanel:
     'grid min-h-36 content-center gap-3 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-5 shadow-lg shadow-black/15 sm:min-h-40 sm:p-7',
   assetOverviewPanel:
-    'grid min-h-48 grid-cols-1 items-center gap-x-7 gap-y-5 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-5 pb-8 shadow-lg shadow-black/15 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] sm:p-7 sm:pb-10 lg:col-span-2',
+    'grid h-auto min-h-48 grid-cols-1 content-start items-start gap-x-7 gap-y-5 overflow-hidden rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-5 shadow-lg shadow-black/15 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] sm:p-7 lg:col-span-2',
   assetOverviewHead: 'grid gap-3',
   assetOverviewSubtext: 'text-sm font-semibold text-[#c3c7cf]',
   assetBreakdownPanel: 'grid gap-3',

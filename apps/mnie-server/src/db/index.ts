@@ -62,6 +62,30 @@ export const createDb = (path: string) => {
     )
   `)
   sqlite.run(`
+    CREATE TABLE IF NOT EXISTS asset_valuations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      profile_id TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      value INTEGER NOT NULL,
+      holdings_value INTEGER,
+      cash_value INTEGER,
+      currency TEXT NOT NULL,
+      captured_at INTEGER NOT NULL
+    )
+  `)
+  const assetValuationColumns = sqlite
+    .query<{ name: string }, []>('PRAGMA table_info(asset_valuations)')
+    .all()
+    .map((column) => column.name)
+  if (!assetValuationColumns.includes('holdings_value'))
+    sqlite.run('ALTER TABLE asset_valuations ADD COLUMN holdings_value INTEGER')
+  if (!assetValuationColumns.includes('cash_value'))
+    sqlite.run('ALTER TABLE asset_valuations ADD COLUMN cash_value INTEGER')
+  sqlite.run(`
+    CREATE INDEX IF NOT EXISTS asset_valuations_profile_captured_idx
+    ON asset_valuations (profile_id, captured_at DESC)
+  `)
+  sqlite.run(`
     INSERT OR IGNORE INTO account_profiles (id, provider, label, keyring_account, created_at, updated_at)
     SELECT id, 'sbisec', label, keyring_account, created_at, updated_at FROM sbi_passkeys
   `)

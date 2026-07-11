@@ -3,10 +3,7 @@ import {
   importSession as importMobileSuicaSession,
   exportSession as exportMobileSuicaSession,
 } from '../../../packages/provider-mobile-suica/src'
-import {
-  createProvider as createSbiSecProvider,
-  type AvailabilityCheckResult,
-} from '@mnie/provider-sbi-sec'
+import type { AvailabilityCheckResult } from '@mnie/types'
 import {
   createProvider as createSmbcDirectProvider,
   exportSession as exportSmbcDirectSession,
@@ -63,11 +60,8 @@ export const checkProfileAvailability = async (
 ): Promise<AvailabilityCheckResult> => {
   try {
     if (profile.provider === 'sbisec') {
-      const client = await connectSbi(db, config, profile.id)
-      return await timed(
-        createSbiSecProvider(client).checkAvailability(),
-        `SBI Securities (${profile.label})`,
-      )
+      const provider = await connectSbi(db, config, profile.id)
+      return await timed(provider.checkAvailability(), `SBI Securities (${profile.label})`)
     }
     if (profile.provider === 'smbc-direct') {
       const secret = await readSecret<StoredSmbcDirectSecret>(profile.keyringAccount)

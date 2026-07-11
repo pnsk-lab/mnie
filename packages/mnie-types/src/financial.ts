@@ -24,6 +24,12 @@ export interface ProviderDescriptor {
   name: string
 }
 
+export interface ProfileDescriptor {
+  id: string
+  provider: ProviderDescriptor
+  label: string
+}
+
 export interface Money {
   /** ISO 4217 currency code. */
   currency: string
@@ -57,6 +63,36 @@ export interface Balance {
   type: 'current' | 'available' | 'withdrawable' | 'buying-power' | 'collateral' | 'points'
   amount: Amount
   asOf: string
+}
+
+export interface AssetValuation {
+  amount: Money
+  asOf: string
+  holdingsAmount?: Money
+  cashAmount?: Money
+}
+
+export interface PortfolioValuationComponent {
+  profileId: string
+  providerId: string
+  label: string
+  originalAmount: Money
+  convertedAmount: Money
+  asOf: string
+}
+
+export interface PortfolioValuationError {
+  profileId: string
+  message: string
+}
+
+export interface PortfolioValuation {
+  baseCurrency: string
+  total: Money
+  asOf: string
+  completeness: 'complete' | 'partial'
+  components: PortfolioValuationComponent[]
+  errors: PortfolioValuationError[]
 }
 
 export type TransactionDirection = 'credit' | 'debit' | 'neutral'
@@ -225,11 +261,20 @@ export type OperationMap = Record<string, OperationDefinition<unknown, unknown>>
 export type CommonOperations = {
   'accounts.list': OperationDefinition<PageRequest, Page<Account>>
   'balances.list': OperationDefinition<{ accountId?: string }, Balance[]>
+  'assets.valuation.get': OperationDefinition<{ accountId?: string }, AssetValuation>
   'transactions.list': OperationDefinition<DateRangeRequest, Page<Transaction>>
   'transfers.recipients.list': OperationDefinition<PageRequest, Page<TransferRecipient>>
 }
 
 export type FinancialOperations = CommonOperations & InvestmentOperations
+
+export type WorkspaceOperations = {
+  'profiles.list': OperationDefinition<{}, ProfileDescriptor[]>
+  'portfolio.valuation.get': OperationDefinition<
+    { baseCurrency: string; profileIds?: string[] },
+    PortfolioValuation
+  >
+}
 
 export type OperationName<Operations> = Extract<keyof Operations, string>
 export type OperationRequest<Operations, Name extends OperationName<Operations>> =
@@ -258,5 +303,19 @@ export interface FinancialProvider<Operations = CommonOperations> {
     request: OperationRequest<Operations, Name>,
   ): Promise<OperationResponse<Operations, Name>>
   exportSession(): unknown
+  close(): void | Promise<void>
+}
+
+export interface FinancialWorkspace<
+  Operations = WorkspaceOperations,
+  ProviderOperations = OperationMap,
+> {
+  operations(): readonly OperationName<Operations>[] | Promise<readonly OperationName<Operations>[]>
+  profiles(): Promise<ProfileDescriptor[]>
+  profile(profileId: string): FinancialProvider<ProviderOperations>
+  invoke<Name extends OperationName<Operations>>(
+    name: Name,
+    request: OperationRequest<Operations, Name>,
+  ): Promise<OperationResponse<Operations, Name>>
   close(): void | Promise<void>
 }

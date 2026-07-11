@@ -49,6 +49,17 @@ export const accountProfiles = sqliteTable('account_profiles', {
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 })
 
+export const assetValuations = sqliteTable('asset_valuations', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  profileId: text('profile_id').notNull(),
+  provider: text('provider').notNull(),
+  value: integer('value').notNull(),
+  holdingsValue: integer('holdings_value'),
+  cashValue: integer('cash_value'),
+  currency: text('currency').notNull(),
+  capturedAt: integer('captured_at', { mode: 'timestamp_ms' }).notNull(),
+})
+
 export const apiKeys = sqliteTable(
   'api_keys',
   {

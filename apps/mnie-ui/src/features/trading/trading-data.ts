@@ -429,6 +429,23 @@ export const chartNoticeFromIssueChart = (value: unknown): ChartNotice | null =>
 
 export const positionFromApi = (value: unknown): Position | null => {
   const item = asRecord(value)
+  if (typeof item.instrumentId === 'string') {
+    const marketValue = numberValue(asRecord(item.marketValue).value)
+    const profitLoss = numberValue(asRecord(item.unrealizedProfitLoss).value)
+    return {
+      code: item.instrumentId,
+      name: textValue(item.instrumentName, item.instrumentId),
+      market: '',
+      quantity: numberValue(item.quantity),
+      avgPrice: 0,
+      currentPrice: null,
+      marketValue,
+      profitLoss,
+      profitLossRate: 0,
+      type: item.positionType === 'margin' ? '信用' : '現物',
+      accountType: undefined,
+    }
+  }
   const issue = issueFrom(item.issue)
   if (!issue.code) return null
   const quantity = numberValue(item.quantity)
@@ -462,6 +479,31 @@ const orderStatusText = (status: string): OrderRow['status'] => {
 
 export const orderFromApi = (value: unknown): OrderRow | null => {
   const item = asRecord(value)
+  if (typeof item.instrumentId === 'string') {
+    const status = orderStatusText(textValue(item.status, 'executed'))
+    const executedQuantity = nullableNumberValue(item.executedQuantity)
+    const quantity = nullableNumberValue(item.quantity)
+    return {
+      id: textValue(item.id, item.instrumentId),
+      code: item.instrumentId,
+      date: textValue(item.orderedAt),
+      stock: textValue(item.instrumentName, item.instrumentId),
+      market: '',
+      side: item.side === 'sell' ? 'sell' : 'buy',
+      kind: 'standard',
+      quantity,
+      unexecutedQuantity: null,
+      executedQuantity,
+      price: nullableNumberValue(asRecord(item.price).value),
+      status,
+      orderNumber: '',
+      orderSubNo: '',
+      tradeId: '',
+      accountType: '',
+      cancelable: false,
+      correctable: false,
+    }
+  }
   const issue = issueFrom(item.issue)
   if (!issue.code) return null
   const side = item.side === 'sell' ? 'sell' : 'buy'

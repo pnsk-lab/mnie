@@ -183,6 +183,9 @@ const credentials = (options: PayPayBankLoginOptions) => {
   }
   if (!/^\d{3}$/.test(branchNo)) throw new Error('branchNo must be three digits')
   if (!/^\d{7}$/.test(accountNo)) throw new Error('accountNo must be seven digits')
+  if (!/^[\x20-\x7e]{1,32}$/.test(password)) {
+    throw new Error('password must be 1–32 ASCII characters')
+  }
   return { branchNo, accountNo, password }
 }
 
@@ -346,6 +349,7 @@ export const login = async (options: PayPayBankLoginOptions = {}): Promise<PayPa
           __uid: `${values.branchNo}${values.accountNo}`,
           userAgent: browserHeaders['user-agent'],
           rw_screenparam_button: 'login',
+          TimeZone: new Date().toString(),
           TimeZoneDetect: 'Asia/Tokyo',
           ScreenWidth: '1680',
           ScreenHeight: '1050',
@@ -363,6 +367,12 @@ export const login = async (options: PayPayBankLoginOptions = {}): Promise<PayPa
     transitionFields = inputFields(transitionHtml)
     if (transitionFields.__gid === 'NBG12340G13') break
     if (transitionFields.__gid !== 'NBG12340G91') {
+      if (
+        transitionHtml.includes('店番号、口座番号、ログインパスワードが一致しません') ||
+        transitionHtml.includes('ログインパスワードを正しく入力してください')
+      ) {
+        throw new Error('PayPay Bank rejected the branch, account number, or login password')
+      }
       const title = /<title[^>]*>([^<]*)/i.exec(transitionHtml)?.[1]?.trim()
       throw new Error(
         `unexpected login transition: ${String(transitionFields.__gid)} (${title ?? 'untitled'})`,

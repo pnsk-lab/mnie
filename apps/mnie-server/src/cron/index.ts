@@ -16,6 +16,7 @@ import type { StoredMobileSuicaSecret, StoredSmbcDirectSecret } from '../routes/
 import { readSecret, saveSecret } from '../security/keyring'
 import { checkProfileAvailability, listProfiles, type CachedAvailability } from '../availability'
 import type { ServerConfig } from '../config'
+import { fetchAssetValuation, saveAssetValuation } from '../assets'
 
 const smbcDirectSchedule = '*/5 * * * *'
 const mobileSuicaSchedule = '*/5 * * * *'
@@ -34,6 +35,8 @@ export interface CronSystem {
   jobs(): CronJobStatus[]
   availability(profileId?: string): Record<string, CachedAvailability>
 }
+
+const assetSchedule = '* * * * *'
 
 const errorMessage = (cause: unknown) =>
   cause instanceof Error ? cause.message : 'Session maintenance failed'
@@ -79,6 +82,44 @@ export const createCronSystem = (db: Db, config: ServerConfig): CronSystem => {
   }
   Bun.cron('*/10 * * * *', runAvailability)
   void runAvailability()
+
+  const assetStatus: CronJobStatus = {
+    id: 'asset-valuations' as CronJobStatus['id'],
+    label: '総資産価値の更新',
+    schedule: assetSchedule,
+    running: false,
+  }
+  const lastAssetRuns = new Map<string, number>()
+  const runAssets = async () => {
+    if (assetStatus.running) return
+    assetStatus.running = true
+    assetStatus.lastRunAt = new Date()
+    assetStatus.lastError = undefined
+    const errors: string[] = []
+    try {
+      for (const profile of await listProfiles(db)) {
+        const intervalMs = profile.provider === 'sbisec' ? 5 * 60_000 : 60 * 60_000
+        const previous = lastAssetRuns.get(profile.id) ?? 0
+        if (Date.now() - previous < intervalMs) continue
+        lastAssetRuns.set(profile.id, Date.now())
+        try {
+          const valuation = await fetchAssetValuation(db, config, profile)
+          await saveAssetValuation(db, profile, valuation)
+        } catch (cause) {
+          errors.push(`${profile.label}: ${errorMessage(cause)}`)
+          console.error(`Asset valuation update failed for ${profile.id}:`, cause)
+        }
+      }
+      if (errors.length) throw new Error(errors.join('; '))
+      assetStatus.lastSuccessAt = new Date()
+    } catch (cause) {
+      assetStatus.lastError = errorMessage(cause)
+    } finally {
+      assetStatus.running = false
+    }
+  }
+  Bun.cron(assetSchedule, runAssets)
+  void runAssets()
 
   Bun.cron(smbcDirectSchedule, async () => {
     if (status.running) return
@@ -148,7 +189,12 @@ export const createCronSystem = (db: Db, config: ServerConfig): CronSystem => {
   })
 
   return {
-    jobs: () => [{ ...status }, { ...mobileSuicaStatus }, { ...availabilityStatus }],
+    jobs: () => [
+      { ...status },
+      { ...mobileSuicaStatus },
+      { ...availabilityStatus },
+      { ...assetStatus },
+    ],
     availability: (profileId) =>
       Object.fromEntries([...availabilityCache].filter(([id]) => !profileId || id === profileId)),
   }

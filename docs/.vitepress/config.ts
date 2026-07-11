@@ -23,7 +23,10 @@ export default defineConfig({
         },
         {
           text: 'SDK',
-          items: [{ text: 'About', link: '/docs/sdk/' }],
+          items: [
+            { text: 'About', link: '/docs/sdk/' },
+            { text: 'Workspaces and providers', link: '/docs/sdk/workspaces' },
+          ],
         },
         {
           text: 'CLI',

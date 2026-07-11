@@ -1,7 +1,6 @@
 import { and, eq } from 'drizzle-orm'
 import type { Db } from '../db'
 import { apiKeyTradeUsage, apiKeys } from '../db/schema'
-import type { RpcMethod } from '../rpc/methods'
 
 type WindowName = '1h' | '3h' | '1d'
 
@@ -108,7 +107,7 @@ export const assertAndConsumeApiKeyTradeLimits = async ({
   await checkAndConsumeWindow(db, apiKeyId, '1d', key.maxTradesPerDay, now)
 }
 
-export const assertApiKeyMethodAllowed = async (db: Db, apiKeyId: string, method: RpcMethod) => {
+export const assertApiKeyMethodAllowed = async (db: Db, apiKeyId: string, method: string) => {
   const [key] = await db.select().from(apiKeys).where(eq(apiKeys.id, apiKeyId)).limit(1)
   if (!key || key.revokedAt) throw new Error('API key is not active')
   if (key.allowedMethods === null || key.allowedMethods === undefined) return

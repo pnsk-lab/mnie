@@ -1,41 +1,15 @@
 ---
 title: SDK
-description: One typed interface for finance operations.
+description: Provider-neutral financial providers and cross-profile workspaces.
 ---
 
-# Typed end to end
+# SDK
 
-The SDK keeps the same operation contract across direct clients, RPC, and automation.
+Mnie separates individual financial-service operations from cross-profile operations.
 
-## Read
+- `FinancialProvider`: one profile, usable directly or through the server
+- `FinancialWorkspace`: multiple profiles and aggregate operations
+- `@mnie/sdk`: helpers and `createLocalWorkspace`
+- `connectMnie`: a remote workspace backed by `mnie-server`
 
-```ts
-import { getCashPositions, getIssueBoard } from 'mnie'
-
-const [positions, board] = await Promise.all([
-  getCashPositions({ profile }),
-  getIssueBoard({ profile, issueCode: '7203', market: 'XTKS' }),
-])
-```
-
-## Act
-
-Order estimation, placement, correction, and cancellation are guarded explicitly.
-
-```ts
-await placeCashOrder({
-  profile,
-  allowTrading: true,
-  order,
-})
-```
-
-## Compose
-
-| Surface             | Purpose                                 |
-| ------------------- | --------------------------------------- |
-| `mnie`              | Profile-injected operations             |
-| `@repo/client-mnie` | Authenticated connection                |
-| `@repo/mnie-types`  | Requests, responses, and operation maps |
-
-> One contract. No translation layer.
+See [Workspaces and providers](./workspaces.md) for direct, local, and remote examples.

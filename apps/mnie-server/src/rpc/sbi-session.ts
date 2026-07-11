@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
-import { loginWithPasskey } from '@mnie/provider-sbi-sec'
-import type { SbiClientMethods, SbiClientOptions } from '@mnie/provider-sbi-sec'
+import { connectWithPasskey } from '@mnie/provider-sbi-sec'
+import type { FinancialProvider, OperationMap } from '@mnie/types'
+import type { SbiClientOptions } from '@mnie/provider-sbi-sec'
 import type { ServerConfig } from '../config'
 import type { Db } from '../db'
 import { sbiPasskeys } from '../db/schema'
@@ -12,7 +13,7 @@ export const connectSbi = async (
   db: Db,
   config: ServerConfig,
   profileId: string,
-): Promise<SbiClientMethods> => {
+): Promise<FinancialProvider<OperationMap>> => {
   const [row] = await db.select().from(sbiPasskeys).where(eq(sbiPasskeys.id, profileId)).limit(1)
   if (!row) throw new Error('SBI passkey not found')
 
@@ -21,7 +22,7 @@ export const connectSbi = async (
     tradePassword: effectiveSbiTradePassword(secret),
     deviceId: effectiveSbiDeviceId(secret),
   }
-  const client = await loginWithPasskey(
+  const provider = await connectWithPasskey(
     {
       passkeyCredential: secret.credential,
       authBaseUrl: config.authBaseUrl,
@@ -42,6 +43,6 @@ export const connectSbi = async (
     },
     clientOptions,
   )
-  await saveSecret(row.keyringAccount, { ...secret, session: await client.session.export() })
-  return client
+  await saveSecret(row.keyringAccount, { ...secret, session: await provider.exportSession() })
+  return provider as FinancialProvider<OperationMap>
 }

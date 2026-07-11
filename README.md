@@ -6,24 +6,19 @@ Self-host finance management for running your own portfolio, trading, API key, O
 
 ## Mnie SDK
 
-`@repo/client-mnie` opens an authenticated Mnie connection. `mnie` provides high-level
-finance operations that accept either that connection or a direct SBI client as a profile.
+`@repo/client-mnie` opens a remote financial workspace. `@mnie/sdk` provides the same
+workspace contract locally for directly connected providers.
 
 ```ts
-import { getCashPositions, getIssueBoard } from 'mnie'
+import { connectMnie } from '@repo/client-mnie'
 
-const positions = await getCashPositions({ profile })
-const board = await getIssueBoard({ profile, issueCode: '7203', market: 'XTKS' })
+const workspace = await connectMnie({ baseURL, token })
+const valuation = await workspace.invoke('portfolio.valuation.get', { baseCurrency: 'JPY' })
+const positions = await workspace.profile('sbi_xxx').invoke('investments.positions.list', {})
 ```
 
-The high-level SDK exposes the complete typed API as profile-injected operations: session
-and account data, positions, market search/boards/charts/rankings, news/watchlists, and every
-order estimate or placement operation. Live operations retain the required
-`allowTrading: true` type guard.
-
-`@repo/mnie-types` also exports `MnieOperationMap`, per-operation
-`MnieOperationRequest` / `MnieOperationResponse`, and the discriminated `MnieRequest` /
-`MnieResponse` unions for routers, logging, and transport layers.
+Individual profiles implement `FinancialProvider`; cross-profile aggregation implements
+`FinancialWorkspace`. See `docs/docs/sdk/workspaces.md` for direct, local, and remote usage.
 
 ## Apps
 

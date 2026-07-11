@@ -1,5 +1,10 @@
 import { computed, ref, watch, type Ref } from 'vue'
-import { createRpcSocket, type AccountProfile } from '../../api'
+import {
+  createRpcSocket,
+  listLatestAssetValuations,
+  type AccountProfile,
+  type AssetValuation,
+} from '../../api'
 import {
   cashOrderAccountTypeOptions as defaultCashOrderAccountTypeOptions,
   cashOrderMarketOptions as defaultCashOrderMarketOptions,
@@ -37,12 +42,10 @@ import {
   isOrderPreview,
   issueFrom,
   marketDateKey,
-  marketIndexFromApi,
   numberValue,
   orderDetailFromApi,
   orderFromApi,
   orderHistoryKey,
-  orderHistoryResultNotice,
   chartNoticeFromIssueChart,
   pricePointsFromIssueChart,
   positionFromApi,
@@ -164,8 +167,6 @@ const displayApkOrderTermDate = (value: string) => {
 
 const usMarkets = new Set(['XNAS', 'XNYS', 'ARCX'])
 const isUsMarket = (market: string) => usMarkets.has(market)
-const usOrderMarkets = ['XNAS', 'XNYS', 'ARCX'] as const
-
 const parseApkExchangeMarkets = (value: string) => {
   const markets: CashOrderMarket[] = []
   for (let index = 0; index < value.length; index += 3) {
@@ -214,6 +215,7 @@ export const useTradingSession = (
   const lastCashEstimateKey = ref('')
   const cashPreOrder = ref<RecordLike | null>(null)
   const ws = ref<WebSocket | null>(null)
+  const providerOperations = ref(new Set<string>())
   const rpcPending = new Map<number, RpcResolver>()
   const sbiConnected = ref(false)
   const smbcQrUrl = ref('')
@@ -221,6 +223,9 @@ export const useTradingSession = (
   const dataLoading = ref(false)
   const searchLoading = ref(false)
   const totalAssetValueFromAssets = ref<number | null>(null)
+  const storedTotalAssetValue = ref<number | null>(null)
+  const assetValuations = ref<AssetValuation[]>([])
+  const storedAssetsLoaded = ref(false)
   const buyingPower = ref(0)
   const holdingsMarketValue = ref(0)
   const totalProfitLoss = ref(0)
@@ -445,7 +450,9 @@ export const useTradingSession = (
       holdingsMarketValue.value > 0 ||
       buyingPower.value > 0,
   )
-  const showPortfolioSpinner = computed(() => dataLoading.value || !hasAccountSummary.value)
+  const showPortfolioSpinner = computed(
+    () => !storedAssetsLoaded.value && (dataLoading.value || !hasAccountSummary.value),
+  )
   const cashOrderKey = computed(() =>
     JSON.stringify({
       issueCode: selectedStock.value.code,
@@ -566,7 +573,38 @@ export const useTradingSession = (
   )
   const recentOrders = computed(() => orders.value.slice(0, 2))
   const totalAssetValue = computed(
-    () => totalAssetValueFromAssets.value ?? holdingsMarketValue.value + buyingPower.value,
+    () =>
+      storedTotalAssetValue.value ??
+      totalAssetValueFromAssets.value ??
+      holdingsMarketValue.value + buyingPower.value,
+  )
+
+  const loadStoredAssetValuations = async () => {
+    try {
+      const { valuations } = await listLatestAssetValuations()
+      assetValuations.value = valuations
+      const jpy = valuations.filter((item) => item.currency === 'JPY')
+      storedTotalAssetValue.value = jpy.length
+        ? jpy.reduce((sum, item) => sum + item.value, 0)
+        : null
+      const sbi = jpy.find((item) => item.provider === 'sbisec')
+      if (sbi?.holdingsValue != null) holdingsMarketValue.value = sbi.holdingsValue
+      if (sbi?.cashValue != null) buyingPower.value = sbi.cashValue
+    } finally {
+      storedAssetsLoaded.value = true
+    }
+  }
+  const otherAssetBreakdown = computed(() =>
+    assetValuations.value
+      .filter((item) => item.provider !== 'sbisec' && item.currency === 'JPY')
+      .map((item) => ({
+        profileId: item.profileId,
+        label:
+          profiles.value.find((profile) => profile.id === item.profileId)?.label ?? item.provider,
+        provider: item.provider,
+        value: item.value,
+        ratio: totalAssetValue.value ? (item.value / totalAssetValue.value) * 100 : 0,
+      })),
   )
   const stockAssetRatio = computed(() => {
     if (!totalAssetValue.value) return 0
@@ -659,7 +697,7 @@ export const useTradingSession = (
     boardPollingSubscriptionId = ''
     boardPollingRequestId += 1
     pricePolling.value = false
-    if (subscriptionId) {
+    if (subscriptionId && providerOperations.value.has('market.issue.pollBoard.unsubscribe')) {
       call('market.issue.pollBoard.unsubscribe', { subscriptionId })
     }
   }
@@ -718,7 +756,18 @@ export const useTradingSession = (
   const call = (method: string, params?: unknown) => {
     const socket = ws.value
     if (!socket || socket.readyState !== WebSocket.OPEN) return undefined
-    const payload: RpcMessage = { id: ++rpcId, method, params }
+    const controlMethod =
+      method.startsWith('provider.') ||
+      method.startsWith('profile.') ||
+      method.startsWith('workspace.') ||
+      method === 'rpc.methods'
+    const payload: RpcMessage = controlMethod
+      ? { id: ++rpcId, method, params }
+      : {
+          id: ++rpcId,
+          method: 'profile.invoke',
+          params: { profileId: selectedProfileId.value, operation: method, input: params ?? {} },
+        }
     socket.send(JSON.stringify({ jsonrpc: '2.0', ...payload }))
     return payload.id
   }
@@ -792,20 +841,8 @@ export const useTradingSession = (
   const loadOrderHistoryFromSdk = async () => {
     orderHistoryLoaded.value = false
     orderHistoryNotice.value = ''
-    const orderResults = await Promise.allSettled([
-      rpcCallOptional<RecordLike>('orders.inquiry.open'),
-      rpcCallOptional<RecordLike>('orders.inquiry.executionsToday'),
-      ...usOrderMarkets.flatMap((market) => [
-        rpcCallOptional<RecordLike>('orders.inquiry.open', { market }),
-        rpcCallOptional<RecordLike>('orders.inquiry.executionsToday', { market }),
-      ]),
-    ])
-    const [openOrdersResult, executionsTodayResult] = orderResults
-    if (openOrdersResult.status === 'rejected' && executionsTodayResult.status === 'rejected') {
-      throw openOrdersResult.reason
-    }
-    const nextOrders = fulfilledValues(orderResults)
-      .flatMap((orderList) => asArray(orderList.orders))
+    const orderList = await rpcCallOptional<RecordLike>('investments.orders.list')
+    const nextOrders = asArray(orderList.items)
       .map(orderFromApi)
       .filter((order): order is OrderRow => Boolean(order))
 
@@ -813,10 +850,6 @@ export const useTradingSession = (
     for (const order of nextOrders) deduped.set(orderHistoryKey(order), order)
     orders.value = [...deduped.values()]
     orderHistoryLoaded.value = true
-    if (!orders.value.length) {
-      const notices = fulfilledValues(orderResults).map(orderHistoryResultNotice).filter(Boolean)
-      orderHistoryNotice.value = [...new Set(notices)].join(' / ')
-    }
   }
 
   const optionalNumber = (value: unknown) => {
@@ -825,12 +858,10 @@ export const useTradingSession = (
   }
 
   const applyAccountAssets = (value: RecordLike) => {
-    const summary = asRecord(value.summary)
-    const summaryWithoutDeposit = asRecord(value.summaryWithoutDeposit)
-    const valuation = optionalNumber(summary.valuation)
-    const valuationWithoutDeposit = optionalNumber(summaryWithoutDeposit.valuation)
-    const profitLoss = optionalNumber(summary.profitLoss)
-    const profitLossRate = optionalNumber(summary.profitLossRate)
+    const valuation = optionalNumber(asRecord(value.amount).value)
+    const valuationWithoutDeposit = optionalNumber(asRecord(value.holdingsAmount).value)
+    const profitLoss = null
+    const profitLossRate = null
 
     if (valuation !== null) totalAssetValueFromAssets.value = valuation
     if (valuationWithoutDeposit !== null) holdingsMarketValue.value = valuationWithoutDeposit
@@ -844,29 +875,14 @@ export const useTradingSession = (
   const loadTradingData = async () => {
     dataLoading.value = true
     try {
-      const [assetsResult, indexResult, ...positionResults] = await Promise.allSettled([
-        rpcCallOptional<RecordLike>('account.assets.current', undefined, 20_000),
-        rpcCallOptional<unknown[]>('market.index.major', undefined, 15_000),
-        rpcCallOptional<RecordLike>('account.positions.cash', undefined, 15_000),
-        ...usOrderMarkets.map((market) =>
-          rpcCallOptional<RecordLike>('account.positions.cash', { market }, 15_000),
-        ),
+      const [assetsResult, positionsResult, balancesResult] = await Promise.allSettled([
+        rpcCallOptional<RecordLike>('assets.valuation.get', undefined, 20_000),
+        rpcCallOptional<RecordLike>('investments.positions.list', undefined, 15_000),
+        rpcCallOptional<unknown[]>('balances.list', undefined, 15_000),
       ])
-      if (indexResult.status === 'fulfilled') {
-        marketIndexes.value = asArray(indexResult.value)
-          .map(marketIndexFromApi)
-          .filter((index): index is MarketIndex => Boolean(index))
-      } else {
-        marketIndexes.value = []
-        reportDataError(
-          errorMessage(indexResult.reason, '指数の取得に失敗しました'),
-          indexResult.reason,
-        )
-      }
-      const cashPositionLists = fulfilledValues(positionResults)
-      const cashPositions = cashPositionLists[0] ?? {}
-      const nextPositions = cashPositionLists
-        .flatMap((list) => asArray(list.positions))
+      marketIndexes.value = []
+      const positionList = positionsResult.status === 'fulfilled' ? positionsResult.value : {}
+      const nextPositions = asArray(positionList.items)
         .map(positionFromApi)
         .filter((position): position is Position => Boolean(position))
       positions.value = nextPositions
@@ -880,17 +896,11 @@ export const useTradingSession = (
         (sum, position) => sum + (position.marketValue - position.profitLoss),
         0,
       )
-      const nextHoldingsMarketValue =
-        nextPositions.length > 0
-          ? summedHoldingsMarketValue
-          : numberValue(cashPositions.totalMarketValue)
+      const nextHoldingsMarketValue = nextPositions.length > 0 ? summedHoldingsMarketValue : 0
       holdingsMarketValue.value = nextHoldingsMarketValue
-      totalProfitLoss.value =
-        nextPositions.length > 0 ? summedProfitLoss : numberValue(cashPositions.totalProfitLoss)
+      totalProfitLoss.value = nextPositions.length > 0 ? summedProfitLoss : 0
       totalProfitLossRate.value =
-        nextPositions.length > 0 && summedCostBasis
-          ? (summedProfitLoss / summedCostBasis) * 100
-          : numberValue(cashPositions.totalProfitLossRate)
+        nextPositions.length > 0 && summedCostBasis ? (summedProfitLoss / summedCostBasis) * 100 : 0
 
       const hasAccountAssets = assetsResult.status === 'fulfilled'
       if (hasAccountAssets) {
@@ -903,54 +913,30 @@ export const useTradingSession = (
         )
       }
 
-      const [orderHistoryResult, powerResult] = await Promise.allSettled([
-        loadOrderHistoryFromSdk(),
-        rpcCallOptional<RecordLike>('account.power.buyingPower'),
-      ])
+      const orderHistoryResult = await Promise.allSettled([loadOrderHistoryFromSdk()])
+      const powerResult = balancesResult
 
       if (!hasAccountAssets && powerResult.status === 'fulfilled') {
-        buyingPower.value = numberValue(
-          powerResult.value.cashBuyingPower ?? powerResult.value.withdrawableAmount,
-        )
+        const balance = asArray(powerResult.value)
+          .map(asRecord)
+          .find((item) => item.type === 'buying-power' || item.type === 'withdrawable')
+        buyingPower.value = numberValue(asRecord(asRecord(balance?.amount).money).value)
       }
-      if (orderHistoryResult.status === 'rejected') {
+      if (orderHistoryResult[0]?.status === 'rejected') {
         reportDataError(
-          errorMessage(orderHistoryResult.reason, '取引履歴の取得に失敗しました'),
-          orderHistoryResult.reason,
+          errorMessage(orderHistoryResult[0].reason, '取引履歴の取得に失敗しました'),
+          orderHistoryResult[0].reason,
         )
       }
-
-      const boards = await Promise.allSettled(
-        nextPositions.slice(0, 20).map((position) =>
-          rpcCallOptional<RecordLike>(
-            'market.issue.board',
-            {
-              issueCode: position.code,
-              market: position.market,
-            },
-            8_000,
-          ),
-        ),
-      )
-      mergeStocks(
-        boards.flatMap((result, index) =>
-          result.status === 'fulfilled'
-            ? [
-                stockFromBoard(result.value, {
-                  code: nextPositions[index]?.code ?? '',
-                  market: nextPositions[index]?.market ?? '',
-                  name: nextPositions[index]?.name ?? '',
-                }),
-              ]
-            : [],
-        ),
-      )
     } finally {
       dataLoading.value = false
     }
   }
 
   const connect = () => {
+    void loadStoredAssetValuations().catch((cause) =>
+      reportDataError(errorMessage(cause, '保存済み資産額の取得に失敗しました'), cause),
+    )
     const previousSocket = ws.value
     rejectPendingRpc(new Error('RPC socket reconnecting'))
     stopBoardPolling()
@@ -968,15 +954,20 @@ export const useTradingSession = (
     const socket = createRpcSocket()
     socket.addEventListener('open', async () => {
       try {
-        const connection = (await rpcCall('provider.connect', {
-          provider: selectedProfile.provider,
-          profileId: selectedProfile.id,
-        })) as { requires2fa?: boolean; qrurl?: string }
-        if (connection.requires2fa) {
-          if (!connection.qrurl) throw new Error('SMBC Direct QR code was not returned')
-          smbcQrUrl.value = connection.qrurl
-          return
+        if (selectedProfile.provider === 'smbc-direct') {
+          const connection = (await rpcCall('provider.connect', {
+            provider: selectedProfile.provider,
+            profileId: selectedProfile.id,
+          })) as { requires2fa?: boolean; qrurl?: string }
+          if (connection.requires2fa) {
+            if (!connection.qrurl) throw new Error('SMBC Direct QR code was not returned')
+            smbcQrUrl.value = connection.qrurl
+            return
+          }
         }
+        providerOperations.value = new Set(
+          await rpcCall<string[]>('profile.operations', { profileId: selectedProfile.id }),
+        )
         sbiConnected.value = true
         await loadTradingData()
       } catch (cause) {
@@ -1002,6 +993,7 @@ export const useTradingSession = (
       realtimePricePoints.value = []
       pricePolling.value = false
       sbiConnected.value = false
+      providerOperations.value = new Set()
       dataLoading.value = false
     })
     ws.value = socket
@@ -1012,9 +1004,14 @@ export const useTradingSession = (
     dataLoading.value = true
     try {
       await rpcCall('provider.finish2fa')
-      smbcBalance.value = (await rpcCall('account.balance')) as {
-        amount: number
-        displayValue: string
+      providerOperations.value = new Set(
+        await rpcCall<string[]>('profile.operations', { profileId: selectedProfileId.value }),
+      )
+      const balances = await rpcCall<RecordLike[]>('balances.list')
+      const balance = balances[0]
+      smbcBalance.value = {
+        amount: numberValue(asRecord(asRecord(asRecord(balance).amount).money).value),
+        displayValue: textValue(asRecord(asRecord(asRecord(balance).amount).money).value),
       }
       smbcQrUrl.value = ''
     } catch (cause) {
@@ -1029,7 +1026,12 @@ export const useTradingSession = (
     realtimePricePoints.value = []
 
     const stock = selectedStock.value
-    if (!connected.value || !stock.code) return
+    if (
+      !connected.value ||
+      !stock.code ||
+      !providerOperations.value.has('market.issue.pollBoard.subscribe')
+    )
+      return
     const timeZone = selectedStockTimeZone.value
     if (!timeZone || !isMarketSessionOpen(stock.market, timeZone)) return
 
@@ -1063,6 +1065,13 @@ export const useTradingSession = (
     chartNotice.value = null
     const stock = selectedStock.value
     if (!connected.value || !stock.code) return
+    if (!providerOperations.value.has('market.issue.chart')) {
+      chartNotice.value = {
+        title: '価格チャートは未対応です',
+        detail: 'この provider は市場データを提供していません。',
+      }
+      return
+    }
 
     const requestId = ++chartHistoryRequestId
     const chartOptions = chartRangeOptions[chartRange.value]
@@ -1090,6 +1099,7 @@ export const useTradingSession = (
 
   const suggestIssues = async (query: string) => {
     if (!connected.value || query.trim().length < 2) return
+    if (!providerOperations.value.has('market.issue.suggest')) return
     const marketsToSearch =
       marketFilter.value !== 'all'
         ? [marketFilter.value as CashOrderMarket]
@@ -1120,6 +1130,9 @@ export const useTradingSession = (
   }
 
   const estimateCashOrder = async () => {
+    if (!providerOperations.value.has('investments.orders.preview')) {
+      throw new Error('この provider は注文見積に未対応です')
+    }
     if (!canRequestCashEstimate.value) return
     lastCashEstimate.value = null
     lastCashEstimateKey.value = ''
@@ -1158,6 +1171,10 @@ export const useTradingSession = (
   })
 
   const refreshCashPreOrder = async () => {
+    if (!providerOperations.value.has('investments.orders.preview')) {
+      cashPreOrder.value = null
+      return
+    }
     const requestId = ++cashPreOrderRequestId
     if (!connected.value || !selectedStock.value.code || !resolvedCashOrderMarket.value) {
       cashPreOrder.value = null
@@ -1189,6 +1206,9 @@ export const useTradingSession = (
   }
 
   const placeCashOrder = async () => {
+    if (!providerOperations.value.has('investments.orders.create')) {
+      throw new Error('この provider は注文実行に未対応です')
+    }
     if (!canPlaceCashOrder.value || !lastCashEstimate.value) return
     const receipt = await rpcCall<RecordLike>('orders.cash.place', {
       ...cashOrderParams(),
@@ -1215,6 +1235,10 @@ export const useTradingSession = (
   }
 
   const cancelOrder = async (order: OrderRow) => {
+    if (!providerOperations.value.has('investments.orders.cancel')) {
+      reportDataError('この provider は注文取消に未対応です')
+      return
+    }
     if (!order.orderNumber) {
       reportDataError('注文番号を取得できないため取消できません')
       return
@@ -1301,6 +1325,9 @@ export const useTradingSession = (
     order: OrderRow,
     draft: { quantity: number; priceCondition: 'market' | 'limit'; price?: number },
   ): Promise<OrderPreview> => {
+    if (!providerOperations.value.has('investments.orders.preview')) {
+      throw new Error('この provider は注文見積に未対応です')
+    }
     if (!isUsMarket(order.market)) throw new Error('注文訂正は米国株のみ対応しています')
     const preview = await rpcCall<unknown>(
       'orders.cash.estimateCorrection',
@@ -1314,6 +1341,9 @@ export const useTradingSession = (
     order: OrderRow,
     draft: { quantity: number; priceCondition: 'market' | 'limit'; price?: number },
   ) => {
+    if (!providerOperations.value.has('investments.orders.replace')) {
+      throw new Error('この provider は注文訂正に未対応です')
+    }
     if (!isUsMarket(order.market)) throw new Error('注文訂正は米国株のみ対応しています')
     await rpcCall('orders.cash.placeCorrection', {
       ...orderCorrectionParams(order, draft),
@@ -1533,11 +1563,13 @@ export const useTradingSession = (
     totalAssetValue,
     stockAssetRatio,
     cashAssetRatio,
+    otherAssetBreakdown,
     hasQuote,
     selectStock,
     selectStockByCode,
     connect,
     loadTradingData,
+    loadStoredAssetValuations,
     estimateCashOrder,
     askPlaceOrder,
     placeCashOrder,
