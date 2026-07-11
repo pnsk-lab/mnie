@@ -160,7 +160,7 @@
 
             image = lib.mkOption {
               type = lib.types.str;
-              default = "git.yutakobayashi.com/nakasyou/mnie:latest";
+              default = "ghcr.io/pnsk-lab/mnie:latest";
               description = "Container image to run when runtime is docker.";
             };
 

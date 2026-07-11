@@ -1,0 +1,12 @@
+.git
+.github
+.vite
+**/node_modules
+**/dist
+data
+tmp
+workspace
+.env
+.env.*
+!.env.example
+*.log

@@ -49,7 +49,7 @@ docker-compose.yml:
 ```yaml
 services:
   mnie:
-    image: git.yutakobayashi.com/nakasyou/mnie:latest
+    image: ghcr.io/pnsk-lab/mnie:latest
     ports:
       - '18787:8787'
     env_file:
@@ -65,11 +65,11 @@ docker run --rm -it --name mnie \
   -p 18787:8787 \
   --env-file .env \
   -v "$PWD/data:/app/data" \
-  git.yutakobayashi.com/nakasyou/mnie:latest
+  ghcr.io/pnsk-lab/mnie:latest
 ```
 
 #### With Nix
 
 ```bash
-nix run 'git+https://git.yutakobayashi.com/nakasyou/mnie.git#mnie'
+nix run 'github:pnsk-lab/mnie#mnie'
 ```
