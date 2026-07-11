@@ -55,6 +55,10 @@ export default defineConfig({
               text: 'PayPay',
               link: '/docs/providers/paypay',
             },
+            {
+              text: 'Nissay 401k',
+              link: '/docs/providers/nissay-401k',
+            },
           ],
         },
       ],

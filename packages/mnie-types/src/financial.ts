@@ -18,6 +18,7 @@ export type Capability =
   | 'points:read'
   | 'investments:read'
   | 'investments:trade'
+  | 'pensions:read'
 
 export interface ProviderDescriptor {
   id: ProviderId
@@ -250,6 +251,65 @@ export type InvestmentOperations = {
   >
 }
 
+export interface PensionParticipant {
+  name: string
+}
+
+export interface PensionHolding {
+  operationType: string
+  productName: string
+  totalAsset: number
+  profitLoss: number
+  assetRatio: number
+}
+
+export interface PensionCurrentAssets {
+  planName: string
+  lastLogin: Date
+  totalAsset: number
+  totalContribution: number
+  totalProfitLoss: number
+  roi: number
+  date: Date
+  holdings: PensionHolding[]
+}
+
+export interface PensionContributionAllocation {
+  operationType: string
+  productName: string
+  contributionRatio: number
+}
+
+export interface PensionContribution {
+  planName: string
+  lastLogin: Date
+  contributionAmount: number
+  contributionDate: Date
+  date: Date
+  allocations: PensionContributionAllocation[]
+}
+
+export interface PensionHistoricalAssetEntry {
+  date: Date
+  totalAsset: number
+  totalContribution: number
+  totalProfitLoss: number
+}
+
+export interface PensionHistoricalAssets {
+  planName: string
+  lastLogin: Date
+  entries: PensionHistoricalAssetEntry[]
+}
+
+/** Provider-neutral operations for defined-contribution pension accounts. */
+export type PensionOperations = {
+  'pension.participant.get': OperationDefinition<Record<string, never>, PensionParticipant>
+  'pension.assets.current.get': OperationDefinition<Record<string, never>, PensionCurrentAssets>
+  'pension.contribution.get': OperationDefinition<Record<string, never>, PensionContribution>
+  'pension.assets.history.list': OperationDefinition<Record<string, never>, PensionHistoricalAssets>
+}
+
 export interface OperationDefinition<Request, Response> {
   request: Request
   response: Response
@@ -266,7 +326,7 @@ export type CommonOperations = {
   'transfers.recipients.list': OperationDefinition<PageRequest, Page<TransferRecipient>>
 }
 
-export type FinancialOperations = CommonOperations & InvestmentOperations
+export type FinancialOperations = CommonOperations & InvestmentOperations & PensionOperations
 
 export type WorkspaceOperations = {
   'profiles.list': OperationDefinition<{}, ProfileDescriptor[]>

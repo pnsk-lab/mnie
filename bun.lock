@@ -105,6 +105,21 @@
         "typescript": "^5",
       },
     },
+    "packages/client-nissay-401k": {
+      "name": "@mnie/client-nissay-401k",
+      "dependencies": {
+        "@mnie/types": "workspace:*",
+        "iconv-lite": "^0.7.3",
+        "node-html-parser": "^9.0.0",
+      },
+      "devDependencies": {
+        "@repo/tsconfig": "workspace:*",
+        "@types/bun": "latest",
+      },
+      "peerDependencies": {
+        "typescript": "^5",
+      },
+    },
     "packages/mnie-cli": {
       "name": "@mnie/cli",
       "bin": {
@@ -356,6 +371,8 @@
     "@levischuck/tiny-cbor": ["@levischuck/tiny-cbor@0.2.11", "", {}, "sha512-llBRm4dT4Z89aRsm6u2oEZ8tfwL/2l6BwpZ7JcyieouniDECM5AqNgr/y08zalEIvW3RSK4upYyybDcmjXqAow=="],
 
     "@mnie/cli": ["@mnie/cli@workspace:packages/mnie-cli"],
+
+    "@mnie/client-nissay-401k": ["@mnie/client-nissay-401k@workspace:packages/client-nissay-401k"],
 
     "@mnie/provider-mobile-suica": ["@mnie/provider-mobile-suica@workspace:packages/provider-mobile-suica"],
 
