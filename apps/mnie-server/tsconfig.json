@@ -2,7 +2,7 @@
   "extends": "@repo/tsconfig/tsconfig.json",
   "compilerOptions": {
     "types": ["bun"],
-    "rootDir": "src",
+    "rootDir": "../..",
     "outDir": "dist",
     "noEmit": true
   },

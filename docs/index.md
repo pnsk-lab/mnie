@@ -17,8 +17,10 @@ description: Self-hosted finance infrastructure.
     <h1>Mnie<span>.</span></h1>
     <p class="mnie-statement" aria-label="Your money. Your machine.">
       <span aria-hidden="true">Your money.<br>Your machine.</span>
-      <span aria-hidden="true">Unified financial interface</span>
+      <span aria-hidden="true">Financial interface,<br>but unified</span>
       <span aria-hidden="true">Accessible finance,<br>for AI agents</span>
+      <span aria-hidden="true">Beeper,<br>but for finance</span>
+      <span aria-hidden="true">AI SDK,<br>for money.</span>
     </p>
     <nav class="mnie-actions" aria-label="Get started">
       <a class="mnie-primary" href="/docs/">Start building <span>↗</span></a>
@@ -158,12 +160,15 @@ body {
   opacity: 0;
   filter: blur(6px);
   transform: translateY(0.45em);
-  animation: mnie-statement-cycle 9s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  animation: mnie-statement-cycle 15s cubic-bezier(0.22, 1, 0.36, 1) infinite;
   will-change: transform, opacity, filter;
 }
 
 .mnie-statement span:nth-child(2) { animation-delay: 3s; }
 .mnie-statement span:nth-child(3) { animation-delay: 6s; }
+.mnie-statement span:nth-child(4) { animation-delay: 9s; }
+.mnie-statement span:nth-child(5) { animation-delay: 12s; }
+
 
 .mnie-actions {
   display: flex;
@@ -274,13 +279,13 @@ body {
     transform: translateY(0.45em);
   }
 
-  6%, 27% {
+  5%, 15% {
     opacity: 1;
     filter: blur(0);
     transform: translateY(0);
   }
 
-  33%, 100% {
+  20%, 100% {
     opacity: 0;
     filter: blur(6px);
     transform: translateY(-0.35em);

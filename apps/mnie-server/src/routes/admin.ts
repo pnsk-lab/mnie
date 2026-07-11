@@ -1,6 +1,10 @@
 import { eq } from 'drizzle-orm'
 import { Hono } from 'hono'
 import type { MiddlewareHandler } from 'hono'
+import {
+  login as loginMobileSuica,
+  type MobileSuicaUsageHistoryItem,
+} from '../../../../packages/client-mobilesuica/src'
 import type { PlaintextStoredWebAuthnCredential } from '@repo/client-sbi'
 import type { AppBindings } from '../context'
 import { accountProfiles, sbiPasskeys } from '../db/schema'
@@ -26,6 +30,14 @@ export interface StoredSmbcDirectSecret {
   accountItemCode?: string
 }
 
+interface PendingMobileSuicaLogin {
+  answer: (value: string) => void
+  login: Promise<{
+    getUsageHistory(): Promise<MobileSuicaUsageHistoryItem[]>
+    logout(): Promise<void>
+  }>
+}
+
 const requireOwnerSession: MiddlewareHandler<AppBindings> = async (c, next) => {
   if (c.get('auth').type !== 'session') return c.json({ error: 'unauthorized' }, 401)
   await next()
@@ -33,6 +45,7 @@ const requireOwnerSession: MiddlewareHandler<AppBindings> = async (c, next) => {
 
 export const createAdminRoutes = () => {
   const app = new Hono<AppBindings>()
+  const mobileSuicaLogins = new Map<string, PendingMobileSuicaLogin>()
   app.use('*', requireOwnerSession)
 
   app.get('/api-keys', async (c) => c.json({ apiKeys: await listApiKeys(c.get('db')) }))
@@ -70,6 +83,56 @@ export const createAdminRoutes = () => {
     return c.json({
       profiles: rows.map(({ keyringAccount: _keyringAccount, ...profile }) => profile),
     })
+  })
+
+  app.post('/mobilesuica/captcha', async (c) => {
+    const body = await c.req.json<{ baseURL?: string; user?: string; password?: string }>()
+    if (!body.baseURL || !body.user?.trim() || !body.password) {
+      return c.json({ error: 'baseURL, user, and password are required' }, 400)
+    }
+
+    let publishCaptcha: ((value: { id: string; imageDataUrl: string }) => void) | undefined
+    let rejectCaptcha: ((reason?: unknown) => void) | undefined
+    const captcha = new Promise<{ id: string; imageDataUrl: string }>((resolve, reject) => {
+      publishCaptcha = resolve
+      rejectCaptcha = reject
+    })
+    let loginPromise: PendingMobileSuicaLogin['login'] | undefined
+    loginPromise = loginMobileSuica({
+      baseURL: body.baseURL,
+      user: body.user.trim(),
+      password: body.password,
+      onCaptcha: async ({ image, contentType }) => {
+        const id = randomId('mobilesuica')
+        const answer = new Promise<string>((resolve) => {
+          if (!loginPromise) throw new Error('Mobile Suica login was not initialized')
+          mobileSuicaLogins.set(id, { answer: resolve, login: loginPromise })
+        })
+        publishCaptcha?.({
+          id,
+          imageDataUrl: `data:${contentType};base64,${Buffer.from(image).toString('base64')}`,
+        })
+        return answer
+      },
+    })
+    void loginPromise.catch(rejectCaptcha)
+    const result = await captcha
+    return c.json(result)
+  })
+
+  app.post('/mobilesuica/captcha/:id', async (c) => {
+    const pending = mobileSuicaLogins.get(c.req.param('id'))
+    if (!pending) return c.json({ error: 'CAPTCHA challenge not found or expired' }, 404)
+    const body = await c.req.json<{ answer?: string }>()
+    if (!body.answer?.trim()) return c.json({ error: 'answer is required' }, 400)
+    mobileSuicaLogins.delete(c.req.param('id'))
+    pending.answer(body.answer.trim())
+    const profile = await pending.login
+    try {
+      return c.json({ usageHistory: await profile.getUsageHistory() })
+    } finally {
+      await profile.logout()
+    }
   })
 
   app.post('/profiles/smbc-direct', async (c) => {

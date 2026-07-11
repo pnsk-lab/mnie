@@ -19,6 +19,7 @@ import type { AccountProfile, ApiKey, ApiKeySettings, SbiPasskey } from '../../a
 import ApiKeyPolicyEditor from '../../components/ApiKeyPolicyEditor.vue'
 import UiModal from '../../components/ui/UiModal.vue'
 import { ui } from '../../styles/ui'
+import MobileSuicaPanel from './MobileSuicaPanel.vue'
 
 defineProps<{
   apiKeys: ApiKey[]
@@ -325,6 +326,8 @@ const saveEditingApiKey = () => {
             <p class="text-2xl font-black">{{ smbcBalance.displayValue }}</p>
           </template>
         </article>
+
+        <MobileSuicaPanel />
 
         <article class="grid min-w-0 content-start gap-4 overflow-hidden bg-transparent">
           <div class="flex flex-wrap items-center justify-between gap-3">

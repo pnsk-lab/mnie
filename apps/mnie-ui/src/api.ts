@@ -45,6 +45,14 @@ export interface AccountProfile {
   updatedAt: string
 }
 
+export interface MobileSuicaUsageHistoryItem {
+  date: string
+  type: string
+  detail: string
+  amount: number | null
+  balance: number | null
+}
+
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(`/api${path}`, {
     cache: 'no-store',
@@ -132,6 +140,22 @@ export const saveSmbcDirectProfile = (payload: {
 
 export const deleteAccountProfile = (id: string) =>
   request<{ ok: true }>(`/admin/profiles/${id}`, { method: 'DELETE' })
+
+export const createMobileSuicaCaptcha = (payload: {
+  baseURL: string
+  user: string
+  password: string
+}) =>
+  request<{ id: string; imageDataUrl: string }>('/admin/mobilesuica/captcha', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+
+export const submitMobileSuicaCaptcha = (id: string, answer: string) =>
+  request<{ usageHistory: MobileSuicaUsageHistoryItem[] }>(`/admin/mobilesuica/captcha/${id}`, {
+    method: 'POST',
+    body: JSON.stringify({ answer }),
+  })
 
 export const createRpcSocket = () => {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
