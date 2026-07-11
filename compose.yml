@@ -1,6 +1,6 @@
 services:
   mnie:
-    image: git.yutakobayashi.com/nakasyou/mnie:latest
+    image: ${MNIE_IMAGE:-ghcr.io/pnsk-lab/mnie:latest}
     ports:
       - '${MNIE_HOST_PORT:-18787}:8787'
     env_file:

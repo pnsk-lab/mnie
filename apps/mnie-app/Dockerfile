@@ -1,18 +1,31 @@
 FROM oven/bun:1 AS deps
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json bun.lock tsconfig.json vite.config.ts ./
 COPY packages/provider-sbi-sec/package.json packages/provider-sbi-sec/package.json
+COPY packages/provider-mobile-suica/package.json packages/provider-mobile-suica/package.json
+COPY packages/provider-paypay/package.json packages/provider-paypay/package.json
+COPY packages/provider-paypay-bank/package.json packages/provider-paypay-bank/package.json
+COPY packages/provider-smbc-direct/package.json packages/provider-smbc-direct/package.json
 COPY packages/mnie-types/package.json packages/mnie-types/package.json
 COPY packages/mnie-sdk/package.json packages/mnie-sdk/package.json
 COPY packages/mnie-cli/package.json packages/mnie-cli/package.json
+COPY packages/client-mnie/package.json packages/client-mnie/package.json
+COPY packages/client-nissay-401k/package.json packages/client-nissay-401k/package.json
+COPY packages/tsconfig/package.json packages/tsconfig/package.json
 COPY apps/mnie-app/package.json apps/mnie-app/package.json
 COPY apps/mnie-server/package.json apps/mnie-server/package.json
 COPY apps/mnie-ui/package.json apps/mnie-ui/package.json
+COPY example/package.json example/package.json
+COPY docs/package.json docs/package.json
 RUN bun install --frozen-lockfile
 
 FROM deps AS build
 COPY . .
-RUN bun --filter @repo/mnie-app build
+RUN ./node_modules/.bin/vp run --no-cache sdk-build \
+  && bun --filter @repo/mnie-app build
 RUN mkdir -p /keyring-node-modules/@napi-rs \
   && cp -R /app/node_modules/.bun/@napi-rs+keyring@*/node_modules/@napi-rs/keyring /keyring-node-modules/@napi-rs/keyring \
   && for package in /app/node_modules/.bun/@napi-rs+keyring-linux-*@*/node_modules/@napi-rs/keyring-linux-*; do \

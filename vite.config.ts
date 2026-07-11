@@ -21,6 +21,9 @@ export default defineConfig({
         command: [
           'vp run @mnie/types#build',
           'vp run @mnie/provider-sbi-sec#build',
+          'vp run @mnie/provider-mobile-suica#build',
+          'vp run @mnie/provider-paypay#build',
+          'vp run @mnie/provider-paypay-bank#build',
           'vp run @repo/client-mnie#build',
           'vp run @mnie/provider-smbc-direct#build',
           'vp run @repo/mnie-cli#build',
@@ -50,12 +53,10 @@ export default defineConfig({
         command: ['vp check', 'vp run typecheck:all', 'vp run app:build'],
       },
       'docker:build':
-        'docker build --no-cache -f apps/mnie-app/Dockerfile -t git.yutakobayashi.com/nakasyou/mnie:latest .',
+        'docker build -f apps/mnie-app/Dockerfile -t "${MNIE_IMAGE:-ghcr.io/pnsk-lab/mnie:latest}" .',
       'docker:run':
-        'docker run --rm -p 8787:8787 --env-file .env -v "$PWD/data:/app/data" git.yutakobayashi.com/nakasyou/mnie:latest',
-      'docker:tag':
-        'docker tag git.yutakobayashi.com/nakasyou/mnie:latest git.yutakobayashi.com/nakasyou/mnie:latest',
-      'docker:push': 'docker push git.yutakobayashi.com/nakasyou/mnie:latest',
+        'docker run --rm -p 8787:8787 --env-file .env -v "$PWD/data:/app/data" "${MNIE_IMAGE:-ghcr.io/pnsk-lab/mnie:latest}"',
+      'docker:push': 'docker push "${MNIE_IMAGE:-ghcr.io/pnsk-lab/mnie:latest}"',
       'docs:dev': {
         command: 'vp run @repo/docs#dev',
         cache: false,

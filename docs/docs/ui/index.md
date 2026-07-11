@@ -12,7 +12,7 @@ Mnie ships as a bundled server and UI. Credentials and portfolio workflows stay 
 ```yaml
 services:
   mnie:
-    image: git.yutakobayashi.com/nakasyou/mnie:latest
+    image: ghcr.io/pnsk-lab/mnie:latest
     ports:
       - '18787:8787'
     env_file:
@@ -26,7 +26,7 @@ Set `MNIE_KEYRING_BACKEND=sqlite` and a strong `MNIE_KEYRING_SECRET` for headles
 ## Nix
 
 ```bash
-nix run 'git+https://git.yutakobayashi.com/nakasyou/mnie.git#mnie'
+nix run 'github:pnsk-lab/mnie#mnie'
 ```
 
 ::: warning KEEP THE KEY
