@@ -18,16 +18,18 @@ export default defineConfig({
         dependsOn: ['typecheck:all', 'sdk-build'],
       },
       'sdk-build': {
-        command: [
-          'vp run @mnie/types#build',
-          'vp run @mnie/provider-sbi-sec#build',
-          'vp run @mnie/provider-mobile-suica#build',
-          'vp run @mnie/provider-paypay#build',
-          'vp run @mnie/provider-paypay-bank#build',
-          'vp run @repo/client-mnie#build',
-          'vp run @mnie/provider-smbc-direct#build',
-          'vp run @repo/mnie-cli#build',
+        dependsOn: [
+          '@mnie/types#build',
+          '@mnie/provider-sbi-sec#build',
+          '@mnie/provider-mobile-suica#build',
+          '@mnie/provider-paypay#build',
+          '@mnie/provider-paypay-bank#build',
+          '@repo/client-mnie#build',
+          '@mnie/provider-smbc-direct#build',
+          '@mnie/cli#build',
         ],
+        command: 'echo "SDK build complete"',
+        cache: true
       },
       'app:start': {
         command: 'vp run @repo/mnie-app#start',
