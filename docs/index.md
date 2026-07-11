@@ -23,7 +23,7 @@ description: Self-hosted finance infrastructure.
       <span aria-hidden="true">AI SDK,<br>for money.</span>
     </p>
     <nav class="mnie-actions" aria-label="Get started">
-      <a class="mnie-primary" href="/docs/">Start building <span>↗</span></a>
+      <a class="mnie-primary" href="./docs/">Start building <span>↗</span></a>
       <a class="mnie-github" href="https://github.com/pnsk-lab/mnie">GitHub <span>⌁</span></a>
     </nav>
   </section>

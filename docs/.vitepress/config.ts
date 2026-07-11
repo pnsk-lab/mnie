@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
+  base: '/mnie/',
   title: 'Mnie',
   description: 'Self-hosted finance infrastructure.',
   appearance: false,

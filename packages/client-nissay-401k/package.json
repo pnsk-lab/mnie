@@ -1,5 +1,6 @@
 {
   "name": "@mnie/client-nissay-401k",
+  "license": "MIT",
   "type": "module",
   "module": "./dist/index.mjs",
   "types": "./src/index.ts",

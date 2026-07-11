@@ -1,5 +1,6 @@
 {
   "name": "@mnie/provider-smbc-direct",
+  "license": "MIT",
   "type": "module",
   "module": "./dist/index.mjs",
   "types": "./src/index.ts",

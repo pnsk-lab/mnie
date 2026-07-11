@@ -10,7 +10,7 @@ Everything you need to build, ship, and scale with Mnie.
 Choose a section below to get started.
 
 <div class="start-grid">
-  <a class="start-card" href="/docs/sdk/">
+  <a class="start-card" href="./sdk/">
     <span class="start-card__icon" aria-hidden="true">
       <svg viewBox="0 0 48 48" role="img">
         <path d="m24 4 17 9.5v20L24 43 7 33.5v-20L24 4Z" />
@@ -23,7 +23,7 @@ Choose a section below to get started.
     <span class="start-card__action">Explore <span aria-hidden="true">→</span></span>
   </a>
 
-  <a class="start-card" href="/docs/cli/">
+  <a class="start-card" href="./cli/">
     <span class="start-card__icon" aria-hidden="true">
       <svg viewBox="0 0 48 48" role="img">
         <path d="m10 12 13 12-13 12M27 36h12" />
@@ -35,7 +35,7 @@ Choose a section below to get started.
     <span class="start-card__action">Explore <span aria-hidden="true">→</span></span>
   </a>
 
-  <a class="start-card" href="/docs/ui/">
+  <a class="start-card" href="./ui/">
     <span class="start-card__icon" aria-hidden="true">
       <svg viewBox="0 0 48 48" role="img">
         <path d="M7 8h34v32H7zM7 16h34M14 24h12M14 31h8" />
