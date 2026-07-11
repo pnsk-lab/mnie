@@ -1,4 +1,6 @@
-# Mnie
+# Mnie: Finance Management System
+
+<img width="1672" height="941" alt="image" src="https://github.com/user-attachments/assets/359cfe22-e35e-4ff5-af12-f2808a1d171b" />
 
 [![技術者倫理 遵守済み](https://img.shields.io/badge/%E6%8A%80%E8%A1%93%E8%80%85%E5%80%AB%E7%90%86-%E9%81%B5%E5%AE%88%E6%B8%88%E3%81%BF-0a0a0a?style=for-the-badge&labelColor=ffffff)](https://技術者倫理.com)
 
@@ -73,3 +75,7 @@ docker run --rm -it --name mnie \
 ```bash
 nix run 'github:pnsk-lab/mnie#mnie'
 ```
+
+## Acknowledgment
+
+* This project is inspired by [MoneyForward](https://moneyforward.com/).
