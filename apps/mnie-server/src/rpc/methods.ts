@@ -1,4 +1,4 @@
-import type { SbiClientMethods } from '@repo/client-sbi'
+import type { SbiClientMethods } from '@mnie/provider-sbi-sec'
 
 export const RPC_METHODS = [
   'session.profile',

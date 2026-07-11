@@ -15,10 +15,11 @@
   },
   "dependencies": {
     "@hono/mcp": "^0.3.0",
+    "@mnie/provider-sbi-sec": "workspace:*",
+    "@mnie/provider-smbc-direct": "workspace:*",
+    "@mnie/types": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@napi-rs/keyring": "^1.2.0",
-    "@repo/client-sbi": "workspace:*",
-    "@repo/client-smbc-direct": "workspace:*",
     "@simplewebauthn/server": "^13.1.2",
     "drizzle-orm": "^0.44.2",
     "hono": "^4.8.3",

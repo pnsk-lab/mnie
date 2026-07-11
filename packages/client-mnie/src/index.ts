@@ -1,4 +1,4 @@
-import type { SbiClientMethods } from '@repo/mnie-types'
+import type { FinancialProvider, OperationMap, ProviderDescriptor } from '@mnie/types'
 
 export interface ConnectMnieOptions {
   /** Mnie server origin. A path is intentionally not accepted. */
@@ -6,7 +6,7 @@ export interface ConnectMnieOptions {
   /** API key or OAuth access token. */
   token: string
   /** Provider registered on the Mnie server. */
-  provider?: 'sbisec' | 'smbc-direct'
+  provider?: string
   /** Provider-neutral profile ID registered on the Mnie server. */
   profileId?: string
   /** WebSocket implementation for non-browser runtimes. */
@@ -21,23 +21,17 @@ export interface MnieRpcError extends Error {
 
 export interface MnieProviderConnection {
   connected: boolean
-  provider: 'sbisec' | 'smbc-direct'
+  provider: string
   profileId?: string
   requires2fa?: boolean
   qrurl?: string
   url?: string
 }
 
-export interface MnieProfile extends SbiClientMethods {
-  /** Calls an RPC method that is not yet represented by the typed SDK. */
-  call(method: string, params?: unknown): Promise<unknown>
-  /** Returns the RPC methods supported by the connected server. */
-  methods(): Promise<string[]>
+export interface MnieProfile extends FinancialProvider<OperationMap> {
+  /** Selects a provider profile on the server. */
   /** Selects a provider profile. SMBC Direct returns a QR challenge before connection. */
-  connectProvider(
-    provider: 'sbisec' | 'smbc-direct',
-    profileId: string,
-  ): Promise<MnieProviderConnection>
+  connectProvider(provider: string, profileId: string): Promise<MnieProviderConnection>
   /** Completes a pending SMBC Direct QR approval. */
   finish2fa(): Promise<MnieProviderConnection>
   /** Closes the WebSocket and rejects any in-flight calls. */
@@ -176,14 +170,22 @@ class JsonRpcConnection {
   }
 }
 
-const methodProxy = (rpc: JsonRpcConnection, path: string[] = []): unknown =>
+const methodProxy = (
+  rpc: JsonRpcConnection,
+  descriptor: ProviderDescriptor,
+  profileId?: string,
+  path: string[] = [],
+): unknown =>
   new Proxy(() => undefined, {
     get(_target, property) {
       if (property === 'then') return undefined
-      if (property === 'call') return rpc.call.bind(rpc)
-      if (property === 'methods') return () => rpc.call('rpc.methods') as Promise<string[]>
+      if (property === 'descriptor') return descriptor
+      if (property === 'accountId') return profileId ?? 'primary'
+      if (property === 'capabilities') return () => []
+      if (property === 'operations') return () => rpc.call('rpc.methods') as Promise<string[]>
+      if (property === 'invoke') return (name: string, request: unknown) => rpc.call(name, request)
       if (property === 'connectProvider') {
-        return (provider: 'sbisec' | 'smbc-direct', profileId: string) =>
+        return (provider: string, profileId: string) =>
           rpc.call('provider.connect', { provider, profileId }) as Promise<MnieProviderConnection>
       }
       if (property === 'finish2fa') {
@@ -191,7 +193,7 @@ const methodProxy = (rpc: JsonRpcConnection, path: string[] = []): unknown =>
       }
       if (property === 'close') return rpc.close.bind(rpc)
       if (typeof property !== 'string') return undefined
-      return methodProxy(rpc, [...path, property])
+      return methodProxy(rpc, descriptor, profileId, [...path, property])
     },
     apply(_target, _thisArg, args) {
       return rpc.call(path.join('.'), args.length > 1 ? args : args[0])
@@ -201,9 +203,13 @@ const methodProxy = (rpc: JsonRpcConnection, path: string[] = []): unknown =>
 /** Opens a Mnie RPC connection and returns the selected provider profile. */
 export const connectMnie = async (options: ConnectMnieOptions): Promise<MnieProfile> => {
   const rpc = new JsonRpcConnection(options)
-  const profile = methodProxy(rpc) as MnieProfile
+  const profile = methodProxy(
+    rpc,
+    { id: options.provider ?? 'unselected', name: options.provider ?? 'Unselected provider' },
+    options.profileId,
+  ) as MnieProfile
   try {
-    await profile.call('rpc.methods')
+    await profile.operations()
     if (options.provider || options.profileId) {
       if (!options.provider || !options.profileId)
         throw new Error('provider and profileId must be provided together')
@@ -219,4 +225,4 @@ export const connectMnie = async (options: ConnectMnieOptions): Promise<MnieProf
   }
 }
 
-export type * from '@repo/mnie-types'
+export type * from '@mnie/types'

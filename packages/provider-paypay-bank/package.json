@@ -1,5 +1,5 @@
 {
-  "name": "@repo/client-mnie",
+  "name": "@mnie/provider-paypay-bank",
   "type": "module",
   "module": "./dist/index.mjs",
   "types": "./src/index.ts",
@@ -10,12 +10,13 @@
     }
   },
   "scripts": {
-    "build": "cd ../.. && vp run @mnie/types#build && cd packages/client-mnie && vp pack",
+    "build": "cd ../.. && cd packages/provider-paypay-bank && vp pack",
     "clean": "rm -rf dist",
     "typecheck": "tsc"
   },
   "dependencies": {
-    "@mnie/types": "workspace:*"
+    "@mnie/types": "workspace:*",
+    "iconv-lite": "^0.7.2"
   },
   "devDependencies": {
     "@repo/tsconfig": "workspace:*",

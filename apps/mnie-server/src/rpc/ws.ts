@@ -1,9 +1,13 @@
-import type { MarketCode, SbiClientMethods } from '@repo/client-sbi'
+import { createProvider as createSbiSecProvider } from '@mnie/provider-sbi-sec'
+import type { MarketCode, SbiClientMethods } from '@mnie/provider-sbi-sec'
 import {
+  createProvider as createSmbcDirectProvider,
   loginWithPasskey as loginSmbcDirect,
+  exportSession as exportSmbcDirectSession,
   type SmbcDirectLoginChallenge,
   type SmbcDirectProfile,
-} from '@repo/client-smbc-direct'
+} from '@mnie/provider-smbc-direct'
+import type { FinancialProvider, OperationMap } from '@mnie/types'
 import { createBunWebSocket } from 'hono/bun'
 import type { WSContext } from 'hono/ws'
 import { eq } from 'drizzle-orm'
@@ -14,11 +18,11 @@ import {
   assertAndConsumeApiKeyTradeLimits,
   assertApiKeyMethodAllowed,
 } from '../security/trade-limits'
-import { invokeSbiMethod, isRpcMethod, isTradingMethod, RPC_METHODS } from './methods'
+import { invokeSbiMethod, isRpcMethod, isTradingMethod } from './methods'
 import { connectSbi } from './sbi-session'
 import { accountProfiles } from '../db/schema'
 import type { StoredSmbcDirectSecret } from '../routes/admin'
-import { readSecret } from '../security/keyring'
+import { readSecret, saveSecret } from '../security/keyring'
 
 interface JsonRpcRequest {
   jsonrpc?: '2.0'
@@ -29,9 +33,11 @@ interface JsonRpcRequest {
 
 interface RpcSocketState {
   client?: SbiClientMethods
+  providerClient?: FinancialProvider<OperationMap>
   smbcProfile?: SmbcDirectProfile
   smbcChallenge?: SmbcDirectLoginChallenge
   provider?: 'sbisec' | 'smbc-direct'
+  profileId?: string
   apiKeyId?: string
   scopes?: string[]
   boardPollingSubscriptions: Map<string, AbortController>
@@ -42,11 +48,6 @@ interface BoardPollingParams {
   market: MarketCode
   intervalSeconds?: number
 }
-
-const BOARD_POLLING_METHODS = [
-  'market.issue.pollBoard.subscribe',
-  'market.issue.pollBoard.unsubscribe',
-] as const
 
 const send = (ws: WSContext, payload: unknown) => {
   ws.send(JSON.stringify(payload))
@@ -174,7 +175,7 @@ const handleRpc = async (
   request: JsonRpcRequest,
 ) => {
   if (request.method === 'rpc.methods') {
-    return result(request.id, [...RPC_METHODS, ...BOARD_POLLING_METHODS])
+    return result(request.id, state.providerClient?.operations() ?? [])
   }
 
   if (request.method === 'provider.connect') {
@@ -195,11 +196,14 @@ const handleRpc = async (
     if (!profile || profile.provider !== params.provider) throw new Error('profile not found')
     stopBoardPollingSubscriptions(state)
     state.client = undefined
+    state.providerClient = undefined
     state.smbcProfile = undefined
     state.smbcChallenge = undefined
     state.provider = params.provider
+    state.profileId = profile.id
     if (params.provider === 'sbisec') {
       state.client = await connectSbi(db, config, profile.id)
+      state.providerClient = createSbiSecProvider(state.client) as FinancialProvider<OperationMap>
       return result(request.id, {
         connected: true,
         provider: params.provider,
@@ -232,8 +236,36 @@ const handleRpc = async (
       throw new Error('SMBC Direct two-factor authentication is not pending')
     }
     state.smbcProfile = await state.smbcChallenge.finished2fa()
+    state.providerClient = createSmbcDirectProvider(
+      state.smbcProfile,
+    ) as FinancialProvider<OperationMap>
     state.smbcChallenge = undefined
+    if (state.profileId) {
+      const [profile] = await db
+        .select()
+        .from(accountProfiles)
+        .where(eq(accountProfiles.id, state.profileId))
+        .limit(1)
+      if (!profile) throw new Error('profile not found')
+      const secret = await readSecret<StoredSmbcDirectSecret>(profile.keyringAccount)
+      await saveSecret(profile.keyringAccount, {
+        ...secret,
+        session: exportSmbcDirectSession(state.smbcProfile),
+      })
+    }
     return result(request.id, { connected: true, provider: 'smbc-direct' })
+  }
+
+  if (
+    state.providerClient &&
+    typeof request.method === 'string' &&
+    state.providerClient.operations().includes(request.method)
+  ) {
+    assertScope(state, request.method.includes('.create') ? 'trade' : 'read')
+    return result(
+      request.id,
+      await state.providerClient.invoke(request.method, request.params ?? {}),
+    )
   }
 
   if (request.method === 'account.balance') {

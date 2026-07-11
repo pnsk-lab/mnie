@@ -1,5 +1,5 @@
 {
-  "name": "@mnie/mnie-types",
+  "name": "@mnie/types",
   "private": true,
   "type": "module",
   "module": "./dist/index.mjs",

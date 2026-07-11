@@ -60,7 +60,7 @@ const submitCaptcha = async () => {
   <article class="grid min-w-0 content-start gap-4 overflow-hidden bg-transparent">
     <div>
       <h3 class="text-lg font-black">モバイル Suica 利用履歴</h3>
-      <p class="mt-1 text-sm text-[#9aa0a9]">資格情報はこの取得処理だけで使用し、保存しません。</p>
+      <p class="mt-1 text-sm text-[#9aa0a9]">認証情報とログイン Cookie は暗号化して保存します。</p>
     </div>
     <label :class="ui.label">
       Web サイトの Origin

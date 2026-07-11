@@ -39,7 +39,7 @@ export interface SbiPasskey {
 
 export interface AccountProfile {
   id: string
-  provider: 'sbisec' | 'smbc-direct'
+  provider: 'sbisec' | 'smbc-direct' | 'mobilesuica'
   label: string
   createdAt: string
   updatedAt: string
@@ -152,10 +152,13 @@ export const createMobileSuicaCaptcha = (payload: {
   })
 
 export const submitMobileSuicaCaptcha = (id: string, answer: string) =>
-  request<{ usageHistory: MobileSuicaUsageHistoryItem[] }>(`/admin/mobilesuica/captcha/${id}`, {
-    method: 'POST',
-    body: JSON.stringify({ answer }),
-  })
+  request<{ usageHistory: MobileSuicaUsageHistoryItem[]; profile: { id: string } }>(
+    `/admin/mobilesuica/captcha/${id}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ answer }),
+    },
+  )
 
 export const createRpcSocket = () => {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'

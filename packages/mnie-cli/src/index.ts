@@ -273,7 +273,7 @@ const rpc = async (args: string[]) => {
   const client = await connectMnie({ baseURL: profile.origin, token: apiKey })
   try {
     if (positionals[0] === 'methods') {
-      printJson(await client.methods())
+      printJson(await client.operations())
       return
     }
     if (positionals[0] !== 'call' || !positionals[1])

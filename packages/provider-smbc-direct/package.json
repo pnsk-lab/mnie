@@ -1,5 +1,5 @@
 {
-  "name": "@repo/client-mnie",
+  "name": "@mnie/provider-smbc-direct",
   "type": "module",
   "module": "./dist/index.mjs",
   "types": "./src/index.ts",
@@ -10,7 +10,7 @@
     }
   },
   "scripts": {
-    "build": "cd ../.. && vp run @mnie/types#build && cd packages/client-mnie && vp pack",
+    "build": "cd ../.. && cd packages/provider-smbc-direct && vp pack",
     "clean": "rm -rf dist",
     "typecheck": "tsc"
   },

@@ -1,4 +1,3 @@
-import { getBalance, getCashPositions, getIssueBoard } from 'mnie'
 import { connectMnie } from '@repo/client-mnie'
 
 const profile = await connectMnie({
@@ -8,15 +7,7 @@ const profile = await connectMnie({
   profileId: 'your-sbi-profile-id',
 })
 
-const _balance = await getBalance({
-  profile,
-})
-
-const _positions = await getCashPositions({ profile })
-const _board = await getIssueBoard({
-  profile,
-  issueCode: '7203',
-  market: 'XTKS',
-})
+const _accounts = await profile.invoke('accounts.list', {})
+const _balances = await profile.invoke('balances.list', {})
 
 profile.close()

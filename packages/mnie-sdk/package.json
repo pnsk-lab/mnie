@@ -11,13 +11,13 @@
     }
   },
   "scripts": {
-    "build": "cd ../.. && vp run @repo/mnie-types#build && cd packages/mnie-sdk && vp pack",
+    "build": "cd ../.. && vp run @mnie/types#build && cd packages/mnie-sdk && vp pack",
     "clean": "rm -rf dist",
     "typecheck": "tsc"
   },
   "dependencies": {},
   "devDependencies": {
-    "@repo/mnie-types": "workspace:*",
+    "@mnie/types": "workspace:*",
     "@repo/tsconfig": "workspace:*",
     "@types/bun": "latest"
   },

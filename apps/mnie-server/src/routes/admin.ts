@@ -3,9 +3,10 @@ import { Hono } from 'hono'
 import type { MiddlewareHandler } from 'hono'
 import {
   login as loginMobileSuica,
-  type MobileSuicaUsageHistoryItem,
-} from '../../../../packages/client-mobilesuica/src'
-import type { PlaintextStoredWebAuthnCredential } from '@repo/client-sbi'
+  exportSession as exportMobileSuicaSession,
+  type MobileSuicaProfile,
+} from '../../../../packages/provider-mobile-suica/src'
+import type { PlaintextStoredWebAuthnCredential } from '@mnie/provider-sbi-sec'
 import type { AppBindings } from '../context'
 import { accountProfiles, sbiPasskeys } from '../db/schema'
 import {
@@ -22,20 +23,21 @@ export interface StoredSbiPasskeySecret {
   credential: PlaintextStoredWebAuthnCredential
   tradePassword?: string
   deviceId?: string
+  session?: unknown
 }
 
 export interface StoredSmbcDirectSecret {
   user: string
   password: string
   accountItemCode?: string
+  session?: unknown
 }
 
 interface PendingMobileSuicaLogin {
   answer: (value: string) => void
-  login: Promise<{
-    getUsageHistory(): Promise<MobileSuicaUsageHistoryItem[]>
-    logout(): Promise<void>
-  }>
+  login: Promise<MobileSuicaProfile>
+  id: string
+  keyringAccount: string
 }
 
 const requireOwnerSession: MiddlewareHandler<AppBindings> = async (c, next) => {
@@ -106,7 +108,12 @@ export const createAdminRoutes = () => {
         const id = randomId('mobilesuica')
         const answer = new Promise<string>((resolve) => {
           if (!loginPromise) throw new Error('Mobile Suica login was not initialized')
-          mobileSuicaLogins.set(id, { answer: resolve, login: loginPromise })
+          mobileSuicaLogins.set(id, {
+            answer: resolve,
+            login: loginPromise,
+            id: randomId('mobilesuica'),
+            keyringAccount: `mobilesuica:${randomId('credential')}`,
+          })
         })
         publishCaptcha?.({
           id,
@@ -129,7 +136,17 @@ export const createAdminRoutes = () => {
     pending.answer(body.answer.trim())
     const profile = await pending.login
     try {
-      return c.json({ usageHistory: await profile.getUsageHistory() })
+      const now = new Date()
+      await saveSecret(pending.keyringAccount, { session: exportMobileSuicaSession(profile) })
+      await c.get('db').insert(accountProfiles).values({
+        id: pending.id,
+        provider: 'mobilesuica',
+        label: 'Mobile Suica',
+        keyringAccount: pending.keyringAccount,
+        createdAt: now,
+        updatedAt: now,
+      })
+      return c.json({ usageHistory: await profile.getUsageHistory(), profile: { id: pending.id } })
     } finally {
       await profile.logout()
     }

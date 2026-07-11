@@ -37,8 +37,8 @@ order estimate or placement operation. Live operations retain the required
 - `packages/client-mnie`: authenticated Mnie connection client
 - `packages/mnie-sdk`: high-level `mnie` SDK
 - `packages/mnie-cli`: CLI using `client-mnie`
-- `packages/client-sbi`: SBI profile client
-- `packages/client-mobilesuica`: Mobile Suica usage-history client
+- `packages/provider-sbi-sec`: SBI Securities provider
+- `packages/provider-mobile-suica`: Mobile Suica provider
 
 ### Install
 

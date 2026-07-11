@@ -11,7 +11,7 @@ export default defineConfig({
       'app:dev': {
         command: 'vp run @repo/mnie-app#dev',
         cache: false,
-        dependsOn: ['env:doctor'],
+        dependsOn: ['env:doctor', 'sdk-build'],
       },
       'app:build': {
         command: 'vp run @repo/mnie-app#build',
@@ -19,10 +19,10 @@ export default defineConfig({
       },
       'sdk-build': {
         command: [
-          'vp run @repo/mnie-types#build',
-          'vp run @repo/client-sbi#build',
+          'vp run @mnie/types#build',
+          'vp run @mnie/provider-sbi-sec#build',
           'vp run @repo/client-mnie#build',
-          'vp run @repo/client-smbc-direct#build',
+          'vp run @mnie/provider-smbc-direct#build',
           'vp run @repo/mnie-cli#build',
         ],
       },

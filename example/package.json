@@ -2,8 +2,8 @@
   "name": "example",
   "private": true,
   "dependencies": {
-    "@repo/client-mnie": "workspace:*",
-    "mnie": "workspace:*"
+    "@mnie/sdk": "workspace:*",
+    "@repo/client-mnie": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest"

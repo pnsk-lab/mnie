@@ -4,6 +4,11 @@ export default defineConfig({
   title: 'Mnie',
   description: 'Self-hosted finance infrastructure.',
   appearance: false,
+  vite: {
+    server: {
+      port: 3213,
+    },
+  },
   themeConfig: {
     nav: [{ text: 'Docs', link: '/docs/' }],
     sidebar: {
@@ -29,19 +34,23 @@ export default defineConfig({
           items: [
             {
               text: 'SBI Security',
-              link: '/docs/providers/sbisec/',
+              link: '/docs/providers/sbisec',
             },
             {
               text: 'SMBC Direct',
-              link: '/docs/providers/smbc-direct/',
+              link: '/docs/providers/smbc-direct',
             },
             {
               text: 'PayPay Bank',
-              link: '/docs/providers/paypay-bank/',
+              link: '/docs/providers/paypay-bank',
             },
             {
               text: 'Mobile Suica',
-              link: '/docs/providers/mobilesuica/',
+              link: '/docs/providers/mobilesuica',
+            },
+            {
+              text: 'PayPay',
+              link: '/docs/providers/paypay',
             },
           ],
         },

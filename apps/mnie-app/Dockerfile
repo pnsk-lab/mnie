@@ -1,7 +1,7 @@
 FROM oven/bun:1 AS deps
 WORKDIR /app
 COPY package.json bun.lock tsconfig.json vite.config.ts ./
-COPY packages/client-sbi/package.json packages/client-sbi/package.json
+COPY packages/provider-sbi-sec/package.json packages/provider-sbi-sec/package.json
 COPY packages/mnie-types/package.json packages/mnie-types/package.json
 COPY packages/mnie-sdk/package.json packages/mnie-sdk/package.json
 COPY packages/mnie-cli/package.json packages/mnie-cli/package.json

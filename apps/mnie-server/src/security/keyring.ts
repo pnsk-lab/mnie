@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path'
 import { Database } from 'bun:sqlite'
 
 const SERVICE = 'mnie'
+const ENCRYPTION_KEY_ACCOUNT = 'credential-encryption-key:v1'
 const LEGACY_SERVICES = ['csbie'] as const
 const SQLITE_BACKEND = 'sqlite'
 const PLATFORM_BACKEND = 'platform'
@@ -81,8 +82,79 @@ const decrypt = (row: { nonce: string; tag: string; ciphertext: string }) => {
   ]).toString('utf8')
 }
 
+/**
+ * Keeps the data-encryption key separate from the credential payload.  On a
+ * desktop installation this lives in the OS keyring; the SQLite keyring
+ * backend encrypts it with its explicitly configured deployment secret.
+ */
+const encryptionKey = async (): Promise<Buffer> => {
+  if (keyringBackend() === PLATFORM_BACKEND) {
+    const { getPassword, setPassword } = await loadKeytar()
+    const existing = await getPassword(SERVICE, ENCRYPTION_KEY_ACCOUNT)
+    if (existing) {
+      const key = Buffer.from(existing, 'base64url')
+      if (key.length !== 32) throw new Error('stored credential encryption key is invalid')
+      return key
+    }
+    const key = randomBytes(32)
+    await setPassword(SERVICE, ENCRYPTION_KEY_ACCOUNT, key.toString('base64url'))
+    return key
+  }
+
+  const query = keyringDb().query<
+    { nonce: string; tag: string; ciphertext: string },
+    [string, string]
+  >('SELECT nonce, tag, ciphertext FROM keyring_secrets WHERE service = ? AND account = ?')
+  const existing = query.get(SERVICE, ENCRYPTION_KEY_ACCOUNT)
+  if (existing) {
+    const key = Buffer.from(decrypt(existing), 'base64url')
+    if (key.length !== 32) throw new Error('stored credential encryption key is invalid')
+    return key
+  }
+  const key = randomBytes(32)
+  const sealed = encrypt(key.toString('base64url'))
+  keyringDb()
+    .query(
+      'INSERT INTO keyring_secrets (service, account, nonce, tag, ciphertext, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+    )
+    .run(SERVICE, ENCRYPTION_KEY_ACCOUNT, sealed.nonce, sealed.tag, sealed.ciphertext, Date.now())
+  return key
+}
+
+const sealCredential = async (payload: string) => {
+  const nonce = randomBytes(12)
+  const cipher = createCipheriv('aes-256-gcm', await encryptionKey(), nonce)
+  const ciphertext = Buffer.concat([cipher.update(payload, 'utf8'), cipher.final()])
+  return JSON.stringify({
+    version: 1,
+    nonce: nonce.toString('base64url'),
+    tag: cipher.getAuthTag().toString('base64url'),
+    ciphertext: ciphertext.toString('base64url'),
+  })
+}
+
+const openCredential = async (payload: string) => {
+  const value: unknown = JSON.parse(payload)
+  if (!value || typeof value !== 'object' || (value as { version?: unknown }).version !== 1) {
+    // Existing installations used the keyring payload directly. It is read
+    // once for migration compatibility and rewritten encrypted on the next save.
+    return payload
+  }
+  const sealed = value as { nonce: string; tag: string; ciphertext: string }
+  const decipher = createDecipheriv(
+    'aes-256-gcm',
+    await encryptionKey(),
+    Buffer.from(sealed.nonce, 'base64url'),
+  )
+  decipher.setAuthTag(Buffer.from(sealed.tag, 'base64url'))
+  return Buffer.concat([
+    decipher.update(Buffer.from(sealed.ciphertext, 'base64url')),
+    decipher.final(),
+  ]).toString('utf8')
+}
+
 export const saveSecret = async (account: string, secret: unknown) => {
-  const payload = JSON.stringify(secret)
+  const payload = await sealCredential(JSON.stringify(secret))
   if (keyringBackend() === PLATFORM_BACKEND) {
     const { setPassword } = await loadKeytar()
     await setPassword(SERVICE, account, payload)
@@ -110,7 +182,7 @@ export const readSecret = async <T>(account: string): Promise<T> => {
     const { getPassword } = await loadKeytar()
     const secret = await getPassword(SERVICE, account)
     if (!secret) throw new Error(`secret not found: ${account}`)
-    return JSON.parse(secret) as T
+    return JSON.parse(await openCredential(secret)) as T
   }
 
   const query = keyringDb().query<
@@ -128,7 +200,7 @@ export const readSecret = async <T>(account: string): Promise<T> => {
     LEGACY_SERVICES.map((service) => query.get(service, account)).find(Boolean)
   const secret = row ? decrypt(row) : undefined
   if (!secret) throw new Error(`secret not found: ${account}`)
-  return JSON.parse(secret) as T
+  return JSON.parse(await openCredential(secret)) as T
 }
 
 export const deleteSecret = async (account: string) => {

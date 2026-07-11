@@ -20,6 +20,10 @@
     "sdk:build": "vp run sdk-build",
     "typecheck": "vp run typecheck:all"
   },
+  "dependencies": {
+    "iconv-lite": "^0.7.3",
+    "node-html-parser": "^9.0.0"
+  },
   "devDependencies": {
     "@repo/tsconfig": "workspace:*",
     "@types/bun": "latest",
