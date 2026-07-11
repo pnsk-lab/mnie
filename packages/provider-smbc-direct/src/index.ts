@@ -75,6 +75,8 @@ export interface SmbcDirectProfile {
   getTransferRecipient(index: string): Promise<unknown>
   /** Calculates a transfer fee only; it neither confirms nor executes a transfer. */
   estimateTransferFee(options: SmbcDirectTransferFeeOptions): Promise<unknown>
+  /** Navigates to the account-list page to keep the authenticated session active. */
+  continueSession(): Promise<void>
   logout(): Promise<void>
 }
 
@@ -100,6 +102,14 @@ export const createProvider = (profile: SmbcDirectProfile): FinancialProvider<Co
       'transactions.list',
       'transfers.recipients.list',
     ],
+    checkAvailability: async () => {
+      try {
+        await profile.continueSession()
+        return { ok: true }
+      } catch (message) {
+        return { ok: false, message }
+      }
+    },
     invoke: async (name, request) => {
       if (name === 'accounts.list') return accounts() as never
       if (name === 'balances.list') {
@@ -125,19 +135,26 @@ export const createProvider = (profile: SmbcDirectProfile): FinancialProvider<Co
           throw new Error('transactions.list requires from and to for SMBC Direct')
         }
         const value = await profile.getTransactions({ startDate: input.from, endDate: input.to })
-        const items: Transaction[] = value.transactions.map((transaction) => ({
-          id: transaction.id,
-          accountId,
-          type: transaction.type === 'deposit' ? 'deposit' : 'withdrawal',
-          status: 'posted',
-          amount: { kind: 'money', money: { currency: 'JPY', value: String(transaction.amount) } },
-          occurredAt: transaction.date,
-          description: transaction.description,
-          balanceAfter: {
-            kind: 'money',
-            money: { currency: 'JPY', value: String(transaction.balance) },
-          },
-        }))
+        const items: Transaction[] = value.transactions.map((transaction) => {
+          const base = {
+            id: transaction.id,
+            accountId,
+            status: 'posted' as const,
+            amount: {
+              kind: 'money' as const,
+              money: { currency: 'JPY', value: String(transaction.amount) },
+            },
+            occurredAt: transaction.date,
+            description: transaction.description,
+            balanceAfter: {
+              kind: 'money' as const,
+              money: { currency: 'JPY', value: String(transaction.balance) },
+            },
+          }
+          return transaction.type === 'deposit'
+            ? { ...base, kind: 'deposit' as const, direction: 'credit' as const }
+            : { ...base, kind: 'withdrawal' as const, direction: 'debit' as const }
+        })
         return { items } as Page<Transaction> as never
       }
       if (name === 'transfers.recipients.list') {
@@ -351,14 +368,44 @@ const dateParameter = (value: string, name: string) => {
 
 const createProfile = (
   context: LoginContext,
-  topPage: { html: string; url: string },
+  initialTopPage: { html: string; url: string },
 ): SmbcDirectProfile => {
-  const topForm = formFields(topPage.html, 'TPALTOP')
-  const headerForm = formFields(topPage.html, 'DIRECTHEADERFORM')
-  const token = required(topForm, '_TOKEN')
-  const formId = required(topForm, '_FORMID')
+  let topPage = initialTopPage
+
+  const topPageForms = () => {
+    const topForm = formFields(topPage.html, 'TPALTOP')
+    return {
+      topForm,
+      headerForm: formFields(topPage.html, 'DIRECTHEADERFORM'),
+      token: required(topForm, '_TOKEN'),
+      formId: required(topForm, '_FORMID'),
+    }
+  }
+
+  const continueSession = async () => {
+    const { headerForm } = topPageForms()
+    const response = await fetchWithCookies(
+      new URL('/ib/web/top/TPALTOPacctList.smbc', context.baseURL),
+      {
+        method: 'POST',
+        headers: {
+          ...context.headers,
+          'content-type': 'application/x-www-form-urlencoded',
+          origin: context.baseURL,
+          referer: topPage.url,
+        },
+        body: new URLSearchParams(headerForm),
+      },
+      context.jar,
+    )
+    topPage = {
+      html: await responseText(response, 'continue-session request'),
+      url: response.url,
+    }
+  }
 
   const requestTransferPage = async () => {
+    const { headerForm } = topPageForms()
     const response = await fetchWithCookies(
       new URL('/ib/web/transfer/TFTPTOPfurikomi.smbc', context.baseURL),
       {
@@ -438,6 +485,7 @@ const createProfile = (
       ]
     },
     async getBalance() {
+      const { token, formId } = topPageForms()
       const url = new URL('/ib/ajax/top/TPALTOPAjaxSavingBalance.smbc', context.baseURL)
       url.searchParams.set('_TOKEN', token)
       url.searchParams.set('_FORMID', formId)
@@ -474,6 +522,7 @@ const createProfile = (
       const endDate = dateParameter(options.endDate, 'endDate')
       if (startDate > endDate) throw new Error('startDate must not be after endDate')
 
+      const { topForm } = topPageForms()
       const detailResponse = await fetchWithCookies(
         new URL('/ib/web/top/TPALTOPaccountFutsuDetail.smbc', context.baseURL),
         {
@@ -566,7 +615,9 @@ const createProfile = (
         furikomiShiteiDatePulldown: options.scheduledDate ?? '0',
       })
     },
+    continueSession,
     async logout() {
+      const { headerForm } = topPageForms()
       const response = await fetchWithCookies(
         new URL('/ib/web/loginlogout/TPALTOPlogout1.smbc', context.baseURL),
         {
@@ -720,6 +771,10 @@ export const getTransactions = async ({
   startDate: string
   endDate: string
 }) => profile.getTransactions({ startDate, endDate })
+
+/** Navigates to the account-list page so SMBC Direct keeps the session active. */
+export const continueSession = async ({ profile }: { profile: SmbcDirectProfile }) =>
+  profile.continueSession()
 
 /** Lists saved and previously used transfer recipients without creating a transfer. */
 export const getTransferRecipients = async ({ profile }: { profile: SmbcDirectProfile }) =>

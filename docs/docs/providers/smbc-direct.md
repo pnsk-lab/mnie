@@ -48,6 +48,7 @@ const profile = await challenge.finished2fa()
 | `getTransferRecipients()`     | Retrieve saved and previously used transfer recipients               |
 | `getTransferRecipient(index)` | Retrieve one previously used recipient                               |
 | `estimateTransferFee()`       | Estimate only the transfer fee                                       |
+| `continueSession()`           | Refresh the authenticated session by returning to the account list   |
 | `logout()`                    | End the session                                                      |
 
 Recipient methods and fee estimation do not confirm or execute a transfer. This client does not support executing transfers.
@@ -67,6 +68,16 @@ await profile.logout()
 ```
 
 Dates use the `YYYYMMDD` format. The account list currently returns only the ordinary-deposit account used to log in. If the account uses a non-default item code, pass it with `loginWithPasskey({ accountItemCode: '...' })`.
+
+## Keep the session active
+
+```ts
+import { continueSession } from '@mnie/provider-smbc-direct'
+
+await continueSession({ profile })
+```
+
+This performs the same authenticated account-list form navigation observed in the browser session. It refreshes the session's form state, so subsequent provider calls use the newly issued tokens.
 
 ## Fee estimation
 

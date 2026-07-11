@@ -66,6 +66,14 @@ export const createProvider = (profile: PayPayProfile): FinancialProvider<Common
     accountId: profile.accountId,
     capabilities: () => ['accounts:read', 'balances:read'],
     operations: () => ['accounts.list', 'balances.list'],
+    checkAvailability: async () => {
+      try {
+        await profile.getBalance()
+        return { ok: true }
+      } catch (message) {
+        return { ok: false, message }
+      }
+    },
     invoke: async (name, request) => {
       if (name === 'accounts.list') return accounts() as never
       if (name === 'balances.list') {

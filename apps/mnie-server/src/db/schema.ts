@@ -40,7 +40,9 @@ export const sbiPasskeys = sqliteTable('sbi_passkeys', {
 
 export const accountProfiles = sqliteTable('account_profiles', {
   id: text('id').primaryKey(),
-  provider: text('provider', { enum: ['sbisec', 'smbc-direct', 'mobilesuica'] }).notNull(),
+  provider: text('provider', {
+    enum: ['sbisec', 'smbc-direct', 'mobilesuica', 'paypay-bank'],
+  }).notNull(),
   label: text('label').notNull(),
   keyringAccount: text('keyring_account').notNull(),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),

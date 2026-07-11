@@ -59,29 +59,86 @@ export interface Balance {
   asOf: string
 }
 
-export type TransactionType =
-  | 'deposit'
-  | 'withdrawal'
-  | 'payment'
-  | 'transfer'
-  | 'refund'
-  | 'transport'
-  | 'charge'
-  | 'reward'
-  | 'investment-trade'
-  | 'fee'
-  | 'other'
+export type TransactionDirection = 'credit' | 'debit' | 'neutral'
+export type TransactionStatus = 'pending' | 'posted' | 'reversed' | 'failed'
 
-export interface Transaction {
+export interface TransactionBase<Kind extends string, Direction extends TransactionDirection> {
   id: string
   accountId: string
-  type: TransactionType
-  status: 'pending' | 'posted' | 'reversed' | 'failed'
-  amount?: Amount
+  /** Discriminant for a financial event, never a provider-specific label. */
+  kind: Kind
+  direction: Direction
+  status: TransactionStatus
+  /** Absolute amount. `null` preserves source rows without a monetary movement. */
+  amount: Amount | null
   occurredAt: string
   description: string
   balanceAfter?: Amount
 }
+
+export interface DepositTransaction extends TransactionBase<'deposit', 'credit'> {}
+export interface WithdrawalTransaction extends TransactionBase<'withdrawal', 'debit'> {}
+
+export interface PaymentTransaction extends TransactionBase<'payment', 'debit'> {
+  merchant?: string
+}
+
+export interface TransferTransaction extends TransactionBase<'transfer', 'credit' | 'debit'> {
+  counterparty?: string
+}
+
+export interface RefundTransaction extends TransactionBase<'refund', 'credit'> {
+  merchant?: string
+}
+
+export type TransitService = 'rail' | 'bus' | 'shopping' | 'other'
+
+export interface TransitTransaction extends TransactionBase<'transit', 'debit'> {
+  transit: {
+    service: TransitService
+    from?: string
+    to?: string
+  }
+}
+
+export interface ChargeTransaction extends TransactionBase<'charge', 'credit'> {
+  charge: {
+    method: 'cash' | 'card' | 'bank-transfer' | 'automatic' | 'other'
+  }
+}
+
+export interface RewardTransaction extends TransactionBase<'reward', 'credit'> {
+  reward?: { programId?: string }
+}
+
+export interface InvestmentTradeTransaction extends TransactionBase<
+  'investment-trade',
+  'credit' | 'debit'
+> {
+  investment: {
+    instrumentId: string
+    side: 'buy' | 'sell'
+    quantity?: string
+    unitPrice?: Money
+  }
+}
+
+export interface FeeTransaction extends TransactionBase<'fee', 'debit'> {}
+export interface OtherTransaction extends TransactionBase<'other', TransactionDirection> {}
+
+/** A complete, provider-neutral financial history record. */
+export type Transaction =
+  | DepositTransaction
+  | WithdrawalTransaction
+  | PaymentTransaction
+  | TransferTransaction
+  | RefundTransaction
+  | TransitTransaction
+  | ChargeTransaction
+  | RewardTransaction
+  | InvestmentTradeTransaction
+  | FeeTransaction
+  | OtherTransaction
 
 export interface PageRequest {
   cursor?: string
@@ -132,12 +189,29 @@ export interface InvestmentOrderPreview {
   confirmationToken?: string
 }
 
+export interface InvestmentOrder {
+  id: string
+  accountId: string
+  instrumentId: string
+  instrumentName?: string
+  side: 'buy' | 'sell'
+  status: 'open' | 'executed' | 'cancelled' | 'expired' | 'rejected' | 'unknown'
+  quantity?: string
+  executedQuantity?: string
+  price?: Money
+  orderedAt?: string
+}
+
 export type InvestmentOperations = {
   'investments.positions.list': OperationDefinition<
     PageRequest & { accountId?: string; positionType?: 'cash' | 'margin' },
     Page<InvestmentPosition>
   >
   'investments.orders.preview': OperationDefinition<InvestmentOrderRequest, InvestmentOrderPreview>
+  'investments.orders.list': OperationDefinition<
+    PageRequest & { accountId?: string; status?: InvestmentOrder['status'] },
+    Page<InvestmentOrder>
+  >
 }
 
 export interface OperationDefinition<Request, Response> {
@@ -163,6 +237,8 @@ export type OperationRequest<Operations, Name extends OperationName<Operations>>
 export type OperationResponse<Operations, Name extends OperationName<Operations>> =
   Operations[Name] extends OperationDefinition<unknown, infer Response> ? Response : never
 
+export type AvailabilityCheckResult = { ok: true } | { ok: false; message: unknown }
+
 /**
  * The public contract of every provider. Provider-specific login is allowed,
  * but an authenticated provider exposes only this common invocation surface.
@@ -172,6 +248,11 @@ export interface FinancialProvider<Operations = CommonOperations> {
   readonly accountId: string
   capabilities(): readonly Capability[]
   operations(): readonly OperationName<Operations>[]
+  /**
+   * Verifies that the authenticated profile can still make an authenticated request.
+   * Returns the provider failure message instead of throwing when unavailable.
+   */
+  checkAvailability(): Promise<AvailabilityCheckResult>
   invoke<Name extends OperationName<Operations>>(
     name: Name,
     request: OperationRequest<Operations, Name>,

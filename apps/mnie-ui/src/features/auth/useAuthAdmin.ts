@@ -1,7 +1,8 @@
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import {
   createApiKey,
+  checkProfileAvailability,
   createLoginOptions,
   createSetupOptions,
   deleteAccountProfile,
@@ -9,14 +10,19 @@ import {
   listApiKeys,
   listSbiPasskeys,
   listAccountProfiles,
+  listCronJobs,
   saveSbiPasskey,
   saveSmbcDirectProfile,
+  savePayPayBankProfile,
   updateApiKeySettings,
+  updateAccountProfileLabel,
   verifyLogin,
   verifySetup,
   type ApiKey,
   type AccountProfile,
   type AuthStatus,
+  type CronJob,
+  type ProfileAvailability,
   type SbiPasskey,
 } from '../../api'
 import { defaultApiKeyPolicy } from './api-key-policy'
@@ -26,6 +32,10 @@ export const useAuthAdmin = () => {
   const apiKeys = ref<ApiKey[]>([])
   const sbiPasskeys = ref<SbiPasskey[]>([])
   const profiles = ref<AccountProfile[]>([])
+  const profileAvailability = ref<Record<string, ProfileAvailability>>({})
+  const profileAvailabilityCheckedAt = ref<Record<string, number>>({})
+  const availabilityRefreshMs = 10 * 60 * 1000
+  const cronJobs = ref<CronJob[]>([])
   const selectedProfileId = ref('')
   const setupPassword = ref('')
   const authBusy = ref(false)
@@ -40,6 +50,18 @@ export const useAuthAdmin = () => {
   const smbcUser = ref('')
   const smbcPassword = ref('')
   const smbcAccountItemCode = ref('')
+  const payPayBankLabel = ref('PayPay銀行')
+  const payPayBankBranchNo = ref('')
+  const payPayBankAccountNo = ref('')
+  const payPayBankPassword = ref('')
+
+  watch(payPayBankBranchNo, (value) => {
+    const match = /^(\d{3})-(\d{1,7})$/.exec(value)
+    if (!match) return
+
+    payPayBankBranchNo.value = match[1]!
+    payPayBankAccountNo.value = match[2]!
+  })
 
   const refresh = async (options?: { autoConnect?: boolean; connect?: () => void }) => {
     status.value = await getStatus()
@@ -47,6 +69,31 @@ export const useAuthAdmin = () => {
       apiKeys.value = (await listApiKeys()).apiKeys.filter((key) => !key.revokedAt)
       sbiPasskeys.value = (await listSbiPasskeys()).passkeys
       profiles.value = (await listAccountProfiles()).profiles
+      for (const profile of profiles.value) {
+        if (
+          Date.now() - (profileAvailabilityCheckedAt.value[profile.id] ?? 0) <
+          availabilityRefreshMs
+        )
+          continue
+        try {
+          const result = await checkProfileAvailability(profile.id)
+          const value = result.availability[profile.id]
+          if (value) {
+            profileAvailability.value[profile.id] = value
+            profileAvailabilityCheckedAt.value[profile.id] = value.checkedAt
+              ? Date.parse(value.checkedAt)
+              : Date.now()
+          }
+        } catch (cause) {
+          profileAvailability.value[profile.id] = {
+            ok: false,
+            message: cause instanceof Error ? cause.message : String(cause),
+          }
+        } finally {
+          profileAvailabilityCheckedAt.value[profile.id] ||= Date.now()
+        }
+      }
+      cronJobs.value = (await listCronJobs()).jobs
       selectedProfileId.value ||= profiles.value[0]?.id ?? ''
       if (options?.autoConnect && selectedProfileId.value) options.connect?.()
     }
@@ -115,6 +162,11 @@ export const useAuthAdmin = () => {
     await refresh()
   }
 
+  const updateProfileLabel = async (id: string, label: string) => {
+    await updateAccountProfileLabel(id, label)
+    await refresh()
+  }
+
   const addSmbcDirectProfile = async () => {
     const { profile } = await saveSmbcDirectProfile({
       label: smbcLabel.value,
@@ -127,11 +179,26 @@ export const useAuthAdmin = () => {
     await refresh()
   }
 
+  const addPayPayBankProfile = async () => {
+    const { profile } = await savePayPayBankProfile({
+      label: payPayBankLabel.value,
+      branchNo: payPayBankBranchNo.value,
+      accountNo: payPayBankAccountNo.value,
+      password: payPayBankPassword.value,
+    })
+    selectedProfileId.value = profile.id
+    payPayBankPassword.value = ''
+    await refresh()
+  }
+
   return {
     status,
     apiKeys,
     sbiPasskeys,
     profiles,
+    profileAvailability,
+    profileAvailabilityCheckedAt,
+    cronJobs,
     selectedProfileId,
     setupPassword,
     authBusy,
@@ -146,6 +213,10 @@ export const useAuthAdmin = () => {
     smbcUser,
     smbcPassword,
     smbcAccountItemCode,
+    payPayBankLabel,
+    payPayBankBranchNo,
+    payPayBankAccountNo,
+    payPayBankPassword,
     refresh,
     addApiKey,
     saveApiKeySettings,
@@ -153,6 +224,8 @@ export const useAuthAdmin = () => {
     loginWithPasskey,
     addSbiPasskey,
     addSmbcDirectProfile,
+    addPayPayBankProfile,
     removeSbiPasskey,
+    updateProfileLabel,
   }
 }

@@ -4,15 +4,17 @@ import type {
   CommonOperations,
   FinancialProvider,
   InvestmentOperations,
+  InvestmentOrder,
   InvestmentPosition,
   Page,
+  Transaction,
 } from '@mnie/types'
 import type { SbiClientMethods } from './methods/types'
 import { loginWithPasskey } from './session'
 import type { LoginWithPasskeyOptions, SbiClientOptions } from './types'
 
 export type SbiSecOperations = CommonOperations &
-  Pick<InvestmentOperations, 'investments.positions.list'>
+  Pick<InvestmentOperations, 'investments.orders.list' | 'investments.positions.list'>
 
 const money = (value: { currency: string; value: number | null } | undefined) =>
   value?.value == null ? undefined : { currency: value.currency, value: String(value.value) }
@@ -40,8 +42,22 @@ export const createProvider = (client: SbiClientMethods): FinancialProvider<SbiS
   return {
     descriptor: { id: 'sbi-sec', name: 'SBI Securities' },
     accountId: 'primary',
-    capabilities: () => ['accounts:read', 'balances:read', 'investments:read'],
-    operations: () => ['accounts.list', 'balances.list', 'investments.positions.list'],
+    capabilities: () => ['accounts:read', 'balances:read', 'transactions:read', 'investments:read'],
+    operations: () => [
+      'accounts.list',
+      'balances.list',
+      'transactions.list',
+      'investments.positions.list',
+      'investments.orders.list',
+    ],
+    checkAvailability: async () => {
+      try {
+        await client.account.assets.current()
+        return { ok: true }
+      } catch (message) {
+        return { ok: false, message }
+      }
+    },
     invoke: async (name, request) => {
       if (name === 'accounts.list') return { items: [await account()] } as Page<Account> as never
       const currentAccount = await account()
@@ -101,6 +117,49 @@ export const createProvider = (client: SbiClientMethods): FinancialProvider<SbiS
           })),
         ]
         return { items: positions } as Page<InvestmentPosition> as never
+      }
+      if (name === 'investments.orders.list' || name === 'transactions.list') {
+        const input = request as { accountId?: string; from?: string; status?: string; to?: string }
+        if (input.accountId && input.accountId !== currentAccount.id) return { items: [] } as never
+        if (input.from || input.to) {
+          throw new Error("SBI Securities currently provides today's execution history only")
+        }
+        const executions = await client.orders.inquiry.executionsToday()
+        const orders: InvestmentOrder[] = executions.orders.map((order) => ({
+          id: order.id,
+          accountId: currentAccount.id,
+          instrumentId: order.issue.code,
+          instrumentName: order.issue.name,
+          side: order.side,
+          status: order.status,
+          quantity: order.quantity == null ? undefined : String(order.quantity),
+          executedQuantity:
+            order.executedQuantity == null ? undefined : String(order.executedQuantity),
+          price: money(order.executedPrice ?? order.price),
+          orderedAt: order.orderedAt,
+        }))
+        if (name === 'investments.orders.list') {
+          return {
+            items: input.status ? orders.filter((order) => order.status === input.status) : orders,
+          } as Page<InvestmentOrder> as never
+        }
+        const transactions: Transaction[] = orders.map((order) => ({
+          id: order.id,
+          accountId: currentAccount.id,
+          kind: 'investment-trade',
+          direction: order.side === 'buy' ? 'debit' : 'credit',
+          status: order.status === 'executed' ? 'posted' : 'pending',
+          amount: order.price ? { kind: 'money', money: order.price } : null,
+          occurredAt: order.orderedAt ?? new Date().toISOString(),
+          description: `${order.side} ${order.instrumentName ?? order.instrumentId}`,
+          investment: {
+            instrumentId: order.instrumentId,
+            side: order.side,
+            quantity: order.executedQuantity ?? order.quantity,
+            unitPrice: order.price,
+          },
+        }))
+        return { items: transactions } as Page<Transaction> as never
       }
       throw new Error(`unsupported SBI Securities operation: ${name}`)
     },

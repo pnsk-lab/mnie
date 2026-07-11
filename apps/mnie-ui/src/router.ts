@@ -15,7 +15,7 @@ export const router = createRouter({
     { path: '/api-keys', redirect: '/settings/api-keys' },
     { path: '/settings', redirect: '/settings/api-keys' },
     {
-      path: '/settings/:section(api-keys|passkeys)/:mode(new)?',
+      path: '/settings/:section(api-keys|providers)/:mode(new|edit)?/:provider(sbisec|smbc-direct|mobilesuica|paypay-bank)?/:profileId?',
       name: 'settings',
       component: RouteStub,
     },

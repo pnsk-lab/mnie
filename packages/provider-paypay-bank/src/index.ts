@@ -43,6 +43,14 @@ export const createProvider = (profile: PayPayBankProfile): FinancialProvider<Co
     accountId: account.id,
     capabilities: () => ['accounts:read', 'balances:read'],
     operations: () => ['accounts.list', 'balances.list'],
+    checkAvailability: async () => {
+      try {
+        await profile.getBalance()
+        return { ok: true }
+      } catch (message) {
+        return { ok: false, message }
+      }
+    },
     invoke: async (name, request) => {
       if (name === 'accounts.list') return { items: [account] } as Page<Account> as never
       if (name === 'balances.list') {

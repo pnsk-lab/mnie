@@ -2,12 +2,26 @@ import { eq } from 'drizzle-orm'
 import { Hono } from 'hono'
 import type { MiddlewareHandler } from 'hono'
 import {
+  createProvider as createMobileSuicaProvider,
+  importSession as importMobileSuicaSession,
   login as loginMobileSuica,
   exportSession as exportMobileSuicaSession,
+  type MobileSuicaSession,
   type MobileSuicaProfile,
 } from '../../../../packages/provider-mobile-suica/src'
-import type { PlaintextStoredWebAuthnCredential } from '@mnie/provider-sbi-sec'
+import { createProvider as createSbiSecProvider } from '@mnie/provider-sbi-sec'
+import {
+  createProvider as createSmbcDirectProvider,
+  exportSession as exportSmbcDirectSession,
+  importSession as importSmbcDirectSession,
+  type SmbcDirectSession,
+} from '@mnie/provider-smbc-direct'
+import type {
+  AvailabilityCheckResult,
+  PlaintextStoredWebAuthnCredential,
+} from '@mnie/provider-sbi-sec'
 import type { AppBindings } from '../context'
+import type { CronSystem } from '../cron'
 import { accountProfiles, sbiPasskeys } from '../db/schema'
 import {
   createApiKey,
@@ -18,6 +32,8 @@ import {
 } from '../security/api-keys'
 import { randomId } from '../security/crypto'
 import { deleteSecret, saveSecret } from '../security/keyring'
+import { readSecret } from '../security/keyring'
+import { connectSbi } from '../rpc/sbi-session'
 
 export interface StoredSbiPasskeySecret {
   credential: PlaintextStoredWebAuthnCredential
@@ -33,11 +49,60 @@ export interface StoredSmbcDirectSecret {
   session?: unknown
 }
 
+export interface StoredPayPayBankSecret {
+  branchNo: string
+  accountNo: string
+  password: string
+  session?: unknown
+}
+
+export interface StoredMobileSuicaSecret {
+  session?: MobileSuicaSession
+  user?: string
+  password?: string
+}
+
 interface PendingMobileSuicaLogin {
+  label: string
+  user: string
+  password: string
+  createProfile: boolean
   answer: (value: string) => void
   login: Promise<MobileSuicaProfile>
   id: string
   keyringAccount: string
+}
+
+const availabilityFailure = (message: unknown): AvailabilityCheckResult => ({ ok: false, message })
+
+const availabilityMessage = (cause: unknown) =>
+  cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : String(cause)
+
+const serializableAvailability = async (availability: Promise<AvailabilityCheckResult>) => {
+  const result = await availability
+  return result.ok ? result : availabilityFailure(availabilityMessage(result.message))
+}
+
+const availabilityTimeoutMs = 20_000
+
+const withAvailabilityTimeout = async <T>(operation: Promise<T>, label: string): Promise<T> => {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(
+          () =>
+            reject(
+              new Error(`${label} availability check timed out after ${availabilityTimeoutMs}ms`),
+            ),
+          availabilityTimeoutMs,
+        )
+      }),
+    ])
+  } finally {
+    if (timeout) clearTimeout(timeout)
+  }
 }
 
 const requireOwnerSession: MiddlewareHandler<AppBindings> = async (c, next) => {
@@ -45,7 +110,7 @@ const requireOwnerSession: MiddlewareHandler<AppBindings> = async (c, next) => {
   await next()
 }
 
-export const createAdminRoutes = () => {
+export const createAdminRoutes = (cronSystem: CronSystem) => {
   const app = new Hono<AppBindings>()
   const mobileSuicaLogins = new Map<string, PendingMobileSuicaLogin>()
   app.use('*', requireOwnerSession)
@@ -87,11 +152,122 @@ export const createAdminRoutes = () => {
     })
   })
 
-  app.post('/mobilesuica/captcha', async (c) => {
-    const body = await c.req.json<{ baseURL?: string; user?: string; password?: string }>()
-    if (!body.baseURL || !body.user?.trim() || !body.password) {
-      return c.json({ error: 'baseURL, user, and password are required' }, 400)
+  let availabilityRequest:
+    | Promise<{ availability: Record<string, AvailabilityCheckResult> }>
+    | undefined
+  app.post('/profiles/availability', async (c) => {
+    const body = await c.req.json<{ profileId?: string }>().catch(() => ({ profileId: undefined }))
+    const cached = cronSystem.availability(body.profileId)
+    return c.json({
+      availability: Object.fromEntries(
+        Object.entries(cached).map(([id, value]) => [
+          id,
+          { ...value.result, checkedAt: value.checkedAt.toISOString() },
+        ]),
+      ),
+    })
+  })
+
+  app.post('/profiles/availability/live', async (c) => {
+    if (availabilityRequest) return c.json(await availabilityRequest)
+
+    availabilityRequest = (async () => {
+      const db = c.get('db')
+      const body = await c.req
+        .json<{ profileId?: string }>()
+        .catch(() => ({ profileId: undefined }))
+      const profiles = (
+        await db.select().from(accountProfiles).orderBy(accountProfiles.createdAt)
+      ).filter((profile) => !body.profileId || profile.id === body.profileId)
+      const availability = await Promise.all(
+        profiles.map(async (profile) => {
+          try {
+            if (profile.provider === 'sbisec') {
+              return [
+                profile.id,
+                await withAvailabilityTimeout(
+                  serializableAvailability(
+                    createSbiSecProvider(
+                      await connectSbi(db, c.get('config'), profile.id),
+                    ).checkAvailability(),
+                  ),
+                  `SBI Securities (${profile.label})`,
+                ),
+              ] as const
+            }
+
+            if (profile.provider === 'smbc-direct') {
+              const secret = await readSecret<StoredSmbcDirectSecret>(profile.keyringAccount)
+              if (!secret.session) {
+                return [
+                  profile.id,
+                  availabilityFailure(
+                    'SMBC Direct session is not available; reconnect and finish two-factor authentication',
+                  ),
+                ] as const
+              }
+              const smbcProfile = await importSmbcDirectSession(secret.session as SmbcDirectSession)
+              const result = await withAvailabilityTimeout(
+                serializableAvailability(createSmbcDirectProvider(smbcProfile).checkAvailability()),
+                `SMBC Direct (${profile.label})`,
+              )
+              if (result.ok) {
+                await saveSecret(profile.keyringAccount, {
+                  ...secret,
+                  session: exportSmbcDirectSession(smbcProfile),
+                } satisfies StoredSmbcDirectSecret)
+              }
+              return [profile.id, result] as const
+            }
+
+            const secret = await readSecret<StoredMobileSuicaSecret>(profile.keyringAccount)
+            if (!secret.session) {
+              return [
+                profile.id,
+                availabilityFailure('Mobile Suica session is not available; reconnect'),
+              ] as const
+            }
+            const mobileSuicaProfile = await importMobileSuicaSession(secret.session)
+            const result = await withAvailabilityTimeout(
+              serializableAvailability(
+                createMobileSuicaProvider(mobileSuicaProfile).checkAvailability(),
+              ),
+              `Mobile Suica (${profile.label})`,
+            )
+            if (result.ok) {
+              await saveSecret(profile.keyringAccount, {
+                ...secret,
+                session: exportMobileSuicaSession(mobileSuicaProfile),
+              } satisfies StoredMobileSuicaSecret)
+            }
+            return [profile.id, result] as const
+          } catch (cause) {
+            return [profile.id, availabilityFailure(availabilityMessage(cause))] as const
+          }
+        }),
+      )
+      return { availability: Object.fromEntries(availability) }
+    })()
+
+    try {
+      return c.json(await availabilityRequest)
+    } finally {
+      availabilityRequest = undefined
     }
+  })
+
+  app.get('/cron-jobs', (c) => c.json({ jobs: cronSystem.jobs() }))
+
+  app.post('/mobilesuica/captcha', async (c) => {
+    const body = await c.req.json<{ label?: string; user?: string; password?: string }>()
+    const baseURL = c.get('config').mobileSuicaBaseUrl
+    if (!baseURL) return c.json({ error: 'MOBILE_SUICA_BASE_URL is required' }, 500)
+    if (!body.label?.trim() || !body.user?.trim() || !body.password) {
+      return c.json({ error: 'label, user and password are required' }, 400)
+    }
+    const profileLabel = body.label.trim()
+    const profileUser = body.user.trim()
+    const profilePassword = body.password
 
     let publishCaptcha: ((value: { id: string; imageDataUrl: string }) => void) | undefined
     let rejectCaptcha: ((reason?: unknown) => void) | undefined
@@ -101,7 +277,7 @@ export const createAdminRoutes = () => {
     })
     let loginPromise: PendingMobileSuicaLogin['login'] | undefined
     loginPromise = loginMobileSuica({
-      baseURL: body.baseURL,
+      baseURL,
       user: body.user.trim(),
       password: body.password,
       onCaptcha: async ({ image, contentType }) => {
@@ -109,6 +285,10 @@ export const createAdminRoutes = () => {
         const answer = new Promise<string>((resolve) => {
           if (!loginPromise) throw new Error('Mobile Suica login was not initialized')
           mobileSuicaLogins.set(id, {
+            label: profileLabel,
+            user: profileUser,
+            password: profilePassword,
+            createProfile: true,
             answer: resolve,
             login: loginPromise,
             id: randomId('mobilesuica'),
@@ -135,21 +315,74 @@ export const createAdminRoutes = () => {
     mobileSuicaLogins.delete(c.req.param('id'))
     pending.answer(body.answer.trim())
     const profile = await pending.login
-    try {
-      const now = new Date()
-      await saveSecret(pending.keyringAccount, { session: exportMobileSuicaSession(profile) })
+    const now = new Date()
+    await saveSecret(pending.keyringAccount, {
+      session: exportMobileSuicaSession(profile),
+      user: pending.user,
+      password: pending.password,
+    } satisfies StoredMobileSuicaSecret)
+    if (pending.createProfile) {
       await c.get('db').insert(accountProfiles).values({
         id: pending.id,
         provider: 'mobilesuica',
-        label: 'Mobile Suica',
+        label: pending.label,
         keyringAccount: pending.keyringAccount,
         createdAt: now,
         updatedAt: now,
       })
-      return c.json({ usageHistory: await profile.getUsageHistory(), profile: { id: pending.id } })
-    } finally {
-      await profile.logout()
+    } else {
+      await c
+        .get('db')
+        .update(accountProfiles)
+        .set({ updatedAt: now })
+        .where(eq(accountProfiles.id, pending.id))
     }
+    return c.json({ profile: { id: pending.id } })
+  })
+
+  app.post('/mobilesuica/reauth/:profileId/captcha', async (c) => {
+    const baseURL = c.get('config').mobileSuicaBaseUrl
+    if (!baseURL) return c.json({ error: 'MOBILE_SUICA_BASE_URL is required' }, 500)
+    const profile = await c.get('db').query.accountProfiles.findFirst({
+      where: (table, { eq }) => eq(table.id, c.req.param('profileId')),
+    })
+    if (!profile || profile.provider !== 'mobilesuica')
+      return c.json({ error: 'profile not found' }, 404)
+    const secret = await readSecret<StoredMobileSuicaSecret>(profile.keyringAccount)
+    if (!secret.user || !secret.password)
+      return c.json({ error: 'Mobile Suica credentials are not stored' }, 409)
+    let publishCaptcha: ((value: { id: string; imageDataUrl: string }) => void) | undefined
+    const captcha = new Promise<{ id: string; imageDataUrl: string }>((resolve) => {
+      publishCaptcha = resolve
+    })
+    let loginPromise: PendingMobileSuicaLogin['login'] | undefined
+    loginPromise = loginMobileSuica({
+      baseURL,
+      user: secret.user,
+      password: secret.password,
+      onCaptcha: async ({ image, contentType }) => {
+        const id = randomId('mobilesuica-reauth')
+        const answer = new Promise<string>((resolve) => {
+          mobileSuicaLogins.set(id, {
+            label: profile.label,
+            user: secret.user as string,
+            password: secret.password as string,
+            createProfile: false,
+            answer: resolve,
+            login: loginPromise as Promise<MobileSuicaProfile>,
+            id: profile.id,
+            keyringAccount: profile.keyringAccount,
+          })
+        })
+        publishCaptcha?.({
+          id,
+          imageDataUrl: `data:${contentType};base64,${Buffer.from(image).toString('base64')}`,
+        })
+        return answer
+      },
+    })
+    void loginPromise.catch(() => undefined)
+    return c.json(await captcha)
   })
 
   app.post('/profiles/smbc-direct', async (c) => {
@@ -192,6 +425,80 @@ export const createAdminRoutes = () => {
       },
       201,
     )
+  })
+
+  app.post('/profiles/paypay-bank', async (c) => {
+    const body = await c.req.json<{
+      label?: string
+      branchNo?: string
+      accountNo?: string
+      password?: string
+    }>()
+    if (
+      !body.label?.trim() ||
+      !body.branchNo?.trim() ||
+      !body.accountNo?.trim() ||
+      !body.password
+    ) {
+      return c.json({ error: 'label, branchNo, accountNo, and password are required' }, 400)
+    }
+    if (!/^\d{3}$/.test(body.branchNo.trim())) {
+      return c.json({ error: 'branchNo must be three digits' }, 400)
+    }
+    if (!/^\d{7}$/.test(body.accountNo.trim())) {
+      return c.json({ error: 'accountNo must be seven digits' }, 400)
+    }
+    const now = new Date()
+    const id = randomId('paypay-bank')
+    const keyringAccount = `paypay-bank:${id}`
+    await saveSecret(keyringAccount, {
+      branchNo: body.branchNo.trim(),
+      accountNo: body.accountNo.trim(),
+      password: body.password,
+    } satisfies StoredPayPayBankSecret)
+    await c.get('db').insert(accountProfiles).values({
+      id,
+      provider: 'paypay-bank',
+      label: body.label.trim(),
+      keyringAccount,
+      createdAt: now,
+      updatedAt: now,
+    })
+    return c.json(
+      {
+        profile: {
+          id,
+          provider: 'paypay-bank',
+          label: body.label.trim(),
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      201,
+    )
+  })
+
+  app.patch('/profiles/:id', async (c) => {
+    const body = await c.req.json<{ label?: string }>()
+    if (!body.label?.trim()) return c.json({ error: 'label is required' }, 400)
+    const profile = await c.get('db').query.accountProfiles.findFirst({
+      where: (table, { eq }) => eq(table.id, c.req.param('id')),
+    })
+    if (!profile) return c.json({ error: 'profile not found' }, 404)
+    const now = new Date()
+    await c
+      .get('db')
+      .update(accountProfiles)
+      .set({ label: body.label.trim(), updatedAt: now })
+      .where(eq(accountProfiles.id, profile.id))
+    if (profile.provider === 'sbisec') {
+      await c
+        .get('db')
+        .update(sbiPasskeys)
+        .set({ label: body.label.trim(), updatedAt: now })
+        .where(eq(sbiPasskeys.id, profile.id))
+    }
+    return c.json({ profile: { ...profile, label: body.label.trim(), updatedAt: now } })
   })
 
   app.post('/sbi-passkeys', async (c) => {

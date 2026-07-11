@@ -15,21 +15,65 @@ export interface MobileSuicaLoginOptions {
   onCaptcha: (captcha: MobileSuicaCaptcha) => string | Promise<string>
 }
 
-export interface MobileSuicaUsageHistoryItem {
+interface ParsedHistoryTableRowBase {
+  id: string
   date: string
-  type: string
-  detail: string
+  typeFrom: string
+  placeFrom: string
+  typeTo: string
+  placeTo: string
+  balanceText: string
+  amountText: string
   amount: number | null
   balance: number | null
 }
 
+interface ParsedHistoryTableRowRail extends ParsedHistoryTableRowBase {
+  kind: 'rail'
+  typeFrom: '入' | '＊入'
+  typeTo: '出'
+}
+
+interface ParsedHistoryTableRowCharge extends ParsedHistoryTableRowBase {
+  kind: 'charge'
+  typeFrom: 'ｶｰﾄﾞ'
+  placeFrom: 'ﾓﾊﾞｲﾙ'
+}
+
+interface ParsedHistoryTableRowPayment extends ParsedHistoryTableRowBase {
+  kind: 'payment'
+  typeFrom: '物販'
+}
+
+interface ParsedHistoryTableRowBus extends ParsedHistoryTableRowBase {
+  kind: 'bus'
+  typeFrom: 'ﾊﾞｽ等'
+}
+
+interface ParsedHistoryTableRowCarryover extends ParsedHistoryTableRowBase {
+  kind: 'carryover'
+  typeFrom: '繰'
+}
+
+interface ParsedHistoryTableRowOther extends ParsedHistoryTableRowBase {
+  kind: 'other'
+}
+
+type ParsedHistoryTableRow =
+  | ParsedHistoryTableRowRail
+  | ParsedHistoryTableRowCharge
+  | ParsedHistoryTableRowPayment
+  | ParsedHistoryTableRowBus
+  | ParsedHistoryTableRowCarryover
+  | ParsedHistoryTableRowOther
+
 export interface MobileSuicaProfile {
   readonly baseURL: string
   readonly session: { export(): MobileSuicaSession }
-  /** Reads the 100 SF (electronic money) usage-history rows shown by Mobile Suica. */
-  getUsageHistory(): Promise<MobileSuicaUsageHistoryItem[]>
   logout(): Promise<void>
 }
+
+const historyReaders = new WeakMap<MobileSuicaProfile, () => Promise<ParsedHistoryTableRow[]>>()
 
 /** Converts an authenticated Mobile Suica session to the provider-neutral API. */
 export const createProvider = (
@@ -46,33 +90,24 @@ export const createProvider = (
     accountId: account.id,
     capabilities: () => ['accounts:read', 'transactions:read', 'transit-cards:read'],
     operations: () => ['accounts.list', 'transactions.list'],
+    checkAvailability: async () => {
+      try {
+        const readHistory = historyReaders.get(profile)
+        if (!readHistory) {
+          return { ok: false, message: 'Mobile Suica profile does not have a transaction reader' }
+        }
+        await readHistory()
+        return { ok: true }
+      } catch (message) {
+        return { ok: false, message }
+      }
+    },
     invoke: async (name) => {
       if (name === 'accounts.list') return { items: [account] } as Page<Account> as never
       if (name === 'transactions.list') {
-        const items: Transaction[] = (await profile.getUsageHistory()).map((item, index) => ({
-          id: `${item.date}:${index}`,
-          accountId: account.id,
-          type: /チャージ|入金/i.test(item.type) ? 'charge' : 'transport',
-          status: 'posted',
-          ...(item.amount === null
-            ? {}
-            : {
-                amount: {
-                  kind: 'money' as const,
-                  money: { currency: 'JPY', value: String(item.amount) },
-                },
-              }),
-          occurredAt: item.date,
-          description: [item.type, item.detail].filter(Boolean).join(' '),
-          ...(item.balance === null
-            ? {}
-            : {
-                balanceAfter: {
-                  kind: 'money' as const,
-                  money: { currency: 'JPY', value: String(item.balance) },
-                },
-              }),
-        }))
+        const readHistory = historyReaders.get(profile)
+        if (!readHistory) throw new Error('Mobile Suica profile does not have a transaction reader')
+        const items = (await readHistory()).map((row) => transactionFromHistoryRow(account.id, row))
         return { items } as Page<Transaction> as never
       }
       throw new Error(`unsupported Mobile Suica operation: ${name}`)
@@ -279,22 +314,90 @@ const tableRows = (html: string) =>
     ),
   )
 
-export const parseMobileSuicaUsageHistory = (html: string): MobileSuicaUsageHistoryItem[] => {
-  const records: MobileSuicaUsageHistoryItem[] = []
+const parseMobileSuicaUsageHistory = (html: string): ParsedHistoryTableRow[] => {
+  const records: ParsedHistoryTableRow[] = []
   for (const cells of tableRows(html)) {
     // The first cell is the print-selection checkbox. The 100 history rows in
     // the observed page have eight cells, with the date in the second cell.
     if (cells.length < 8 || !/\d{4}|\d{1,2}[/.月]/.test(cells[1] ?? '')) continue
-    records.push({
+    const row: ParsedHistoryTableRowBase = {
+      id: `${cells[1] ?? ''}:${records.length}`,
       date: cells[1] ?? '',
-      type: cells[2] ?? '',
-      detail: [cells[4], cells[6]].filter((value) => value?.length).join(' '),
-      amount: parseAmount(cells[3] ?? ''),
-      balance: parseAmount(cells[5] ?? ''),
-    })
+      typeFrom: cells[2] ?? '',
+      placeFrom: cells[3] ?? '',
+      typeTo: cells[4] ?? '',
+      placeTo: cells[5] ?? '',
+      balanceText: cells[6] ?? '',
+      amountText: cells[7] ?? '',
+      balance: parseAmount(cells[6] ?? ''),
+      amount: parseAmount(cells[7] ?? ''),
+    }
+    if ((row.typeFrom === '入' || row.typeFrom === '＊入') && row.typeTo === '出') {
+      records.push({ ...row, kind: 'rail', typeFrom: row.typeFrom, typeTo: '出' })
+    } else if (row.typeFrom === 'ｶｰﾄﾞ' && row.placeFrom === 'ﾓﾊﾞｲﾙ') {
+      records.push({ ...row, kind: 'charge', typeFrom: 'ｶｰﾄﾞ', placeFrom: 'ﾓﾊﾞｲﾙ' })
+    } else if (row.typeFrom === '物販') {
+      records.push({ ...row, kind: 'payment', typeFrom: '物販' })
+    } else if (row.typeFrom === 'ﾊﾞｽ等') {
+      records.push({ ...row, kind: 'bus', typeFrom: 'ﾊﾞｽ等' })
+    } else if (row.typeFrom === '繰') {
+      records.push({ ...row, kind: 'carryover', typeFrom: '繰' })
+    } else {
+      records.push({ ...row, kind: 'other' })
+    }
   }
   if (records.length === 0) throw new Error('usage history page did not include any usage rows')
   return records
+}
+
+const yenAmount = (value: number | null) =>
+  value === null
+    ? null
+    : { kind: 'money' as const, money: { currency: 'JPY', value: String(value) } }
+
+const transactionFromHistoryRow = (accountId: string, row: ParsedHistoryTableRow): Transaction => {
+  const base = {
+    id: row.id,
+    accountId,
+    status: 'posted' as const,
+    amount: yenAmount(row.amount),
+    occurredAt: row.date,
+    description: [row.typeFrom, row.placeFrom, row.typeTo, row.placeTo].filter(Boolean).join(' '),
+    ...(row.balance === null ? {} : { balanceAfter: yenAmount(row.balance)! }),
+  }
+  switch (row.kind) {
+    case 'rail':
+      return {
+        ...base,
+        kind: 'transit',
+        direction: 'debit',
+        transit: {
+          service: 'rail',
+          from: row.placeFrom || undefined,
+          to: row.placeTo || undefined,
+        },
+      }
+    case 'bus':
+      return {
+        ...base,
+        kind: 'transit',
+        direction: 'debit',
+        transit: { service: 'bus', from: row.placeFrom || undefined, to: row.placeTo || undefined },
+      }
+    case 'payment':
+      return {
+        ...base,
+        kind: 'payment',
+        direction: 'debit',
+        merchant: row.placeFrom || row.placeTo || undefined,
+      }
+    case 'charge':
+      return { ...base, kind: 'charge', direction: 'credit', charge: { method: 'card' } }
+    case 'carryover':
+      return { ...base, kind: 'other', direction: 'neutral' }
+    case 'other':
+      return { ...base, kind: 'other', direction: 'neutral' }
+  }
 }
 
 const submit = async (
@@ -401,37 +504,40 @@ const createProfile = (
   password: string,
   jar: CookieJar,
   historyUrl: URL,
-): MobileSuicaProfile => ({
-  baseURL,
-  session: {
-    export: () => ({
-      baseURL,
-      user,
-      password,
-      cookies: jar.export(),
-      historyURL: historyUrl.toString(),
-    }),
-  },
-  async getUsageHistory() {
+): MobileSuicaProfile => {
+  const profile: MobileSuicaProfile = {
+    baseURL,
+    session: {
+      export: () => ({
+        baseURL,
+        user,
+        password,
+        cookies: jar.export(),
+        historyURL: historyUrl.toString(),
+      }),
+    },
+    async logout() {
+      const response = await fetchWithCookies(
+        new URL('/ka/lg/LogoutComplete.aspx?logout=pc', baseURL),
+        {
+          method: 'POST',
+          headers: {
+            ...browserHeaders,
+            origin: baseURL,
+            referer: historyUrl.toString(),
+          },
+        },
+        jar,
+      )
+      if (!response.ok) throw new Error(`logout request failed: HTTP ${response.status}`)
+    },
+  }
+  historyReaders.set(profile, async () => {
     const html = await submit(historyUrl, {}, jar, historyUrl, 'usage history request')
     return parseMobileSuicaUsageHistory(html)
-  },
-  async logout() {
-    const response = await fetchWithCookies(
-      new URL('/ka/lg/LogoutComplete.aspx?logout=pc', baseURL),
-      {
-        method: 'POST',
-        headers: {
-          ...browserHeaders,
-          origin: baseURL,
-          referer: historyUrl.toString(),
-        },
-      },
-      jar,
-    )
-    if (!response.ok) throw new Error(`logout request failed: HTTP ${response.status}`)
-  },
-})
+  })
+  return profile
+}
 
 export const exportSession = (profile: MobileSuicaProfile): MobileSuicaSession =>
   profile.session.export()

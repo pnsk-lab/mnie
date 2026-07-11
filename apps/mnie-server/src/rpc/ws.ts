@@ -256,6 +256,14 @@ const handleRpc = async (
     return result(request.id, { connected: true, provider: 'smbc-direct' })
   }
 
+  if (request.method === 'checkAvailability') {
+    assertScope(state, 'read')
+    if (!state.providerClient) {
+      return result(request.id, { ok: false, message: 'provider is not connected' })
+    }
+    return result(request.id, await state.providerClient.checkAvailability())
+  }
+
   if (
     state.providerClient &&
     typeof request.method === 'string' &&

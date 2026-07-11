@@ -39,18 +39,33 @@ export interface SbiPasskey {
 
 export interface AccountProfile {
   id: string
-  provider: 'sbisec' | 'smbc-direct' | 'mobilesuica'
+  provider: 'sbisec' | 'smbc-direct' | 'mobilesuica' | 'paypay-bank'
   label: string
   createdAt: string
   updatedAt: string
 }
 
-export interface MobileSuicaUsageHistoryItem {
-  date: string
+export type ProfileAvailability =
+  | { ok: true; checkedAt?: string }
+  | { ok: false; message: unknown; checkedAt?: string }
+
+export interface CronJob {
+  id: string
+  label: string
+  schedule: string
+  running: boolean
+  lastRunAt?: string
+  lastSuccessAt?: string
+  lastError?: string
+}
+
+export interface MobileSuicaTransaction {
+  id: string
   type: string
-  detail: string
-  amount: number | null
-  balance: number | null
+  occurredAt: string
+  description: string
+  amount?: { kind: 'money'; money: { currency: string; value: string } }
+  balanceAfter?: { kind: 'money'; money: { currency: string; value: string } }
 }
 
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
@@ -127,6 +142,19 @@ export const deleteSbiPasskey = (id: string) =>
 
 export const listAccountProfiles = () => request<{ profiles: AccountProfile[] }>('/admin/profiles')
 
+export const checkAccountProfileAvailability = () =>
+  request<{ availability: Record<string, ProfileAvailability> }>('/admin/profiles/availability', {
+    method: 'POST',
+  })
+
+export const checkProfileAvailability = (profileId: string) =>
+  request<{ availability: Record<string, ProfileAvailability> }>('/admin/profiles/availability', {
+    method: 'POST',
+    body: JSON.stringify({ profileId }),
+  })
+
+export const listCronJobs = () => request<{ jobs: CronJob[] }>('/admin/cron-jobs')
+
 export const saveSmbcDirectProfile = (payload: {
   label: string
   user: string
@@ -138,11 +166,28 @@ export const saveSmbcDirectProfile = (payload: {
     body: JSON.stringify(payload),
   })
 
+export const savePayPayBankProfile = (payload: {
+  label: string
+  branchNo: string
+  accountNo: string
+  password: string
+}) =>
+  request<{ profile: AccountProfile }>('/admin/profiles/paypay-bank', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+
 export const deleteAccountProfile = (id: string) =>
   request<{ ok: true }>(`/admin/profiles/${id}`, { method: 'DELETE' })
 
+export const updateAccountProfileLabel = (id: string, label: string) =>
+  request<{ profile: AccountProfile }>(`/admin/profiles/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ label }),
+  })
+
 export const createMobileSuicaCaptcha = (payload: {
-  baseURL: string
+  label: string
   user: string
   password: string
 }) =>
@@ -151,14 +196,16 @@ export const createMobileSuicaCaptcha = (payload: {
     body: JSON.stringify(payload),
   })
 
+export const createMobileSuicaReauthCaptcha = (profileId: string) =>
+  request<{ id: string; imageDataUrl: string }>(`/admin/mobilesuica/reauth/${profileId}/captcha`, {
+    method: 'POST',
+  })
+
 export const submitMobileSuicaCaptcha = (id: string, answer: string) =>
-  request<{ usageHistory: MobileSuicaUsageHistoryItem[]; profile: { id: string } }>(
-    `/admin/mobilesuica/captcha/${id}`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ answer }),
-    },
-  )
+  request<{ profile: { id: string } }>(`/admin/mobilesuica/captcha/${id}`, {
+    method: 'POST',
+    body: JSON.stringify({ answer }),
+  })
 
 export const createRpcSocket = () => {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'

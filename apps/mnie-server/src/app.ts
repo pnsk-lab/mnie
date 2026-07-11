@@ -5,6 +5,7 @@ import { mcpAuthRouter } from '@hono/mcp'
 import type { ServerConfig } from './config'
 import type { AppBindings } from './context'
 import type { Db } from './db'
+import { createCronSystem } from './cron'
 import { createOAuthServerProvider } from './security/oauth-provider'
 import { authenticateRequest } from './security/http-auth'
 import { createAdminRoutes } from './routes/admin'
@@ -15,6 +16,7 @@ import { createRpcWebSocket } from './rpc/ws'
 
 export const createServerApp = (db: Db, config: ServerConfig) => {
   const app = new Hono<AppBindings>()
+  const cronSystem = createCronSystem(db, config)
   const rpcWebSocket = createRpcWebSocket(db, config)
   const oauthProvider = createOAuthServerProvider(db, config)
 
@@ -59,7 +61,7 @@ export const createServerApp = (db: Db, config: ServerConfig) => {
   )
   app.get('/ws', rpcWebSocket.upgradeWebSocket)
   app.route('/auth', createAuthRoutes())
-  app.route('/admin', createAdminRoutes())
+  app.route('/admin', createAdminRoutes(cronSystem))
   app.route('/oauth', createOAuthRoutes())
   app.route('/mcp', createMcpRoutes())
 

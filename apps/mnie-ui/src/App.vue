@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { AnimatePresence } from 'motion-v'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { revokeApiKey } from './api'
 import AppHeader from './components/layout/AppHeader.vue'
@@ -56,6 +56,9 @@ const {
   apiKeys,
   sbiPasskeys,
   profiles,
+  profileAvailability,
+  profileAvailabilityCheckedAt,
+  cronJobs,
   selectedProfileId,
   setupPassword,
   authBusy,
@@ -70,6 +73,10 @@ const {
   smbcUser,
   smbcPassword,
   smbcAccountItemCode,
+  payPayBankLabel,
+  payPayBankBranchNo,
+  payPayBankAccountNo,
+  payPayBankPassword,
   refresh,
   addApiKey,
   saveApiKeySettings,
@@ -77,7 +84,9 @@ const {
   loginWithPasskey,
   addSbiPasskey,
   addSmbcDirectProfile,
+  addPayPayBankProfile,
   removeSbiPasskey,
+  updateProfileLabel,
 } = useAuthAdmin()
 
 const {
@@ -207,15 +216,30 @@ watch(
   { immediate: true },
 )
 
+let availabilityPolling: number | undefined
+
 onMounted(async () => {
   try {
     await refreshAndMaybeConnect()
-  } catch {
-    status.value = { configured: true, authenticated: false }
+  } catch (cause) {
+    // A failed profile availability check must not turn an already-authenticated
+    // session into the login screen. The auth status is authoritative and was
+    // fetched at the start of refresh().
+    console.error('Failed to initialize admin data', cause)
   } finally {
     authReady.value = true
   }
   await loadOAuthApproval()
+  availabilityPolling = window.setInterval(
+    () => {
+      if (status.value.authenticated) void refresh()
+    },
+    10 * 60 * 1000,
+  )
+})
+
+onUnmounted(() => {
+  if (availabilityPolling) window.clearInterval(availabilityPolling)
 })
 </script>
 
@@ -347,9 +371,16 @@ onMounted(async () => {
           v-model:smbc-user="smbcUser"
           v-model:smbc-password="smbcPassword"
           v-model:smbc-account-item-code="smbcAccountItemCode"
+          v-model:pay-pay-bank-label="payPayBankLabel"
+          v-model:pay-pay-bank-branch-no="payPayBankBranchNo"
+          v-model:pay-pay-bank-account-no="payPayBankAccountNo"
+          v-model:pay-pay-bank-password="payPayBankPassword"
           :api-keys="apiKeys"
           :sbi-passkeys="sbiPasskeys"
           :profiles="profiles"
+          :profile-availability="profileAvailability"
+          :profile-availability-checked-at="profileAvailabilityCheckedAt"
+          :cron-jobs="cronJobs"
           :smbc-qr-url="smbcQrUrl"
           :smbc-balance="smbcBalance"
           @add-api-key="addApiKey"
@@ -358,9 +389,11 @@ onMounted(async () => {
           @revoke-api-key="revokeAndRefresh"
           @add-sbi-passkey="addSbiPasskeyAndConnect"
           @add-smbc-direct-profile="addSmbcDirectProfile"
+          @add-pay-pay-bank-profile="addPayPayBankProfile"
           @finish-smbc-2fa="finishSmbc2fa"
           @connect="connect"
           @remove-sbi-passkey="removeSbiPasskey"
+          @update-profile-label="updateProfileLabel"
         />
       </template>
     </section>
