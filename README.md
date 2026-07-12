@@ -76,6 +76,34 @@ docker run --rm -it --name mnie \
 nix run 'github:pnsk-lab/mnie#mnie'
 ```
 
+### NixOS (systemd)
+
+The flake exports a NixOS module that runs Mnie as a native systemd service:
+
+```nix
+{
+  inputs.mnie.url = "github:pnsk-lab/mnie";
+
+  outputs =
+    { nixpkgs, mnie, ... }:
+    {
+      nixosConfigurations.my-host = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        modules = [
+          mnie.nixosModules.systemd
+          {
+            services.mnie = {
+              enable = true;
+              runtime = "native";
+              envFile = /etc/mnie.env;
+            };
+          }
+        ];
+      };
+    };
+}
+```
+
 ## Acknowledgment
 
 - This project is inspired by [MoneyForward](https://moneyforward.com/).

@@ -285,13 +285,19 @@ export const useTradingSession = (
 
   const selectedStock = computed(() => {
     const selectedRef = stockRefFromId(selectedStockId.value)
-    const exact =
-      stockById.value.get(selectedStockId.value) ??
-      stocks.value.find((stock) => stock.symbol === selectedStockId.value)
-    if (exact) return exact
+    const exact = stockById.value.get(selectedStockId.value)
+    const codeMatch = stockByCode.value.get(selectedStockCode.value)
+
+    // A route may contain only an issue code (for example `/trade/1306`). In that
+    // case a previously created market-less placeholder must not shadow the
+    // market-qualified issue loaded from search, positions, or the watchlist.
+    if (!selectedRef.market && !exact?.market && codeMatch?.market) return codeMatch
+
+    const symbolMatch = stocks.value.find((stock) => stock.symbol === selectedStockId.value)
+    const resolvedExact = exact ?? symbolMatch
+    if (resolvedExact) return resolvedExact
 
     if (!selectedRef.market) {
-      const codeMatch = stockByCode.value.get(selectedStockCode.value)
       if (codeMatch) return codeMatch
     }
 
@@ -1073,17 +1079,45 @@ export const useTradingSession = (
     chartNotice.value = null
     const stock = selectedStock.value
     if (!connected.value || !stock.code) return
-    if (!providerOperations.value.has('market.issue.chart')) {
-      chartNotice.value = {
-        title: '価格チャートは未対応です',
-        detail: 'この provider は市場データを提供していません。',
-      }
-      return
-    }
 
     const requestId = ++chartHistoryRequestId
-    const chartOptions = chartRangeOptions[chartRange.value]
     try {
+      if (!stock.market) {
+        const domesticMarkets: CashOrderMarket[] = ['XTKS', 'XNGO', 'XFKA', 'XSAP']
+        const results = await Promise.allSettled(
+          domesticMarkets.map((market) =>
+            rpcCall<RecordLike>('market.issue.search', {
+              query: stock.code,
+              market,
+              limit: 12,
+            }),
+          ),
+        )
+        if (requestId !== chartHistoryRequestId) return
+
+        const matches = fulfilledValues(results)
+          .flatMap((result) => asArray(result.issues))
+          .map(issueFrom)
+          .filter((issue) => issue.code === stock.code && issue.market)
+        const matchesByMarket = new Map(matches.map((issue) => [issue.market, issue]))
+        if (matchesByMarket.size === 0) {
+          throw new Error(`銘柄 ${stock.code} の市場を特定できませんでした`)
+        }
+        if (matchesByMarket.size > 1) {
+          throw new Error(
+            `銘柄 ${stock.code} は複数市場に存在します: ${[...matchesByMarket.keys()].join(', ')}`,
+          )
+        }
+
+        const [resolvedIssue] = matchesByMarket.values()
+        if (!resolvedIssue) throw new Error(`銘柄 ${stock.code} の市場を特定できませんでした`)
+        const resolvedStock = stockFromIssue(resolvedIssue)
+        mergeStocks([resolvedStock])
+        selectStock(resolvedStock)
+        return
+      }
+
+      const chartOptions = chartRangeOptions[chartRange.value]
       const timeZone = selectedStockTimeZone.value
       if (!timeZone) {
         throw new Error(`Unsupported market timezone for ${stock.market || stock.country}`)
@@ -1098,9 +1132,17 @@ export const useTradingSession = (
       if (requestId !== chartHistoryRequestId) return
       historicalPricePoints.value = pricePointsFromIssueChart(chart, timeZone)
       chartNotice.value = chartNoticeFromIssueChart(chart)
+      if (!historicalPricePoints.value.length && !chartNotice.value) {
+        chartNotice.value = {
+          title: '価格データがありません',
+          detail: '選択した期間のチャートデータは返されませんでした。',
+        }
+      }
     } catch (cause) {
       if (requestId === chartHistoryRequestId) {
-        reportDataError(errorMessage(cause, '価格履歴の取得に失敗しました'), cause)
+        const message = errorMessage(cause, '価格履歴の取得に失敗しました')
+        chartNotice.value = { title: '価格履歴の取得に失敗しました', detail: message }
+        reportDataError(message, cause)
       }
     }
   }

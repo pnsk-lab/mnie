@@ -74,6 +74,7 @@
 
               cd "$source_dir"
               bun install --frozen-lockfile --linker hoisted
+              bun run sdk:build
               bun --filter @repo/mnie-app build
 
               export MNIE_DATABASE_PATH="''${MNIE_DATABASE_PATH:-$data_dir/mnie-app.sqlite}"
@@ -103,7 +104,7 @@
         }
       );
 
-      nixosModules.default =
+      nixosModules.systemd =
         {
           config,
           lib,
@@ -138,6 +139,7 @@
 
               cd "$source_dir"
               bun install --frozen-lockfile --linker hoisted
+              bun run sdk:build
               bun --filter @repo/mnie-app build
 
               export MNIE_DATABASE_PATH="''${MNIE_DATABASE_PATH:-$data_dir/mnie-app.sqlite}"
@@ -234,5 +236,7 @@
             })
           ]);
         };
+
+      nixosModules.default = self.nixosModules.systemd;
     };
 }

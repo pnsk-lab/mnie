@@ -11,12 +11,24 @@ import type {
   Transaction,
 } from '@mnie/types'
 import type { SbiClientMethods } from './methods/types'
+import type { IssueChartOptions, IssueOptions, IssueSearchOptions } from './operations'
 import { loginWithPasskey } from './session'
-import type { LoginWithPasskeyOptions, MarketIndex, SbiClientOptions } from './types'
+import type {
+  Board,
+  IssueChart,
+  IssueSearchResult,
+  LoginWithPasskeyOptions,
+  MarketIndex,
+  SbiClientOptions,
+} from './types'
 
 export type SbiSecOperations = CommonOperations &
   Pick<InvestmentOperations, 'investments.orders.list' | 'investments.positions.list'> & {
     'market.index.major': OperationDefinition<Record<string, never>, MarketIndex[]>
+    'market.issue.chart': OperationDefinition<IssueChartOptions, IssueChart>
+    'market.issue.search': OperationDefinition<IssueSearchOptions, IssueSearchResult>
+    'market.issue.suggest': OperationDefinition<IssueSearchOptions, IssueSearchResult>
+    'market.issue.board': OperationDefinition<IssueOptions, Board>
   }
 
 const money = (value: { currency: string; value: number | null } | undefined) =>
@@ -54,6 +66,10 @@ const createProvider = (client: SbiClientMethods): FinancialProvider<SbiSecOpera
       'investments.positions.list',
       'investments.orders.list',
       'market.index.major',
+      'market.issue.chart',
+      'market.issue.search',
+      'market.issue.suggest',
+      'market.issue.board',
     ],
     checkAvailability: async () => {
       try {
@@ -65,6 +81,18 @@ const createProvider = (client: SbiClientMethods): FinancialProvider<SbiSecOpera
     },
     invoke: async (name, request) => {
       if (name === 'market.index.major') return (await client.market.index.major()) as never
+      if (name === 'market.issue.chart') {
+        return (await client.market.issue.chart(request as IssueChartOptions)) as never
+      }
+      if (name === 'market.issue.search') {
+        return (await client.market.issue.search(request as IssueSearchOptions)) as never
+      }
+      if (name === 'market.issue.suggest') {
+        return (await client.market.issue.suggest(request as IssueSearchOptions)) as never
+      }
+      if (name === 'market.issue.board') {
+        return (await client.market.issue.board(request as IssueOptions)) as never
+      }
       if (name === 'accounts.list') return { items: [await account()] } as Page<Account> as never
       const currentAccount = await account()
       if (name === 'balances.list') {
