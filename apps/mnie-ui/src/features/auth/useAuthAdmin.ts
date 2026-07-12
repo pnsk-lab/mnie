@@ -25,6 +25,7 @@ import {
   type CronJob,
   type ProfileAvailability,
   type SbiPasskey,
+  type SbiPasskeySource,
 } from '../../api'
 import { defaultApiKeyPolicy } from './api-key-policy'
 
@@ -45,7 +46,13 @@ export const useAuthAdmin = () => {
   const newApiKeySettings = ref(defaultApiKeyPolicy())
   const newApiToken = ref('')
   const sbiLabel = ref('Main profile')
+  const sbiPasskeySourceKind = ref<SbiPasskeySource['kind']>('bitwarden')
   const sbiCredentialJson = ref('')
+  const sbiBitwardenDataPath = ref('')
+  const sbiBitwardenMasterPassword = ref('')
+  const sbiBitwardenRpId = ref('')
+  const sbiBitwardenOrigin = ref('')
+  const sbiBitwardenCredentialId = ref('')
   const tradePassword = ref('')
   const sbiDeviceId = ref('')
   const smbcLabel = ref('SMBC Direct')
@@ -160,15 +167,37 @@ export const useAuthAdmin = () => {
     }
   }
 
+  const optionalText = (value: string) => value.trim() || undefined
+
+  const sbiPasskeySource = (): SbiPasskeySource => {
+    if (sbiPasskeySourceKind.value === 'json') {
+      return { kind: 'json', credential: JSON.parse(sbiCredentialJson.value) }
+    }
+
+    return {
+      kind: 'bitwarden',
+      dataPath: optionalText(sbiBitwardenDataPath.value),
+      masterPassword: sbiBitwardenMasterPassword.value,
+      rpId: sbiBitwardenRpId.value.trim(),
+      origin: optionalText(sbiBitwardenOrigin.value),
+      credentialId: optionalText(sbiBitwardenCredentialId.value),
+    }
+  }
+
   const addSbiPasskey = async () => {
     const { passkey } = await saveSbiPasskey({
       label: sbiLabel.value,
-      credential: JSON.parse(sbiCredentialJson.value),
+      source: sbiPasskeySource(),
       tradePassword: tradePassword.value || undefined,
       deviceId: sbiDeviceId.value || undefined,
     })
     selectedProfileId.value = passkey.id
     sbiCredentialJson.value = ''
+    sbiBitwardenDataPath.value = ''
+    sbiBitwardenMasterPassword.value = ''
+    sbiBitwardenRpId.value = ''
+    sbiBitwardenOrigin.value = ''
+    sbiBitwardenCredentialId.value = ''
     tradePassword.value = ''
     sbiDeviceId.value = ''
     await refresh()
@@ -225,7 +254,13 @@ export const useAuthAdmin = () => {
     newApiKeySettings,
     newApiToken,
     sbiLabel,
+    sbiPasskeySourceKind,
     sbiCredentialJson,
+    sbiBitwardenDataPath,
+    sbiBitwardenMasterPassword,
+    sbiBitwardenRpId,
+    sbiBitwardenOrigin,
+    sbiBitwardenCredentialId,
     tradePassword,
     sbiDeviceId,
     smbcLabel,

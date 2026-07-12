@@ -37,6 +37,17 @@ export interface SbiPasskey {
   updatedAt: string
 }
 
+export type SbiPasskeySource =
+  | { kind: 'json'; credential: unknown }
+  | {
+      kind: 'bitwarden'
+      masterPassword: string
+      rpId: string
+      dataPath?: string
+      origin?: string
+      credentialId?: string
+    }
+
 export interface AccountProfile {
   id: string
   provider: 'sbisec' | 'smbc-direct' | 'mobilesuica' | 'paypay-bank'
@@ -143,7 +154,7 @@ export const listSbiPasskeys = () => request<{ passkeys: SbiPasskey[] }>('/admin
 
 export const saveSbiPasskey = (payload: {
   label: string
-  credential: unknown
+  source: SbiPasskeySource
   tradePassword?: string
   deviceId?: string
 }) =>

@@ -29,6 +29,7 @@ import type {
 } from '../../api'
 import ApiKeyPolicyEditor from '../../components/ApiKeyPolicyEditor.vue'
 import UiModal from '../../components/ui/UiModal.vue'
+import UiSegmented from '../../components/ui/UiSegmented.vue'
 import { ui } from '../../styles/ui'
 import MobileSuicaPanel from './MobileSuicaPanel.vue'
 
@@ -48,7 +49,19 @@ const apiKeyLabel = defineModel<string>('apiKeyLabel', { required: true })
 const newApiKeySettings = defineModel<ApiKeySettings>('newApiKeySettings', { required: true })
 const newApiToken = defineModel<string>('newApiToken', { required: true })
 const sbiLabel = defineModel<string>('sbiLabel', { required: true })
+const sbiPasskeySourceKind = defineModel<'json' | 'bitwarden'>('sbiPasskeySourceKind', {
+  required: true,
+})
 const sbiCredentialJson = defineModel<string>('sbiCredentialJson', { required: true })
+const sbiBitwardenDataPath = defineModel<string>('sbiBitwardenDataPath', { required: true })
+const sbiBitwardenMasterPassword = defineModel<string>('sbiBitwardenMasterPassword', {
+  required: true,
+})
+const sbiBitwardenRpId = defineModel<string>('sbiBitwardenRpId', { required: true })
+const sbiBitwardenOrigin = defineModel<string>('sbiBitwardenOrigin', { required: true })
+const sbiBitwardenCredentialId = defineModel<string>('sbiBitwardenCredentialId', {
+  required: true,
+})
 const tradePassword = defineModel<string>('tradePassword', { required: true })
 const sbiDeviceId = defineModel<string>('sbiDeviceId', { required: true })
 const selectedProfileId = defineModel<string>('selectedProfileId', { required: true })
@@ -85,6 +98,10 @@ const editingApiKey = ref<ApiKey | null>(null)
 const profileToDelete = ref<AccountProfile | null>(null)
 const unavailableProfile = ref<AccountProfile | null>(null)
 const providerIds = ['sbisec', 'smbc-direct', 'mobilesuica', 'paypay-bank'] as const
+const sbiPasskeySourceOptions = [
+  { label: 'Bitwarden', value: 'bitwarden' },
+  { label: 'JSON', value: 'json' },
+] as const
 const selectedProvider = computed<AccountProfile['provider']>(() => {
   const provider = route.params.provider
   return typeof provider === 'string' &&
@@ -555,7 +572,49 @@ const saveEditingApiKey = () => {
               <label :class="ui.label"
                 >名前<input v-model="sbiLabel" :class="ui.input" placeholder="例: SBI 証券"
               /></label>
-              <label :class="ui.label"
+              <UiSegmented v-model="sbiPasskeySourceKind" :options="sbiPasskeySourceOptions" />
+              <template v-if="sbiPasskeySourceKind === 'bitwarden'">
+                <div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
+                  <label :class="ui.label"
+                    >data.json パス<input
+                      v-model="sbiBitwardenDataPath"
+                      :class="ui.input"
+                      autocomplete="off"
+                      spellcheck="false"
+                  /></label>
+                  <label :class="ui.label"
+                    >RP ID<input
+                      v-model="sbiBitwardenRpId"
+                      :class="ui.input"
+                      autocomplete="off"
+                      spellcheck="false"
+                  /></label>
+                </div>
+                <label :class="ui.label"
+                  >Master Password<input
+                    v-model="sbiBitwardenMasterPassword"
+                    :class="ui.input"
+                    type="password"
+                    autocomplete="off"
+                /></label>
+                <div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
+                  <label :class="ui.label"
+                    >Origin<input
+                      v-model="sbiBitwardenOrigin"
+                      :class="ui.input"
+                      autocomplete="off"
+                      spellcheck="false"
+                  /></label>
+                  <label :class="ui.label"
+                    >Credential ID<input
+                      v-model="sbiBitwardenCredentialId"
+                      :class="ui.input"
+                      autocomplete="off"
+                      spellcheck="false"
+                  /></label>
+                </div>
+              </template>
+              <label v-else :class="ui.label"
                 >パスキー JSON<textarea
                   v-model="sbiCredentialJson"
                   :class="[ui.input, 'min-h-44 py-3 font-mono text-xs']"

@@ -34,11 +34,22 @@ import { connectSbi } from '../rpc/sbi-session'
 import { ensureInitialAssetValuations, latestAssetValuations } from '../assets'
 
 export interface StoredSbiPasskeySecret {
-  credential: PlaintextStoredWebAuthnCredential
+  source: SbiPasskeySource
   tradePassword?: string
   deviceId?: string
   session?: unknown
 }
+
+export type SbiPasskeySource =
+  | { kind: 'json'; credential: PlaintextStoredWebAuthnCredential }
+  | {
+      kind: 'bitwarden'
+      masterPassword: string
+      rpId: string
+      dataPath?: string
+      origin?: string
+      credentialId?: string
+    }
 
 export interface StoredSmbcDirectSecret {
   user: string
@@ -516,19 +527,34 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
   app.post('/sbi-passkeys', async (c) => {
     const body = await c.req.json<{
       label?: string
-      credential?: PlaintextStoredWebAuthnCredential
+      source?: SbiPasskeySource
       tradePassword?: string
       deviceId?: string
     }>()
-    if (!body.label?.trim() || !body.credential) {
-      return c.json({ error: 'label and credential are required' }, 400)
+    if (!body.label?.trim()) {
+      return c.json({ error: 'label is required' }, 400)
+    }
+    if (!body.source || typeof body.source !== 'object') {
+      return c.json({ error: 'source is required' }, 400)
+    }
+    if (body.source.kind === 'json' && !body.source.credential) {
+      return c.json({ error: 'source.credential is required' }, 400)
+    }
+    if (
+      body.source.kind === 'bitwarden' &&
+      (!body.source.masterPassword?.trim() || !body.source.rpId?.trim())
+    ) {
+      return c.json({ error: 'source.masterPassword and source.rpId are required' }, 400)
+    }
+    if (body.source.kind !== 'json' && body.source.kind !== 'bitwarden') {
+      return c.json({ error: 'unsupported source.kind' }, 400)
     }
 
     const now = new Date()
     const id = randomId('sbi')
     const keyringAccount = `sbi-passkey:${id}`
     await saveSecret(keyringAccount, {
-      credential: body.credential,
+      source: body.source,
       tradePassword: body.tradePassword,
       deviceId: body.deviceId,
     } satisfies StoredSbiPasskeySecret)

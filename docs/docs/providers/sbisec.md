@@ -13,7 +13,7 @@ This client does not use an official public API from SBI Securities. Changes to 
 
 ## Setup
 
-Prepare a `passkey.json` containing your actual passkey credential and configure the service origins through environment variables. URLs must contain only an origin, without a path, query, or fragment.
+Configure the service origins through environment variables. URLs must contain only an origin, without a path, query, or fragment.
 
 ```ini
 SBI_AUTH_BASE_URL=https://auth.example.com
@@ -23,17 +23,17 @@ SBI_IZANAGI_BASE_URL=https://search.example.com
 
 `SBI_AUTH_BASE_URL` and `SBI_MTS_BASE_URL` are required. Issue search requires `SBI_IZANAGI_BASE_URL`. US stocks, asset valuations, and foreign exchange operations require their respective additional endpoints.
 
-## Login
+## JSON passkey login
 
 ```ts
 import { readFile } from 'node:fs/promises'
-import { loginWithPasskey, type PlaintextStoredWebAuthnCredential } from '@mnie/provider-sbi-sec'
+import { connectWithPasskey, type PlaintextStoredWebAuthnCredential } from '@mnie/provider-sbi-sec'
 
 const passkeyCredential = JSON.parse(
   await readFile('./passkey.json', 'utf8'),
 ) as PlaintextStoredWebAuthnCredential
 
-const profile = await loginWithPasskey(
+const profile = await connectWithPasskey(
   { passkeyCredential },
   { tradePassword: process.env.SBI_TRADE_PASSWORD },
 )
@@ -41,6 +41,28 @@ const profile = await loginWithPasskey(
 const account = await profile.account.profile()
 console.log(account)
 ```
+
+## Bitwarden passkey login
+
+`@mnie/passkey-provider-bitwarden` reads Bitwarden desktop `data.json`, unlocks the active account with the master password, and signs WebAuthn assertions with a passkey matching the configured RP ID.
+
+```ts
+import { createBitwardenPasskeyProvider } from '@mnie/passkey-provider-bitwarden'
+import { connectWithPasskey } from '@mnie/provider-sbi-sec'
+
+const profile = await connectWithPasskey(
+  {
+    passkeyProvider: createBitwardenPasskeyProvider({
+      masterPassword: process.env.BITWARDEN_MASTER_PASSWORD!,
+      rpId: process.env.SBI_PASSKEY_RP_ID!,
+      credentialId: process.env.SBI_PASSKEY_CREDENTIAL_ID,
+    }),
+  },
+  { tradePassword: process.env.SBI_TRADE_PASSWORD },
+)
+```
+
+If multiple Bitwarden passkeys match the same RP ID, set `credentialId`. Pass `dataPath` when the Bitwarden `data.json` file is not in the default desktop location.
 
 A trading password is required to place orders. When an operation requires phone verification, use `tradeAuthentication.onRequired` to prompt the user to make the verification call.
 

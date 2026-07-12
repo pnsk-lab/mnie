@@ -67,7 +67,13 @@ const {
   newApiKeySettings,
   newApiToken,
   sbiLabel,
+  sbiPasskeySourceKind,
   sbiCredentialJson,
+  sbiBitwardenDataPath,
+  sbiBitwardenMasterPassword,
+  sbiBitwardenRpId,
+  sbiBitwardenOrigin,
+  sbiBitwardenCredentialId,
   tradePassword,
   sbiDeviceId,
   smbcLabel,
@@ -372,7 +378,13 @@ onUnmounted(() => {
           v-model:new-api-key-settings="newApiKeySettings"
           v-model:new-api-token="newApiToken"
           v-model:sbi-label="sbiLabel"
+          v-model:sbi-passkey-source-kind="sbiPasskeySourceKind"
           v-model:sbi-credential-json="sbiCredentialJson"
+          v-model:sbi-bitwarden-data-path="sbiBitwardenDataPath"
+          v-model:sbi-bitwarden-master-password="sbiBitwardenMasterPassword"
+          v-model:sbi-bitwarden-rp-id="sbiBitwardenRpId"
+          v-model:sbi-bitwarden-origin="sbiBitwardenOrigin"
+          v-model:sbi-bitwarden-credential-id="sbiBitwardenCredentialId"
           v-model:trade-password="tradePassword"
           v-model:sbi-device-id="sbiDeviceId"
           v-model:selected-profile-id="selectedProfileId"
