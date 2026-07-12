@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { createBitwardenPasskeyProvider } from '@mnie/passkey-provider-bitwarden'
+import { createBitwardenPasskeyProvider } from '@mnie/auth-bitwarden'
 import { connectWithPasskey } from '@mnie/provider-sbi-sec'
 import type { FinancialProvider, OperationMap } from '@mnie/types'
 import type {
@@ -54,18 +54,24 @@ const passkeyLoginOptions = (
   secret: StoredSbiPasskeySecret,
   endpointOptions: SbiEndpointOptions,
 ): LoginWithPasskeyOptions => {
-  if (secret.source.kind === 'json') {
-    return { ...endpointOptions, passkeyCredential: secret.source.credential }
+  const source = secret.source
+  if (!source) {
+    if (!secret.credential) throw new Error('SBI passkey source is missing')
+    return { ...endpointOptions, passkeyCredential: secret.credential }
+  }
+
+  if (source.kind === 'json') {
+    return { ...endpointOptions, passkeyCredential: source.credential }
   }
 
   return {
     ...endpointOptions,
     passkeyProvider: createBitwardenPasskeyProvider({
-      dataPath: secret.source.dataPath,
-      masterPassword: secret.source.masterPassword,
-      rpId: secret.source.rpId,
-      origin: secret.source.origin,
-      credentialId: secret.source.credentialId,
+      dataPath: source.dataPath,
+      masterPassword: source.masterPassword,
+      rpId: source.rpId,
+      origin: source.origin,
+      credentialId: source.credentialId,
     }),
   }
 }

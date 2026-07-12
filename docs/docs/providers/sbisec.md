@@ -44,10 +44,10 @@ console.log(account)
 
 ## Bitwarden passkey login
 
-`@mnie/passkey-provider-bitwarden` reads Bitwarden desktop `data.json`, unlocks the active account with the master password, and signs WebAuthn assertions with a passkey matching the configured RP ID.
+`@mnie/auth-bitwarden` reads Bitwarden desktop `data.json`, unlocks the active account with the master password, and provides credentials through the Auth Manager abstraction.
 
 ```ts
-import { createBitwardenPasskeyProvider } from '@mnie/passkey-provider-bitwarden'
+import { createBitwardenPasskeyProvider } from '@mnie/auth-bitwarden'
 import { connectWithPasskey } from '@mnie/provider-sbi-sec'
 
 const profile = await connectWithPasskey(

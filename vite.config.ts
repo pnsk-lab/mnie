@@ -10,7 +10,7 @@ export default defineConfig({
     tasks: {
       'app:dev': {
         command:
-          'vp run --parallel --filter @mnie/types --filter @mnie/passkey-provider-bitwarden --filter @mnie/provider-sbi-sec --filter @mnie/provider-mobile-suica --filter @mnie/provider-paypay --filter @mnie/provider-paypay-bank --filter @repo/client-mnie --filter @mnie/provider-smbc-direct --filter @repo/mnie-app dev',
+          'vp run --parallel --filter @mnie/types --filter @mnie/auth-bitwarden --filter @mnie/provider-sbi-sec --filter @mnie/provider-mobile-suica --filter @mnie/provider-paypay --filter @mnie/provider-paypay-bank --filter @repo/client-mnie --filter @mnie/provider-smbc-direct --filter @repo/mnie-app dev',
         cache: false,
         dependsOn: ['env:doctor', 'sdk-build'],
       },
@@ -21,7 +21,7 @@ export default defineConfig({
       'sdk-build': {
         dependsOn: [
           '@mnie/types#build',
-          '@mnie/passkey-provider-bitwarden#build',
+          '@mnie/auth-bitwarden#build',
           '@mnie/provider-sbi-sec#build',
           '@mnie/provider-mobile-suica#build',
           '@mnie/provider-paypay#build',

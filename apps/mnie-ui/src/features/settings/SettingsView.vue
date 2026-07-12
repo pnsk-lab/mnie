@@ -11,6 +11,7 @@ import {
   Plus,
   RefreshCw,
   Save,
+  ShieldCheck,
   TrainFront,
   WalletCards,
   Trash2,
@@ -23,19 +24,20 @@ import type {
   AccountProfile,
   ApiKey,
   ApiKeySettings,
+  AuthManagerConfig,
   CronJob,
   ProfileAvailability,
   SbiPasskey,
 } from '../../api'
 import ApiKeyPolicyEditor from '../../components/ApiKeyPolicyEditor.vue'
 import UiModal from '../../components/ui/UiModal.vue'
-import UiSegmented from '../../components/ui/UiSegmented.vue'
 import { ui } from '../../styles/ui'
 import MobileSuicaPanel from './MobileSuicaPanel.vue'
 
 const props = defineProps<{
   apiKeys: ApiKey[]
   sbiPasskeys: SbiPasskey[]
+  authManagers: AuthManagerConfig[]
   profiles: AccountProfile[]
   profileAvailability: Record<string, ProfileAvailability>
   profileAvailabilityCheckedAt: Record<string, number>
@@ -49,19 +51,15 @@ const apiKeyLabel = defineModel<string>('apiKeyLabel', { required: true })
 const newApiKeySettings = defineModel<ApiKeySettings>('newApiKeySettings', { required: true })
 const newApiToken = defineModel<string>('newApiToken', { required: true })
 const sbiLabel = defineModel<string>('sbiLabel', { required: true })
-const sbiPasskeySourceKind = defineModel<'json' | 'bitwarden'>('sbiPasskeySourceKind', {
+const authManagerLabel = defineModel<string>('authManagerLabel', { required: true })
+const authManagerDataPath = defineModel<string>('authManagerDataPath', { required: true })
+const authManagerMasterPassword = defineModel<string>('authManagerMasterPassword', {
   required: true,
 })
-const sbiCredentialJson = defineModel<string>('sbiCredentialJson', { required: true })
-const sbiBitwardenDataPath = defineModel<string>('sbiBitwardenDataPath', { required: true })
-const sbiBitwardenMasterPassword = defineModel<string>('sbiBitwardenMasterPassword', {
+const selectedAuthManagerId = defineModel<string>('selectedAuthManagerId', {
   required: true,
 })
-const sbiBitwardenRpId = defineModel<string>('sbiBitwardenRpId', { required: true })
-const sbiBitwardenOrigin = defineModel<string>('sbiBitwardenOrigin', { required: true })
-const sbiBitwardenCredentialId = defineModel<string>('sbiBitwardenCredentialId', {
-  required: true,
-})
+const sbiAuthCredential = defineModel<unknown>('sbiAuthCredential')
 const tradePassword = defineModel<string>('tradePassword', { required: true })
 const sbiDeviceId = defineModel<string>('sbiDeviceId', { required: true })
 const selectedProfileId = defineModel<string>('selectedProfileId', { required: true })
@@ -81,6 +79,9 @@ const emit = defineEmits<{
   saveApiKeySettings: [key: ApiKey]
   revokeApiKey: [id: string]
   addSbiPasskey: []
+  addAuthManager: []
+  removeAuthManager: [id: string]
+  fillProviderCredentials: [provider: AccountProfile['provider']]
   addSmbcDirectProfile: []
   addPayPayBankProfile: []
   finishSmbc2fa: []
@@ -90,7 +91,7 @@ const emit = defineEmits<{
   updateProfileLabel: [id: string, label: string]
 }>()
 
-type SettingsSection = 'api-keys' | 'providers'
+type SettingsSection = 'api-keys' | 'providers' | 'auth-managers'
 
 const route = useRoute()
 const router = useRouter()
@@ -98,10 +99,6 @@ const editingApiKey = ref<ApiKey | null>(null)
 const profileToDelete = ref<AccountProfile | null>(null)
 const unavailableProfile = ref<AccountProfile | null>(null)
 const providerIds = ['sbisec', 'smbc-direct', 'mobilesuica', 'paypay-bank'] as const
-const sbiPasskeySourceOptions = [
-  { label: 'Bitwarden', value: 'bitwarden' },
-  { label: 'JSON', value: 'json' },
-] as const
 const selectedProvider = computed<AccountProfile['provider']>(() => {
   const provider = route.params.provider
   return typeof provider === 'string' &&
@@ -111,7 +108,10 @@ const selectedProvider = computed<AccountProfile['provider']>(() => {
 })
 
 const activeSection = computed<SettingsSection>(() => {
-  return route.params.section === 'providers' ? 'providers' : 'api-keys'
+  if (route.params.section === 'providers' || route.params.section === 'auth-managers') {
+    return route.params.section
+  }
+  return 'api-keys'
 })
 
 const isNewApiKey = computed(
@@ -196,6 +196,12 @@ const settingsGroups = [
         label: 'プロバイダー',
         description: '口座と接続を管理',
         icon: UserRoundCog,
+      },
+      {
+        id: 'auth-managers',
+        label: '認証プロバイダー',
+        description: '認証情報の取得元を管理',
+        icon: ShieldCheck,
       },
     ],
   },
@@ -292,15 +298,17 @@ const confirmProfileDeletion = () => {
 const sectionTitle = computed(() =>
   isNewApiKey.value
     ? 'API Key 発行'
-    : activeSection.value === 'api-keys'
-      ? 'API キー'
-      : isProviderChooser.value
-        ? 'プロバイダーを追加'
-        : isNewProvider.value
-          ? `${providerCards.value.find((provider) => provider.id === selectedProvider.value)?.label} を追加`
-          : isEditingProvider.value
-            ? `${editedProfile.value?.label ?? 'プロバイダー'} を編集`
-            : 'プロバイダー',
+    : activeSection.value === 'auth-managers'
+      ? '認証プロバイダー'
+      : activeSection.value === 'api-keys'
+        ? 'API キー'
+        : isProviderChooser.value
+          ? 'プロバイダーを追加'
+          : isNewProvider.value
+            ? `${providerCards.value.find((provider) => provider.id === selectedProvider.value)?.label} を追加`
+            : isEditingProvider.value
+              ? `${editedProfile.value?.label ?? 'プロバイダー'} を編集`
+              : 'プロバイダー',
 )
 
 const openApiKeyEditor = (key: ApiKey) => {
@@ -467,7 +475,7 @@ const saveEditingApiKey = () => {
         </article>
       </template>
 
-      <template v-else>
+      <template v-else-if="activeSection === 'providers'">
         <template v-if="isProviderChooser">
           <div class="grid gap-4">
             <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -572,56 +580,35 @@ const saveEditingApiKey = () => {
               <label :class="ui.label"
                 >名前<input v-model="sbiLabel" :class="ui.input" placeholder="例: SBI 証券"
               /></label>
-              <UiSegmented v-model="sbiPasskeySourceKind" :options="sbiPasskeySourceOptions" />
-              <template v-if="sbiPasskeySourceKind === 'bitwarden'">
-                <div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
-                  <label :class="ui.label"
-                    >data.json パス<input
-                      v-model="sbiBitwardenDataPath"
-                      :class="ui.input"
-                      autocomplete="off"
-                      spellcheck="false"
-                  /></label>
-                  <label :class="ui.label"
-                    >RP ID<input
-                      v-model="sbiBitwardenRpId"
-                      :class="ui.input"
-                      autocomplete="off"
-                      spellcheck="false"
-                  /></label>
-                </div>
+              <div class="grid gap-3 rounded-[18px] border border-[#30343a] bg-[#111418] p-4">
+                <label :class="ui.label"
+                  >Auth Manager<select v-model="selectedAuthManagerId" :class="ui.input">
+                    <option value="" disabled>認証プロバイダーを選択</option>
+                    <option v-for="manager in authManagers" :key="manager.id" :value="manager.id">
+                      {{ manager.label }}
+                    </option>
+                  </select></label
+                >
                 <label :class="ui.label"
                   >Master Password<input
-                    v-model="sbiBitwardenMasterPassword"
+                    v-model="authManagerMasterPassword"
                     :class="ui.input"
                     type="password"
                     autocomplete="off"
                 /></label>
-                <div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
-                  <label :class="ui.label"
-                    >Origin<input
-                      v-model="sbiBitwardenOrigin"
-                      :class="ui.input"
-                      autocomplete="off"
-                      spellcheck="false"
-                  /></label>
-                  <label :class="ui.label"
-                    >Credential ID<input
-                      v-model="sbiBitwardenCredentialId"
-                      :class="ui.input"
-                      autocomplete="off"
-                      spellcheck="false"
-                  /></label>
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <span class="text-sm text-[#9aa0a9]">
+                    {{ sbiAuthCredential ? 'パスキーを読み込み済み' : 'パスキーは未選択です' }}
+                  </span>
+                  <button
+                    :class="ui.ghostButton"
+                    type="button"
+                    @click="emit('fillProviderCredentials', 'sbisec')"
+                  >
+                    Auth Manager から読み込む
+                  </button>
                 </div>
-              </template>
-              <label v-else :class="ui.label"
-                >パスキー JSON<textarea
-                  v-model="sbiCredentialJson"
-                  :class="[ui.input, 'min-h-44 py-3 font-mono text-xs']"
-                  spellcheck="false"
-                  placeholder="{ ... }"
-                ></textarea>
-              </label>
+              </div>
               <div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
                 <label :class="ui.label"
                   >取引パスワード<input
@@ -645,6 +632,28 @@ const saveEditingApiKey = () => {
             </template>
 
             <template v-else-if="selectedProvider === 'smbc-direct'">
+              <div class="grid gap-3 rounded-[18px] border border-[#30343a] bg-[#111418] p-4">
+                <select v-model="selectedAuthManagerId" :class="ui.input">
+                  <option value="" disabled>認証プロバイダーを選択</option>
+                  <option v-for="manager in authManagers" :key="manager.id" :value="manager.id">
+                    {{ manager.label }}
+                  </option>
+                </select>
+                <input
+                  v-model="authManagerMasterPassword"
+                  :class="ui.input"
+                  type="password"
+                  autocomplete="off"
+                  placeholder="Master Password"
+                />
+                <button
+                  :class="ui.ghostButton"
+                  type="button"
+                  @click="emit('fillProviderCredentials', 'smbc-direct')"
+                >
+                  Auth Manager から読み込む
+                </button>
+              </div>
               <template v-if="smbcQrUrl">
                 <div class="grid gap-3 rounded-[18px] border border-[#4c5b72] bg-[#182331] p-4">
                   <h4 class="font-black">生体認証を承認してください</h4>
@@ -705,6 +714,28 @@ const saveEditingApiKey = () => {
               <MobileSuicaPanel />
             </template>
             <template v-else-if="selectedProvider === 'paypay-bank'">
+              <div class="grid gap-3 rounded-[18px] border border-[#30343a] bg-[#111418] p-4">
+                <select v-model="selectedAuthManagerId" :class="ui.input">
+                  <option value="" disabled>認証プロバイダーを選択</option>
+                  <option v-for="manager in authManagers" :key="manager.id" :value="manager.id">
+                    {{ manager.label }}
+                  </option>
+                </select>
+                <input
+                  v-model="authManagerMasterPassword"
+                  :class="ui.input"
+                  type="password"
+                  autocomplete="off"
+                  placeholder="Master Password"
+                />
+                <button
+                  :class="ui.ghostButton"
+                  type="button"
+                  @click="emit('fillProviderCredentials', 'paypay-bank')"
+                >
+                  Auth Manager から読み込む
+                </button>
+              </div>
               <label :class="ui.label"
                 >名前<input v-model="payPayBankLabel" :class="ui.input"
               /></label>
@@ -818,6 +849,50 @@ const saveEditingApiKey = () => {
             </button>
           </div>
         </template>
+      </template>
+      <template v-else>
+        <div class="grid gap-5">
+          <article class="grid gap-4 rounded-2xl border border-[#30343a] bg-[#111418] p-5">
+            <div>
+              <h3 class="font-black text-[#f0f4f9]">Bitwarden</h3>
+              <p class="mt-1 text-sm text-[#9aa0a9]">
+                Bitwarden Desktop の保管庫から認証情報を取得します。
+              </p>
+            </div>
+            <label :class="ui.label"
+              >名前<input v-model="authManagerLabel" :class="ui.input"
+            /></label>
+            <label :class="ui.label"
+              >data.json パス（任意）<input
+                v-model="authManagerDataPath"
+                :class="ui.input"
+                autocomplete="off"
+                spellcheck="false"
+            /></label>
+            <div class="flex justify-end">
+              <button :class="ui.primaryButton" type="button" @click="emit('addAuthManager')">
+                <Save class="h-4 w-4" aria-hidden="true" /> 保存
+              </button>
+            </div>
+          </article>
+          <article
+            v-for="manager in authManagers"
+            :key="manager.id"
+            class="flex items-center justify-between gap-4 rounded-2xl border border-[#30343a] bg-[#111418] p-4"
+          >
+            <span class="grid gap-1">
+              <strong class="text-[#f0f4f9]">{{ manager.label }}</strong>
+              <small class="text-[#9aa0a9]">Bitwarden</small>
+            </span>
+            <button
+              :class="ui.dangerButton"
+              type="button"
+              @click="emit('removeAuthManager', manager.id)"
+            >
+              <Trash2 class="h-4 w-4" aria-hidden="true" /> 削除
+            </button>
+          </article>
+        </div>
       </template>
     </div>
 

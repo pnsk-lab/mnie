@@ -1,5 +1,5 @@
 {
-  "name": "@mnie/passkey-provider-bitwarden",
+  "name": "@mnie/auth-bitwarden",
   "license": "MIT",
   "type": "module",
   "module": "./dist/index.mjs",
@@ -11,13 +11,14 @@
     }
   },
   "scripts": {
-    "build": "cd ../.. && cd packages/passkey-provider-bitwarden && vp pack",
+    "build": "cd ../.. && cd packages/auth-bitwarden && vp pack",
     "dev": "vp pack --watch",
     "clean": "rm -rf dist",
     "typecheck": "tsc"
   },
   "dependencies": {
     "@mnie/provider-sbi-sec": "workspace:*",
+    "@mnie/types": "workspace:*",
     "@node-rs/argon2": "^2.0.2"
   },
   "devDependencies": {

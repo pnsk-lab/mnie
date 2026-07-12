@@ -27,6 +27,7 @@ export interface ServerConfig {
   smbcDirectBaseUrl?: string
   smbcDirectLoginBaseUrl?: string
   mobileSuicaBaseUrl?: string
+  payPayBankBaseUrl?: string
 }
 
 const optionalUrl = (value: string | undefined) => {
@@ -68,5 +69,6 @@ export const loadConfig = (): ServerConfig => {
     smbcDirectBaseUrl: optionalUrl(process.env.SMBC_DIRECT_BASE_URL),
     smbcDirectLoginBaseUrl: optionalUrl(process.env.SMBC_DIRECT_LOGIN_BASE_URL),
     mobileSuicaBaseUrl: optionalUrl(process.env.MOBILE_SUICA_BASE_URL),
+    payPayBankBaseUrl: optionalUrl(process.env.PAYPAY_BANK_BASE_URL),
   }
 }

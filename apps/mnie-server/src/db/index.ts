@@ -52,6 +52,16 @@ export const createDb = (path: string) => {
     )
   `)
   sqlite.run(`
+    CREATE TABLE IF NOT EXISTS auth_managers (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      label TEXT NOT NULL,
+      keyring_account TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `)
+  sqlite.run(`
     CREATE TABLE IF NOT EXISTS account_profiles (
       id TEXT PRIMARY KEY,
       provider TEXT NOT NULL,

@@ -55,6 +55,7 @@ const {
   status,
   apiKeys,
   sbiPasskeys,
+  authManagers,
   profiles,
   profileAvailability,
   profileAvailabilityCheckedAt,
@@ -67,13 +68,11 @@ const {
   newApiKeySettings,
   newApiToken,
   sbiLabel,
-  sbiPasskeySourceKind,
-  sbiCredentialJson,
-  sbiBitwardenDataPath,
-  sbiBitwardenMasterPassword,
-  sbiBitwardenRpId,
-  sbiBitwardenOrigin,
-  sbiBitwardenCredentialId,
+  authManagerLabel,
+  authManagerDataPath,
+  authManagerMasterPassword,
+  selectedAuthManagerId,
+  sbiAuthCredential,
   tradePassword,
   sbiDeviceId,
   smbcLabel,
@@ -91,6 +90,9 @@ const {
   setupOwnerPasskey,
   loginWithPasskey,
   addSbiPasskey,
+  addAuthManager,
+  removeAuthManager,
+  fillProviderCredentials,
   addSmbcDirectProfile,
   addPayPayBankProfile,
   removeSbiPasskey,
@@ -378,13 +380,11 @@ onUnmounted(() => {
           v-model:new-api-key-settings="newApiKeySettings"
           v-model:new-api-token="newApiToken"
           v-model:sbi-label="sbiLabel"
-          v-model:sbi-passkey-source-kind="sbiPasskeySourceKind"
-          v-model:sbi-credential-json="sbiCredentialJson"
-          v-model:sbi-bitwarden-data-path="sbiBitwardenDataPath"
-          v-model:sbi-bitwarden-master-password="sbiBitwardenMasterPassword"
-          v-model:sbi-bitwarden-rp-id="sbiBitwardenRpId"
-          v-model:sbi-bitwarden-origin="sbiBitwardenOrigin"
-          v-model:sbi-bitwarden-credential-id="sbiBitwardenCredentialId"
+          v-model:auth-manager-label="authManagerLabel"
+          v-model:auth-manager-data-path="authManagerDataPath"
+          v-model:auth-manager-master-password="authManagerMasterPassword"
+          v-model:selected-auth-manager-id="selectedAuthManagerId"
+          v-model:sbi-auth-credential="sbiAuthCredential"
           v-model:trade-password="tradePassword"
           v-model:sbi-device-id="sbiDeviceId"
           v-model:selected-profile-id="selectedProfileId"
@@ -398,6 +398,7 @@ onUnmounted(() => {
           v-model:pay-pay-bank-password="payPayBankPassword"
           :api-keys="apiKeys"
           :sbi-passkeys="sbiPasskeys"
+          :auth-managers="authManagers"
           :profiles="profiles"
           :profile-availability="profileAvailability"
           :profile-availability-checked-at="profileAvailabilityCheckedAt"
@@ -410,6 +411,9 @@ onUnmounted(() => {
           @save-api-key-settings="saveApiKeySettings"
           @revoke-api-key="revokeAndRefresh"
           @add-sbi-passkey="addSbiPasskeyAndConnect"
+          @add-auth-manager="addAuthManager"
+          @remove-auth-manager="removeAuthManager"
+          @fill-provider-credentials="fillProviderCredentials"
           @add-smbc-direct-profile="addSmbcDirectProfile"
           @add-pay-pay-bank-profile="addPayPayBankProfile"
           @finish-smbc-2fa="finishSmbc2faAndRefreshAvailability"

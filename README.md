@@ -34,7 +34,7 @@ Individual profiles implement `FinancialProvider`; cross-profile aggregation imp
 - `packages/client-mnie`: authenticated Mnie connection client
 - `packages/mnie-sdk`: high-level `mnie` SDK
 - `packages/mnie-cli`: CLI using `client-mnie`
-- `packages/passkey-provider-bitwarden`: Bitwarden passkey assertion provider
+- `packages/auth-bitwarden`: Bitwarden Auth Manager
 - `packages/provider-sbi-sec`: SBI Securities provider
 - `packages/provider-mobile-suica`: Mobile Suica provider
 

@@ -24,11 +24,21 @@ export interface BitwardenPasskey {
   keyValue: string
 }
 
+export interface BitwardenCredential {
+  id: string
+  name: string
+  username?: string
+  password?: string
+  uris: string[]
+  passkeys: BitwardenPasskey[]
+}
+
 export interface BitwardenVault {
   userId: string
   email: string
   kdf: BitwardenKdfConfig
   unlock(masterPassword: string): SymmetricKey
+  credentials(userKey: SymmetricKey, origin?: string): BitwardenCredential[]
   passkeys(userKey: SymmetricKey, rpId?: string): BitwardenPasskey[]
 }
 
@@ -37,6 +47,9 @@ interface RawCipher {
   name?: unknown
   key?: unknown
   login?: {
+    username?: unknown
+    password?: unknown
+    uris?: unknown
     fido2Credentials?: unknown
   }
 }
@@ -81,6 +94,19 @@ export const openBitwardenVaultFromObject = (data: Record<string, unknown>): Bit
       const stretched = stretchKey(masterKey)
       return keyFromBytes(decryptString(encryptedUserKey, stretched))
     },
+    credentials: (userKeyValue, origin) => {
+      const ciphersValue = data[userKey(userId, 'ciphers_ciphers')]
+      if (!ciphersValue) throw new Error('Bitwarden ciphers were not found')
+      const ciphers = readObject(ciphersValue, 'Bitwarden ciphers')
+      return Object.values(ciphers).flatMap((cipherValue) => {
+        const credential = readCipherCredential(
+          readObject(cipherValue, 'Bitwarden cipher'),
+          userKeyValue,
+        )
+        if (!origin || credentialMatchesOrigin(credential, origin)) return [credential]
+        return []
+      })
+    },
     passkeys: (userKeyValue, rpId) => {
       const ciphersValue = data[userKey(userId, 'ciphers_ciphers')]
       if (!ciphersValue) throw new Error('Bitwarden ciphers were not found')
@@ -90,6 +116,52 @@ export const openBitwardenVaultFromObject = (data: Record<string, unknown>): Bit
       )
     },
   }
+}
+
+const readCipherCredential = (
+  cipher: Record<string, unknown>,
+  userKeyValue: SymmetricKey,
+): BitwardenCredential => {
+  const raw = cipher as RawCipher
+  const id = readString(raw.id) ?? ''
+  const name = decryptText(requiredString(raw.name, `Bitwarden cipher ${id} name`), userKeyValue)
+  const itemKey = raw.key
+    ? keyFromBytes(decryptString(requiredString(raw.key, 'Bitwarden cipher key'), userKeyValue))
+    : userKeyValue
+  const login = raw.login && typeof raw.login === 'object' ? raw.login : undefined
+  const uris = Array.isArray(login?.uris)
+    ? login.uris.flatMap((value) => {
+        const object = readObject(value, 'Bitwarden login URI')
+        const encrypted = readString(object.uri)
+        return encrypted ? [decryptText(encrypted, itemKey)] : []
+      })
+    : []
+  return {
+    id,
+    name,
+    username: decryptOptionalText(login?.username, itemKey),
+    password: decryptOptionalText(login?.password, itemKey),
+    uris,
+    passkeys: readCipherPasskeys(cipher, userKeyValue),
+  }
+}
+
+const decryptOptionalText = (value: unknown, key: SymmetricKey) => {
+  const encrypted = readString(value)
+  return encrypted ? decryptText(encrypted, key) : undefined
+}
+
+const credentialMatchesOrigin = (credential: BitwardenCredential, origin: string) => {
+  const expected = new URL(origin)
+  return (
+    credential.uris.some((uri) => {
+      try {
+        return new URL(uri).origin === expected.origin
+      } catch {
+        return false
+      }
+    }) || credential.passkeys.some((passkey) => passkey.rpId === expected.hostname)
+  )
 }
 
 const readCipherPasskeys = (

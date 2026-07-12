@@ -11,6 +11,8 @@ export {
   openBitwardenVault,
   openBitwardenVaultFromObject,
   type BitwardenPasskey,
+  type BitwardenCredential,
   type BitwardenVault,
 } from './vault'
 export { createBitwardenPasskeyProvider, type BitwardenPasskeyProviderOptions } from './provider'
+export { createBitwardenAuthManager, type BitwardenAuthManagerOptions } from './auth-manager'

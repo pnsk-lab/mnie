@@ -34,7 +34,7 @@
       "name": "@repo/mnie-server",
       "dependencies": {
         "@hono/mcp": "^0.3.0",
-        "@mnie/passkey-provider-bitwarden": "workspace:*",
+        "@mnie/auth-bitwarden": "workspace:*",
         "@mnie/provider-mobile-suica": "workspace:*",
         "@mnie/provider-paypay-bank": "workspace:*",
         "@mnie/provider-sbi-sec": "workspace:*",
@@ -89,6 +89,21 @@
         "@repo/client-mnie": "workspace:*",
       },
       "devDependencies": {
+        "@types/bun": "latest",
+      },
+      "peerDependencies": {
+        "typescript": "^5",
+      },
+    },
+    "packages/auth-bitwarden": {
+      "name": "@mnie/auth-bitwarden",
+      "dependencies": {
+        "@mnie/provider-sbi-sec": "workspace:*",
+        "@mnie/types": "workspace:*",
+        "@node-rs/argon2": "^2.0.2",
+      },
+      "devDependencies": {
+        "@repo/tsconfig": "workspace:*",
         "@types/bun": "latest",
       },
       "peerDependencies": {
@@ -154,20 +169,6 @@
     },
     "packages/mnie-types": {
       "name": "@mnie/types",
-      "devDependencies": {
-        "@repo/tsconfig": "workspace:*",
-        "@types/bun": "latest",
-      },
-      "peerDependencies": {
-        "typescript": "^5",
-      },
-    },
-    "packages/passkey-provider-bitwarden": {
-      "name": "@mnie/passkey-provider-bitwarden",
-      "dependencies": {
-        "@mnie/provider-sbi-sec": "workspace:*",
-        "@node-rs/argon2": "^2.0.2",
-      },
       "devDependencies": {
         "@repo/tsconfig": "workspace:*",
         "@types/bun": "latest",
@@ -388,11 +389,11 @@
 
     "@levischuck/tiny-cbor": ["@levischuck/tiny-cbor@0.2.11", "", {}, "sha512-llBRm4dT4Z89aRsm6u2oEZ8tfwL/2l6BwpZ7JcyieouniDECM5AqNgr/y08zalEIvW3RSK4upYyybDcmjXqAow=="],
 
+    "@mnie/auth-bitwarden": ["@mnie/auth-bitwarden@workspace:packages/auth-bitwarden"],
+
     "@mnie/cli": ["@mnie/cli@workspace:packages/mnie-cli"],
 
     "@mnie/client-nissay-401k": ["@mnie/client-nissay-401k@workspace:packages/client-nissay-401k"],
-
-    "@mnie/passkey-provider-bitwarden": ["@mnie/passkey-provider-bitwarden@workspace:packages/passkey-provider-bitwarden"],
 
     "@mnie/provider-mobile-suica": ["@mnie/provider-mobile-suica@workspace:packages/provider-mobile-suica"],
 
