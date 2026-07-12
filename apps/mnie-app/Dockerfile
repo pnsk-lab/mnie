@@ -4,6 +4,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json bun.lock tsconfig.json vite.config.ts ./
+COPY packages/passkey-provider-bitwarden/package.json packages/passkey-provider-bitwarden/package.json
 COPY packages/provider-sbi-sec/package.json packages/provider-sbi-sec/package.json
 COPY packages/provider-mobile-suica/package.json packages/provider-mobile-suica/package.json
 COPY packages/provider-paypay/package.json packages/provider-paypay/package.json
