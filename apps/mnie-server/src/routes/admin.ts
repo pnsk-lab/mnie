@@ -8,7 +8,7 @@ import {
   exportSession as exportMobileSuicaSession,
   type MobileSuicaSession,
   type MobileSuicaProfile,
-} from '../../../../packages/provider-mobile-suica/src'
+} from '@mnie/provider-mobile-suica'
 import {
   createProvider as createSmbcDirectProvider,
   exportSession as exportSmbcDirectSession,
@@ -71,7 +71,10 @@ interface PendingMobileSuicaLogin {
   keyringAccount: string
 }
 
-const availabilityFailure = (message: unknown): AvailabilityCheckResult => ({ ok: false, message })
+const availabilityFailure = (
+  message: unknown,
+  reason: Extract<AvailabilityCheckResult, { ok: false }>['reason'] = 'UNKNOWN',
+): AvailabilityCheckResult => ({ ok: false, message, reason })
 
 const availabilityMessage = (cause: unknown) =>
   cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : String(cause)
@@ -204,6 +207,7 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
                   profile.id,
                   availabilityFailure(
                     'SMBC Direct session is not available; reconnect and finish two-factor authentication',
+                    '2FA_REQUIRED',
                   ),
                 ] as const
               }
@@ -247,6 +251,10 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
           }
         }),
       )
+      const checkedAt = new Date()
+      for (const [profileId, result] of availability) {
+        cronSystem.setAvailability(profileId, { result, checkedAt })
+      }
       return { availability: Object.fromEntries(availability) }
     })()
 

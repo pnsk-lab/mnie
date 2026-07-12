@@ -33,6 +33,7 @@
       "name": "@repo/mnie-server",
       "dependencies": {
         "@hono/mcp": "^0.3.0",
+        "@mnie/provider-mobile-suica": "workspace:*",
         "@mnie/provider-paypay-bank": "workspace:*",
         "@mnie/provider-sbi-sec": "workspace:*",
         "@mnie/provider-smbc-direct": "workspace:*",
@@ -217,6 +218,7 @@
       "name": "@mnie/provider-smbc-direct",
       "dependencies": {
         "@mnie/types": "workspace:*",
+        "iconv-lite": "^0.7.3",
       },
       "devDependencies": {
         "@repo/tsconfig": "workspace:*",

@@ -20,7 +20,10 @@ export default defineConfig({
         },
         {
           text: 'UI',
-          items: [{ text: 'About', link: '/docs/ui/' }],
+          items: [
+            { text: 'About', link: '/docs/ui/' },
+            { text: 'MCP', link: '/docs/ui/mcp' },
+          ],
         },
         {
           text: 'SDK',

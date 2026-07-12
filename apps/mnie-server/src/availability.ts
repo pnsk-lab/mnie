@@ -2,7 +2,7 @@ import {
   createProvider as createMobileSuicaProvider,
   importSession as importMobileSuicaSession,
   exportSession as exportMobileSuicaSession,
-} from '../../../packages/provider-mobile-suica/src'
+} from '@mnie/provider-mobile-suica'
 import type { AvailabilityCheckResult } from '@mnie/types'
 import {
   createProvider as createSmbcDirectProvider,
@@ -35,6 +35,8 @@ export interface CachedAvailability {
 
 const message = (cause: unknown) =>
   cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : String(cause)
+const serializableAvailability = (result: AvailabilityCheckResult): AvailabilityCheckResult =>
+  result.ok ? result : { ...result, message: message(result.message) }
 const timeoutMs = 20_000
 const timed = async <T>(operation: Promise<T>, label: string) => {
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -61,7 +63,9 @@ export const checkProfileAvailability = async (
   try {
     if (profile.provider === 'sbisec') {
       const provider = await connectSbi(db, config, profile.id)
-      return await timed(provider.checkAvailability(), `SBI Securities (${profile.label})`)
+      return serializableAvailability(
+        await timed(provider.checkAvailability(), `SBI Securities (${profile.label})`),
+      )
     }
     if (profile.provider === 'smbc-direct') {
       const secret = await readSecret<StoredSmbcDirectSecret>(profile.keyringAccount)
@@ -70,11 +74,14 @@ export const checkProfileAvailability = async (
           ok: false,
           message:
             'SMBC Direct session is not available; reconnect and finish two-factor authentication',
+          reason: '2FA_REQUIRED',
         }
       const smbcProfile = await importSmbcDirectSession(secret.session as SmbcDirectSession)
-      const result = await timed(
-        createSmbcDirectProvider(smbcProfile).checkAvailability(),
-        `SMBC Direct (${profile.label})`,
+      const result = serializableAvailability(
+        await timed(
+          createSmbcDirectProvider(smbcProfile).checkAvailability(),
+          `SMBC Direct (${profile.label})`,
+        ),
       )
       if (result.ok)
         await saveSecret(profile.keyringAccount, {
@@ -86,11 +93,17 @@ export const checkProfileAvailability = async (
     if (profile.provider === 'mobilesuica') {
       const secret = await readSecret<StoredMobileSuicaSecret>(profile.keyringAccount)
       if (!secret.session)
-        return { ok: false, message: 'Mobile Suica session is not available; reconnect' }
+        return {
+          ok: false,
+          message: 'Mobile Suica session is not available; reconnect',
+          reason: 'UNKNOWN',
+        }
       const mobileProfile = await importMobileSuicaSession(secret.session)
-      const result = await timed(
-        createMobileSuicaProvider(mobileProfile).checkAvailability(),
-        `Mobile Suica (${profile.label})`,
+      const result = serializableAvailability(
+        await timed(
+          createMobileSuicaProvider(mobileProfile).checkAvailability(),
+          `Mobile Suica (${profile.label})`,
+        ),
       )
       if (result.ok)
         await saveSecret(profile.keyringAccount, {
@@ -107,9 +120,11 @@ export const checkProfileAvailability = async (
           accountNo: secret.accountNo,
           password: secret.password,
         })
-    const result = await timed(
-      createPayPayBankProvider(payPayBankProfile).checkAvailability(),
-      `PayPay Bank (${profile.label})`,
+    const result = serializableAvailability(
+      await timed(
+        createPayPayBankProvider(payPayBankProfile).checkAvailability(),
+        `PayPay Bank (${profile.label})`,
+      ),
     )
     if (result.ok)
       await saveSecret(profile.keyringAccount, {
@@ -118,7 +133,7 @@ export const checkProfileAvailability = async (
       } satisfies StoredPayPayBankSecret)
     return result
   } catch (cause) {
-    return { ok: false, message: message(cause) }
+    return { ok: false, message: message(cause), reason: 'UNKNOWN' }
   }
 }
 

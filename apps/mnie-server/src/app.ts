@@ -59,6 +59,7 @@ export const createServerApp = (db: Db, config: ServerConfig) => {
       revocationOptions: { rateLimit: false },
     }),
   )
+  app.get('/api/ws', rpcWebSocket.upgradeWebSocket)
   app.get('/ws', rpcWebSocket.upgradeWebSocket)
   app.route('/auth', createAuthRoutes())
   app.route('/admin', createAdminRoutes(cronSystem))

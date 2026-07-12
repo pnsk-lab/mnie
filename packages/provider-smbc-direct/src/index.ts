@@ -1,3 +1,5 @@
+import iconv from 'iconv-lite'
+
 /** Options shared by the SMBC direct client implementation. */
 export interface SmbcDirectClientOptions {
   /** SMBC Direct transaction origin. Paths, queries, and fragments are not accepted. */
@@ -80,6 +82,8 @@ export interface SmbcDirectProfile {
   logout(): Promise<void>
 }
 
+class SmbcDirectTwoFactorRequiredError extends Error {}
+
 /** Converts an authenticated SMBC Direct session to the provider-neutral API. */
 export const createProvider = (profile: SmbcDirectProfile): FinancialProvider<CommonOperations> => {
   const accountId = `${profile.branchNo}-${profile.accountNo}`
@@ -107,7 +111,11 @@ export const createProvider = (profile: SmbcDirectProfile): FinancialProvider<Co
         await profile.continueSession()
         return { ok: true }
       } catch (message) {
-        return { ok: false, message }
+        return {
+          ok: false,
+          message,
+          reason: message instanceof SmbcDirectTwoFactorRequiredError ? '2FA_REQUIRED' : 'UNKNOWN',
+        }
       }
     },
     invoke: async (name, request) => {
@@ -261,7 +269,7 @@ const fetchWithCookies = async (url: URL, init: RequestInit, jar: CookieJar) => 
 
 const responseText = async (response: Response, name: string) => {
   if (!response.ok) throw new Error(`${name} failed: HTTP ${response.status}`)
-  return response.text()
+  return iconv.decode(Buffer.from(await response.arrayBuffer()), 'Shift_JIS')
 }
 
 const formFields = (html: string, formName: string) => {
@@ -279,6 +287,21 @@ const formFields = (html: string, formName: string) => {
     if (name && value !== undefined) fields[name] = value
   }
   return fields
+}
+
+const isConnectionErrorPage = (html: string) => {
+  const hasErrorForm = /<form\b[^>]*\bname=["']ERRINFO["'][^>]*>/i.test(html)
+  const hasDetailList = /class=["'][^"']*\bdetail-list01\b[^"']*["']/i.test(html)
+  const pageId = /(?:const|let|var)\s+pageId\s*=\s*["']([^"']+)["']/i.exec(html)?.[1]
+  return hasErrorForm && hasDetailList && pageId?.startsWith('ibCECEE0800') === true
+}
+
+const assertActiveSessionPage = (html: string) => {
+  if (isConnectionErrorPage(html)) {
+    throw new SmbcDirectTwoFactorRequiredError(
+      'SMBC Direct session was disconnected; two-factor authentication is required',
+    )
+  }
 }
 
 const required = (fields: Record<string, string>, name: string) => {
@@ -373,6 +396,7 @@ const createProfile = (
   let topPage = initialTopPage
 
   const topPageForms = () => {
+    assertActiveSessionPage(topPage.html)
     const topForm = formFields(topPage.html, 'TPALTOP')
     return {
       topForm,
@@ -398,10 +422,12 @@ const createProfile = (
       },
       context.jar,
     )
-    topPage = {
+    const nextTopPage = {
       html: await responseText(response, 'continue-session request'),
       url: response.url,
     }
+    assertActiveSessionPage(nextTopPage.html)
+    topPage = nextTopPage
   }
 
   const requestTransferPage = async () => {

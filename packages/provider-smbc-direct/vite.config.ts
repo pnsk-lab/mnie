@@ -6,5 +6,6 @@ export default defineConfig({
     dts: { eager: true },
     format: ['esm'],
     platform: 'node',
+    sourcemap: 'inline',
   },
 })

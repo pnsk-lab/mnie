@@ -286,7 +286,7 @@ export const createNissay401kClient = (options: Nissay401kClientOptions): Nissay
           await result.getCurrentAssets()
           return { ok: true }
         } catch (message) {
-          return { ok: false, message }
+          return { ok: false, message, reason: 'UNKNOWN' }
         }
       },
       invoke: async (name) => {

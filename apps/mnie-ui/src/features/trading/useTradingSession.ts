@@ -42,6 +42,7 @@ import {
   isOrderPreview,
   issueFrom,
   marketDateKey,
+  marketIndexFromApi,
   numberValue,
   orderDetailFromApi,
   orderFromApi,
@@ -875,12 +876,19 @@ export const useTradingSession = (
   const loadTradingData = async () => {
     dataLoading.value = true
     try {
-      const [assetsResult, positionsResult, balancesResult] = await Promise.allSettled([
-        rpcCallOptional<RecordLike>('assets.valuation.get', undefined, 20_000),
-        rpcCallOptional<RecordLike>('investments.positions.list', undefined, 15_000),
-        rpcCallOptional<unknown[]>('balances.list', undefined, 15_000),
-      ])
-      marketIndexes.value = []
+      const [assetsResult, positionsResult, balancesResult, indexesResult] =
+        await Promise.allSettled([
+          rpcCallOptional<RecordLike>('assets.valuation.get', undefined, 20_000),
+          rpcCallOptional<RecordLike>('investments.positions.list', undefined, 15_000),
+          rpcCallOptional<unknown[]>('balances.list', undefined, 15_000),
+          rpcCallOptional<unknown[]>('market.index.major', undefined, 15_000),
+        ])
+      marketIndexes.value =
+        indexesResult.status === 'fulfilled'
+          ? indexesResult.value
+              .map(marketIndexFromApi)
+              .filter((index): index is MarketIndex => Boolean(index))
+          : []
       const positionList = positionsResult.status === 'fulfilled' ? positionsResult.value : {}
       const nextPositions = asArray(positionList.items)
         .map(positionFromApi)

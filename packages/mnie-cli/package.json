@@ -9,6 +9,7 @@
   "types": "./dist/index.d.mts",
   "scripts": {
     "build": "cd ../.. && vp run @repo/client-mnie#build && cd packages/mnie-cli && vp pack",
+    "dev": "vp pack --watch",
     "clean": "rm -rf dist",
     "typecheck": "tsc"
   },

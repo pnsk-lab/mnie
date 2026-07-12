@@ -16,7 +16,7 @@ import {
   createProvider as createMobileSuicaProvider,
   exportSession as exportMobileSuicaSession,
   importSession as importMobileSuicaSession,
-} from '../../../packages/provider-mobile-suica/src'
+} from '@mnie/provider-mobile-suica'
 import type { ServerConfig } from './config'
 import type { AssetValuation } from '@mnie/types'
 import type { Db } from './db'

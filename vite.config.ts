@@ -9,7 +9,8 @@ export default defineConfig({
     cache: true,
     tasks: {
       'app:dev': {
-        command: 'vp run @repo/mnie-app#dev',
+        command:
+          'vp run --parallel --filter @mnie/types --filter @mnie/provider-sbi-sec --filter @mnie/provider-mobile-suica --filter @mnie/provider-paypay --filter @mnie/provider-paypay-bank --filter @repo/client-mnie --filter @mnie/provider-smbc-direct --filter @repo/mnie-app dev',
         cache: false,
         dependsOn: ['env:doctor', 'sdk-build'],
       },
@@ -29,7 +30,7 @@ export default defineConfig({
           '@mnie/cli#build',
         ],
         command: 'echo "SDK build complete"',
-        cache: true
+        cache: true,
       },
       'app:start': {
         command: 'vp run @repo/mnie-app#start',

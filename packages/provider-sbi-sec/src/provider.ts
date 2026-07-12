@@ -6,15 +6,18 @@ import type {
   InvestmentOperations,
   InvestmentOrder,
   InvestmentPosition,
+  OperationDefinition,
   Page,
   Transaction,
 } from '@mnie/types'
 import type { SbiClientMethods } from './methods/types'
 import { loginWithPasskey } from './session'
-import type { LoginWithPasskeyOptions, SbiClientOptions } from './types'
+import type { LoginWithPasskeyOptions, MarketIndex, SbiClientOptions } from './types'
 
 export type SbiSecOperations = CommonOperations &
-  Pick<InvestmentOperations, 'investments.orders.list' | 'investments.positions.list'>
+  Pick<InvestmentOperations, 'investments.orders.list' | 'investments.positions.list'> & {
+    'market.index.major': OperationDefinition<Record<string, never>, MarketIndex[]>
+  }
 
 const money = (value: { currency: string; value: number | null } | undefined) =>
   value?.value == null ? undefined : { currency: value.currency, value: String(value.value) }
@@ -50,16 +53,18 @@ const createProvider = (client: SbiClientMethods): FinancialProvider<SbiSecOpera
       'transactions.list',
       'investments.positions.list',
       'investments.orders.list',
+      'market.index.major',
     ],
     checkAvailability: async () => {
       try {
         await client.account.assets.current()
         return { ok: true }
       } catch (message) {
-        return { ok: false, message }
+        return { ok: false, message, reason: 'UNKNOWN' }
       }
     },
     invoke: async (name, request) => {
+      if (name === 'market.index.major') return (await client.market.index.major()) as never
       if (name === 'accounts.list') return { items: [await account()] } as Page<Account> as never
       const currentAccount = await account()
       if (name === 'balances.list') {

@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import {
-  continueSession as continueSmbcDirectSession,
+  createProvider as createSmbcDirectProvider,
   exportSession as exportSmbcDirectSession,
   importSession as importSmbcDirectSession,
   type SmbcDirectSession,
@@ -9,7 +9,7 @@ import {
   createProvider as createMobileSuicaProvider,
   exportSession as exportMobileSuicaSession,
   importSession as importMobileSuicaSession,
-} from '../../../../packages/provider-mobile-suica/src'
+} from '@mnie/provider-mobile-suica'
 import type { Db } from '../db'
 import { accountProfiles } from '../db/schema'
 import type { StoredMobileSuicaSecret, StoredSmbcDirectSecret } from '../routes/admin'
@@ -34,6 +34,7 @@ export interface CronJobStatus {
 export interface CronSystem {
   jobs(): CronJobStatus[]
   availability(profileId?: string): Record<string, CachedAvailability>
+  setAvailability(profileId: string, value: CachedAvailability): void
 }
 
 const assetSchedule = '* * * * *'
@@ -98,6 +99,15 @@ export const createCronSystem = (db: Db, config: ServerConfig): CronSystem => {
     const errors: string[] = []
     try {
       for (const profile of await listProfiles(db)) {
+        let availability = availabilityCache.get(profile.id)
+        if (!availability) {
+          availability = {
+            result: await checkProfileAvailability(db, config, profile),
+            checkedAt: new Date(),
+          }
+          availabilityCache.set(profile.id, availability)
+        }
+        if (!availability.result.ok) continue
         const intervalMs = profile.provider === 'sbisec' ? 5 * 60_000 : 60 * 60_000
         const previous = lastAssetRuns.get(profile.id) ?? 0
         if (Date.now() - previous < intervalMs) continue
@@ -131,12 +141,21 @@ export const createCronSystem = (db: Db, config: ServerConfig): CronSystem => {
         .select()
         .from(accountProfiles)
         .where(eq(accountProfiles.provider, 'smbc-direct'))
+      let failed = false
       for (const profile of profiles) {
         const secret = await readSecret<StoredSmbcDirectSecret>(profile.keyringAccount)
         if (!secret.session) continue
         const session = secret.session as SmbcDirectSession
         const smbcProfile = await importSmbcDirectSession(session)
-        await continueSmbcDirectSession({ profile: smbcProfile })
+        const availability = await createSmbcDirectProvider(smbcProfile).checkAvailability()
+        if (!availability.ok) {
+          failed = true
+          status.lastError = errorMessage(availability.message)
+          if (availability.reason === 'UNKNOWN') {
+            console.error('SMBC Direct session cron failed:', availability.message)
+          }
+          continue
+        }
         await saveSecret(profile.keyringAccount, {
           ...secret,
           session: exportSmbcDirectSession(smbcProfile),
@@ -146,7 +165,7 @@ export const createCronSystem = (db: Db, config: ServerConfig): CronSystem => {
           .set({ updatedAt: new Date() })
           .where(eq(accountProfiles.id, profile.id))
       }
-      status.lastSuccessAt = new Date()
+      if (!failed) status.lastSuccessAt = new Date()
     } catch (cause) {
       status.lastError = errorMessage(cause)
       console.error('SMBC Direct session cron failed:', cause)
@@ -165,11 +184,20 @@ export const createCronSystem = (db: Db, config: ServerConfig): CronSystem => {
         .select()
         .from(accountProfiles)
         .where(eq(accountProfiles.provider, 'mobilesuica'))
+      let failed = false
       for (const profile of profiles) {
         const secret = await readSecret<StoredMobileSuicaSecret>(profile.keyringAccount)
         if (!secret.session) continue
         const mobileSuicaProfile = await importMobileSuicaSession(secret.session)
-        await createMobileSuicaProvider(mobileSuicaProfile).invoke('transactions.list', {})
+        const availability = await createMobileSuicaProvider(mobileSuicaProfile).checkAvailability()
+        if (!availability.ok) {
+          failed = true
+          mobileSuicaStatus.lastError = errorMessage(availability.message)
+          if (availability.reason === 'UNKNOWN') {
+            console.error('Mobile Suica session cron failed:', availability.message)
+          }
+          continue
+        }
         await saveSecret(profile.keyringAccount, {
           ...secret,
           session: exportMobileSuicaSession(mobileSuicaProfile),
@@ -179,7 +207,7 @@ export const createCronSystem = (db: Db, config: ServerConfig): CronSystem => {
           .set({ updatedAt: new Date() })
           .where(eq(accountProfiles.id, profile.id))
       }
-      mobileSuicaStatus.lastSuccessAt = new Date()
+      if (!failed) mobileSuicaStatus.lastSuccessAt = new Date()
     } catch (cause) {
       mobileSuicaStatus.lastError = errorMessage(cause)
       console.error('Mobile Suica session cron failed:', cause)
@@ -197,5 +225,6 @@ export const createCronSystem = (db: Db, config: ServerConfig): CronSystem => {
     ],
     availability: (profileId) =>
       Object.fromEntries([...availabilityCache].filter(([id]) => !profileId || id === profileId)),
+    setAvailability: (profileId, value) => availabilityCache.set(profileId, value),
   }
 }

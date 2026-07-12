@@ -58,6 +58,7 @@ const {
   profiles,
   profileAvailability,
   profileAvailabilityCheckedAt,
+  profileAvailabilityLoading,
   cronJobs,
   selectedProfileId,
   setupPassword,
@@ -78,6 +79,7 @@ const {
   payPayBankAccountNo,
   payPayBankPassword,
   refresh,
+  forceProfileAvailability,
   addApiKey,
   saveApiKeySettings,
   setupOwnerPasskey,
@@ -177,6 +179,11 @@ const {
   smbcBalance,
   finishSmbc2fa,
 } = useTradingSession(selectedProfileId, profiles)
+
+const finishSmbc2faAndRefreshAvailability = async () => {
+  await finishSmbc2fa()
+  if (selectedProfileId.value) await forceProfileAvailability(selectedProfileId.value)
+}
 
 const { oauthApproval, oauthSettings, loadOAuthApproval, approveOAuth } = useOAuthApproval()
 
@@ -382,6 +389,7 @@ onUnmounted(() => {
           :profiles="profiles"
           :profile-availability="profileAvailability"
           :profile-availability-checked-at="profileAvailabilityCheckedAt"
+          :profile-availability-loading="profileAvailabilityLoading"
           :cron-jobs="cronJobs"
           :smbc-qr-url="smbcQrUrl"
           :smbc-balance="smbcBalance"
@@ -392,7 +400,8 @@ onUnmounted(() => {
           @add-sbi-passkey="addSbiPasskeyAndConnect"
           @add-smbc-direct-profile="addSmbcDirectProfile"
           @add-pay-pay-bank-profile="addPayPayBankProfile"
-          @finish-smbc-2fa="finishSmbc2fa"
+          @finish-smbc-2fa="finishSmbc2faAndRefreshAvailability"
+          @force-profile-availability="forceProfileAvailability"
           @connect="connect"
           @remove-sbi-passkey="removeSbiPasskey"
           @update-profile-label="updateProfileLabel"

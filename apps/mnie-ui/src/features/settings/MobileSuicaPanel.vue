@@ -17,6 +17,7 @@ const busy = ref(false)
 const error = ref('')
 const saved = ref(false)
 const props = defineProps<{ reauth?: boolean; profileId?: string }>()
+const emit = defineEmits<{ reauthenticated: [profileId: string] }>()
 
 const requestCaptcha = async () => {
   busy.value = true
@@ -47,6 +48,7 @@ const submitCaptcha = async () => {
   error.value = ''
   try {
     await submitMobileSuicaCaptcha(challengeId.value, captchaAnswer.value)
+    if (props.reauth && props.profileId) emit('reauthenticated', props.profileId)
     saved.value = true
     password.value = ''
     challengeId.value = ''

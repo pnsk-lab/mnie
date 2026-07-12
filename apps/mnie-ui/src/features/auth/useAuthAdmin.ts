@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import {
   createApiKey,
   checkProfileAvailability,
+  checkProfileAvailabilityLive,
   createLoginOptions,
   createSetupOptions,
   deleteAccountProfile,
@@ -34,6 +35,7 @@ export const useAuthAdmin = () => {
   const profiles = ref<AccountProfile[]>([])
   const profileAvailability = ref<Record<string, ProfileAvailability>>({})
   const profileAvailabilityCheckedAt = ref<Record<string, number>>({})
+  const profileAvailabilityLoading = ref<Record<string, boolean>>({})
   const availabilityRefreshMs = 10 * 60 * 1000
   const cronJobs = ref<CronJob[]>([])
   const selectedProfileId = ref('')
@@ -75,6 +77,7 @@ export const useAuthAdmin = () => {
           availabilityRefreshMs
         )
           continue
+        profileAvailabilityLoading.value[profile.id] = true
         try {
           const result = await checkProfileAvailability(profile.id)
           const value = result.availability[profile.id]
@@ -88,14 +91,29 @@ export const useAuthAdmin = () => {
           profileAvailability.value[profile.id] = {
             ok: false,
             message: cause instanceof Error ? cause.message : String(cause),
+            reason: 'UNKNOWN',
           }
+          profileAvailabilityCheckedAt.value[profile.id] = Date.now()
         } finally {
-          profileAvailabilityCheckedAt.value[profile.id] ||= Date.now()
+          profileAvailabilityLoading.value[profile.id] = false
         }
       }
       cronJobs.value = (await listCronJobs()).jobs
       selectedProfileId.value ||= profiles.value[0]?.id ?? ''
       if (options?.autoConnect && selectedProfileId.value) options.connect?.()
+    }
+  }
+
+  const forceProfileAvailability = async (profileId: string) => {
+    profileAvailabilityLoading.value[profileId] = true
+    try {
+      const result = await checkProfileAvailabilityLive(profileId)
+      const availability = result.availability[profileId]
+      if (!availability) throw new Error('Profile availability result was not returned')
+      profileAvailability.value[profileId] = availability
+      profileAvailabilityCheckedAt.value[profileId] = Date.now()
+    } finally {
+      profileAvailabilityLoading.value[profileId] = false
     }
   }
 
@@ -198,6 +216,7 @@ export const useAuthAdmin = () => {
     profiles,
     profileAvailability,
     profileAvailabilityCheckedAt,
+    profileAvailabilityLoading,
     cronJobs,
     selectedProfileId,
     setupPassword,
@@ -218,6 +237,7 @@ export const useAuthAdmin = () => {
     payPayBankAccountNo,
     payPayBankPassword,
     refresh,
+    forceProfileAvailability,
     addApiKey,
     saveApiKeySettings,
     setupOwnerPasskey,

@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   KeyRound,
   Landmark,
+  LoaderCircle,
   Pencil,
   Plus,
   RefreshCw,
@@ -37,6 +38,7 @@ const props = defineProps<{
   profiles: AccountProfile[]
   profileAvailability: Record<string, ProfileAvailability>
   profileAvailabilityCheckedAt: Record<string, number>
+  profileAvailabilityLoading: Record<string, boolean>
   cronJobs: CronJob[]
   smbcQrUrl: string
   smbcBalance: { amount: number; displayValue: string } | null
@@ -69,6 +71,7 @@ const emit = defineEmits<{
   addSmbcDirectProfile: []
   addPayPayBankProfile: []
   finishSmbc2fa: []
+  forceProfileAvailability: [profileId: string]
   connect: []
   removeSbiPasskey: [id: string]
   updateProfileLabel: [id: string, label: string]
@@ -218,8 +221,11 @@ const backToProviderChooser = () => {
 }
 
 const availabilityLabel = (availability: ProfileAvailability | undefined) => {
-  if (!availability) return '確認中'
-  return availability.ok ? '利用可' : '利用不可'
+  if (!availability) return '未確認'
+  if (availability.ok) return '利用可'
+  if (availability.reason === '2FA_REQUIRED') return '再認証必要'
+  if (availability.reason === 'CAPTCHA_REQIRED') return 'CAPTCHA 必要'
+  return '利用不可'
 }
 
 const availabilityClass = (availability: ProfileAvailability | undefined) => {
@@ -227,8 +233,16 @@ const availabilityClass = (availability: ProfileAvailability | undefined) => {
   return availability.ok ? 'text-[#8ee6b0]' : 'text-[#ffb4ab]'
 }
 
-const availabilityMessage = (availability: ProfileAvailability | undefined) =>
-  availability && !availability.ok ? String(availability.message) : undefined
+const availabilityMessage = (availability: ProfileAvailability | undefined) => {
+  if (!availability || availability.ok) return undefined
+  const message = availability.message
+  if (typeof message === 'string') return message
+  if (message && typeof message === 'object' && 'message' in message) {
+    const nestedMessage = message.message
+    if (typeof nestedMessage === 'string') return nestedMessage
+  }
+  return '詳細なエラーメッセージを取得できませんでした'
+}
 
 const availabilityCheckedLabel = (profileId: string) => {
   const checkedAt = props.profileAvailabilityCheckedAt[profileId]
@@ -497,7 +511,17 @@ const saveEditingApiKey = () => {
                   v-else-if="selectedProvider === 'mobilesuica'"
                   reauth
                   :profile-id="editedProfile.id"
+                  @reauthenticated="emit('forceProfileAvailability', $event)"
                 />
+                <div class="flex justify-end">
+                  <button
+                    :class="ui.primaryButton"
+                    type="button"
+                    @click="emit('updateProfileLabel', editedProfile.id, editedLabel)"
+                  >
+                    <Save class="h-4 w-4" aria-hidden="true" /> 保存
+                  </button>
+                </div>
                 <div
                   v-if="selectedProvider === 'smbc-direct' || selectedProvider === 'mobilesuica'"
                   v-for="job in cronJobs.filter(
@@ -523,15 +547,6 @@ const saveEditingApiKey = () => {
                   <span :class="job.lastError ? 'text-red-300' : 'text-emerald-300'">
                     {{ job.lastError ? job.lastError : job.running ? '実行中' : '有効' }}
                   </span>
-                </div>
-                <div class="flex justify-end">
-                  <button
-                    :class="ui.primaryButton"
-                    type="button"
-                    @click="emit('updateProfileLabel', editedProfile.id, editedLabel)"
-                  >
-                    <Save class="h-4 w-4" aria-hidden="true" /> 保存
-                  </button>
                 </div>
               </template>
               <p v-else class="text-sm text-red-300" role="alert">プロファイルが見つかりません。</p>
@@ -689,8 +704,15 @@ const saveEditingApiKey = () => {
                 ><small class="truncate font-semibold text-[#9aa0a9]"
                   >{{ providerCards.find((provider) => provider.id === profile.provider)?.label }} ·
                   {{ new Date(profile.createdAt).toLocaleDateString() }} に追加 ·
+                  <span
+                    v-if="props.profileAvailabilityLoading[profile.id]"
+                    class="inline-flex items-center gap-1 text-[#9aa0a9]"
+                  >
+                    <LoaderCircle class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                    <span class="sr-only">確認中</span>
+                  </span>
                   <button
-                    v-if="props.profileAvailability[profile.id]?.ok === false"
+                    v-else-if="props.profileAvailability[profile.id]?.ok === false"
                     type="button"
                     :class="availabilityClass(props.profileAvailability[profile.id])"
                     class="cursor-pointer underline decoration-current/50 underline-offset-2 hover:decoration-current"
@@ -707,14 +729,23 @@ const saveEditingApiKey = () => {
               <span class="flex flex-wrap justify-end gap-2"
                 ><button
                   :class="ui.ghostButton"
+                  class="!h-10 !w-10 !p-0"
                   type="button"
+                  title="編集"
+                  aria-label="編集"
                   @click="openProviderSetup(profile.provider, profile.id)"
                 >
-                  <Pencil class="h-4 w-4" aria-hidden="true" /> 編集</button
-                ><button :class="ui.dangerButton" type="button" @click="profileToDelete = profile">
-                  <Trash2 class="h-4 w-4" aria-hidden="true" /> 削除
-                </button></span
-              >
+                  <Pencil class="h-4 w-4" aria-hidden="true" /></button
+                ><button
+                  :class="ui.dangerButton"
+                  class="!h-10 !w-10 !p-0"
+                  type="button"
+                  title="削除"
+                  aria-label="削除"
+                  @click="profileToDelete = profile"
+                >
+                  <Trash2 class="h-4 w-4" aria-hidden="true" /></button
+              ></span>
             </article>
             <button
               class="grid min-h-20 grid-cols-[2.75rem_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl border border-dashed border-[#59616d] px-4 py-3 text-left text-[#d3e3fd] transition hover:border-[#a8c7fa] hover:bg-[#182331]"

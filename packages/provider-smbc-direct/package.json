@@ -12,11 +12,13 @@
   },
   "scripts": {
     "build": "cd ../.. && cd packages/provider-smbc-direct && vp pack",
+    "dev": "vp pack --watch",
     "clean": "rm -rf dist",
     "typecheck": "tsc"
   },
   "dependencies": {
-    "@mnie/types": "workspace:*"
+    "@mnie/types": "workspace:*",
+    "iconv-lite": "^0.7.3"
   },
   "devDependencies": {
     "@repo/tsconfig": "workspace:*",

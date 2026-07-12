@@ -342,7 +342,10 @@ export type OperationRequest<Operations, Name extends OperationName<Operations>>
 export type OperationResponse<Operations, Name extends OperationName<Operations>> =
   Operations[Name] extends OperationDefinition<unknown, infer Response> ? Response : never
 
-export type AvailabilityCheckResult = { ok: true } | { ok: false; message: unknown }
+export type AvailabilityFailureReason = 'CAPTCHA_REQIRED' | '2FA_REQUIRED' | 'UNKNOWN'
+export type AvailabilityCheckResult =
+  | { ok: true }
+  | { ok: false; message: unknown; reason: AvailabilityFailureReason }
 
 /**
  * The public contract of every provider. Provider-specific login is allowed,

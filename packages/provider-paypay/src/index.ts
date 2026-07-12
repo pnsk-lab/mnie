@@ -71,7 +71,7 @@ export const createProvider = (profile: PayPayProfile): FinancialProvider<Common
         await profile.getBalance()
         return { ok: true }
       } catch (message) {
-        return { ok: false, message }
+        return { ok: false, message, reason: 'UNKNOWN' }
       }
     },
     invoke: async (name, request) => {

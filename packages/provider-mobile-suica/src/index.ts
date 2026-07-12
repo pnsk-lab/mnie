@@ -75,6 +75,8 @@ export interface MobileSuicaProfile {
 
 const historyReaders = new WeakMap<MobileSuicaProfile, () => Promise<ParsedHistoryTableRow[]>>()
 
+class MobileSuicaCaptchaRequiredError extends Error {}
+
 /** Converts an authenticated Mobile Suica session to the provider-neutral API. */
 export const createProvider = (
   profile: MobileSuicaProfile,
@@ -94,12 +96,20 @@ export const createProvider = (
       try {
         const readHistory = historyReaders.get(profile)
         if (!readHistory) {
-          return { ok: false, message: 'Mobile Suica profile does not have a transaction reader' }
+          return {
+            ok: false,
+            message: 'Mobile Suica profile does not have a transaction reader',
+            reason: 'UNKNOWN',
+          }
         }
         await readHistory()
         return { ok: true }
-      } catch (message) {
-        return { ok: false, message }
+      } catch (cause) {
+        return {
+          ok: false,
+          message: cause instanceof Error ? cause.message : String(cause),
+          reason: cause instanceof MobileSuicaCaptchaRequiredError ? 'CAPTCHA_REQIRED' : 'UNKNOWN',
+        }
       }
     },
     invoke: async (name) => {
@@ -293,9 +303,11 @@ const usageHistoryUrl = (html: string, baseURL: string) => {
 }
 
 const parseAmount = (value: string) => {
-  const normalized = value.replace(/[￥円,\s]/g, '')
+  // The yen sign on the Shift_JIS usage-history page decodes as a backslash
+  // with WHATWG-compatible decoders (including Bun's TextDecoder).
+  const normalized = value.replace(/[￥¥\\円,\s]/g, '')
   if (!normalized || normalized === '-') return null
-  if (!/^-?\d+$/.test(normalized)) return null
+  if (!/^[+-]?\d+$/.test(normalized)) return null
   return Number(normalized)
 }
 
@@ -346,7 +358,14 @@ const parseMobileSuicaUsageHistory = (html: string): ParsedHistoryTableRow[] => 
       records.push({ ...row, kind: 'other' })
     }
   }
-  if (records.length === 0) throw new Error('usage history page did not include any usage rows')
+  if (records.length === 0) {
+    const hasLoginButton = [...html.matchAll(/class=["']([^"']*)["']/gi)].some((match) => {
+      const classes = (match[1] ?? '').split(/\s+/)
+      return classes.includes('loginBtn') && classes.includes('ButtonBox')
+    })
+    if (hasLoginButton) throw new MobileSuicaCaptchaRequiredError('logged out, CAPTCHA is needed')
+    throw new Error('usage history page did not include any usage rows')
+  }
   return records
 }
 

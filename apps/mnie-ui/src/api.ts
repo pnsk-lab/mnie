@@ -57,7 +57,12 @@ export interface AssetValuation {
 
 export type ProfileAvailability =
   | { ok: true; checkedAt?: string }
-  | { ok: false; message: unknown; checkedAt?: string }
+  | {
+      ok: false
+      message: unknown
+      reason: 'CAPTCHA_REQIRED' | '2FA_REQUIRED' | 'UNKNOWN'
+      checkedAt?: string
+    }
 
 export interface CronJob {
   id: string
@@ -165,6 +170,15 @@ export const checkProfileAvailability = (profileId: string) =>
     method: 'POST',
     body: JSON.stringify({ profileId }),
   })
+
+export const checkProfileAvailabilityLive = (profileId: string) =>
+  request<{ availability: Record<string, ProfileAvailability> }>(
+    '/admin/profiles/availability/live',
+    {
+      method: 'POST',
+      body: JSON.stringify({ profileId }),
+    },
+  )
 
 export const listCronJobs = () => request<{ jobs: CronJob[] }>('/admin/cron-jobs')
 

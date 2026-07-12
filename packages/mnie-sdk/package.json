@@ -13,6 +13,7 @@
   },
   "scripts": {
     "build": "cd ../.. && vp run @mnie/types#build && cd packages/mnie-sdk && vp pack",
+    "dev": "vp pack --watch",
     "clean": "rm -rf dist",
     "typecheck": "tsc"
   },

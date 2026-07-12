@@ -78,4 +78,4 @@ nix run 'github:pnsk-lab/mnie#mnie'
 
 ## Acknowledgment
 
-* This project is inspired by [MoneyForward](https://moneyforward.com/).
+- This project is inspired by [MoneyForward](https://moneyforward.com/).
