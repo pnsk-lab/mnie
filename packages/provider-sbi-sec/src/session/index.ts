@@ -1,11 +1,4 @@
-import {
-  createHash,
-  createPrivateKey,
-  generateKeyPairSync,
-  privateDecrypt,
-  sign,
-  constants,
-} from 'node:crypto'
+import { createHash, generateKeyPairSync, privateDecrypt, constants } from 'node:crypto'
 import { mkdtempSync, writeFileSync, unlinkSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -17,12 +10,13 @@ import type {
   ForeignStockEndpointConfig,
   ForeignStockSession,
   LoginWithPasskeyOptions,
+  PasskeyAssertionProvider,
   PasskeyLoginResponse,
-  PlaintextStoredWebAuthnCredential,
   SbiClientOptions,
   SbiSession,
 } from '../types'
 import type { SbiClientMethods } from '../methods/types'
+import { createStoredCredentialPasskeyProvider } from './passkey'
 
 interface PasskeyLoginStart {
   url: string
@@ -84,9 +78,10 @@ export const createPasskeySession = async (
   clientOptions: SbiClientOptions = {},
 ): Promise<SbiSession> => {
   const endpoints = resolveSbiEndpointConfig(options)
+  const passkeyProvider = resolvePasskeyProvider(options)
   const domesticAccess = await requestPasskeyAccessToken({
     authBaseUrl: endpoints.authBaseUrl,
-    passkeyCredential: options.passkeyCredential,
+    passkeyProvider,
     channel: 'kabu-app',
   })
   const loginResponse = await finishPasskeyLogin({
@@ -100,7 +95,7 @@ export const createPasskeySession = async (
         (
           await requestPasskeyAccessToken({
             authBaseUrl: endpoints.authBaseUrl,
-            passkeyCredential: options.passkeyCredential,
+            passkeyProvider,
             channel: 'foreign-kabu-app',
           })
         ).accessToken,
@@ -131,6 +126,14 @@ export const createPasskeySession = async (
     session.deviceIdRegistered = true
   }
   return session
+}
+
+const resolvePasskeyProvider = (options: LoginWithPasskeyOptions): PasskeyAssertionProvider => {
+  if ('passkeyProvider' in options && options.passkeyProvider) return options.passkeyProvider
+  if ('passkeyCredential' in options && options.passkeyCredential) {
+    return createStoredCredentialPasskeyProvider(options.passkeyCredential)
+  }
+  throw new Error('passkeyCredential or passkeyProvider is required')
 }
 
 const resolveSbiEndpointConfig = (options: LoginWithPasskeyOptions): SbiEndpointConfig => {
@@ -331,7 +334,7 @@ const stringField = (object: Record<string, unknown>, key: string) => {
 
 const requestPasskeyAccessToken = async (options: {
   authBaseUrl: string
-  passkeyCredential: PlaintextStoredWebAuthnCredential
+  passkeyProvider: PasskeyAssertionProvider
   channel: string
 }): Promise<PasskeyAccessToken> => {
   const started = startPasskeyLogin(options.authBaseUrl, options.channel)
@@ -366,8 +369,8 @@ const requestPasskeyAccessToken = async (options: {
   assertOk(challengeResponse, `passkey challenge (${options.channel})`)
 
   const challengeJson = await challengeResponse.json()
-  const credentialRequest = normalizeCredentialRequest(challengeJson, options.passkeyCredential)
-  const assertion = createWebAuthnAssertion(options.passkeyCredential, credentialRequest)
+  const credentialRequest = normalizeCredentialRequest(challengeJson, options.passkeyProvider.rpId)
+  const assertion = await options.passkeyProvider.createAssertion(credentialRequest)
   const csrf = credentialRequest.csrfToken ?? csrfToken
   if (!csrf) throw new Error(`missing CSRF token for passkey authentication (${options.channel})`)
 
@@ -888,7 +891,7 @@ const extractCsrfToken = (html: string) => {
 
 const normalizeCredentialRequest = (
   challengeJson: unknown,
-  credential: PlaintextStoredWebAuthnCredential,
+  providerRpId: string,
 ): CredentialRequest => {
   const root = challengeJson as Record<string, unknown>
   const data =
@@ -903,7 +906,7 @@ const normalizeCredentialRequest = (
 
   return {
     challenge,
-    rpId: pickString(publicKey.rpId) ?? credential.rpId,
+    rpId: pickString(publicKey.rpId) ?? providerRpId,
     csrfToken:
       pickString(root.csrfToken) ??
       pickString(root._csrf) ??
@@ -922,59 +925,6 @@ const pickObject = (value: unknown) => {
 
 const pickString = (value: unknown) => {
   return typeof value === 'string' && value.length > 0 ? value : undefined
-}
-
-const createWebAuthnAssertion = (
-  credential: PlaintextStoredWebAuthnCredential,
-  request: CredentialRequest,
-) => {
-  const clientDataJSON = Buffer.from(
-    JSON.stringify({
-      type: 'webauthn.get',
-      challenge: request.challenge,
-      origin: credential.origin,
-      crossOrigin: false,
-    }),
-  )
-  const signCount =
-    credential.authenticator.signCount > 0 ? credential.authenticator.signCount + 1 : 0
-  const authenticatorData = Buffer.concat([
-    createHash('sha256').update(request.rpId).digest(),
-    Buffer.from([assertionFlags(credential)]),
-    uint32be(signCount),
-  ])
-  const signedData = Buffer.concat([
-    authenticatorData,
-    createHash('sha256').update(clientDataJSON).digest(),
-  ])
-  const key = createPrivateKey({
-    key: credential.secretPlaintext.privateKey.jwk,
-    format: 'jwk',
-  })
-  const signature = sign('sha256', signedData, key)
-
-  return {
-    id: credential.credentialId,
-    rawId: credential.credentialId,
-    clientDataJSON: base64Url(clientDataJSON),
-    authenticatorData: base64Url(authenticatorData),
-    signature: base64Url(signature),
-    userHandle: credential.userHandle ?? '',
-  }
-}
-
-const assertionFlags = (credential: PlaintextStoredWebAuthnCredential) => {
-  let flags = 0x01
-  if (credential.authenticator.userVerification !== 'discouraged') flags |= 0x04
-  if (credential.authenticator.backupEligible) flags |= 0x08
-  if (credential.authenticator.backupState) flags |= 0x10
-  return flags
-}
-
-const uint32be = (value: number) => {
-  const buffer = Buffer.alloc(4)
-  buffer.writeUInt32BE(value >>> 0, 0)
-  return buffer
 }
 
 const extractCallbackUrl = (html: string) => {

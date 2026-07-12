@@ -1,5 +1,6 @@
 export { connectWithPasskey } from './provider'
 export type { SbiSecOperations } from './provider'
+export { createStoredCredentialPasskeyProvider } from './session/passkey'
 export {
   SBI_SERVER_ERROR_MESSAGES,
   SbiServerError,
@@ -10,8 +11,10 @@ export type * from '@mnie/types'
 export type {
   LoginWithPasskeyOptions,
   PasskeyLoginResponse,
+  PasskeyAssertionProvider,
   PlaintextStoredWebAuthnCredential,
   SbiClientOptions,
+  SbiEndpointOptions,
   StoredWebAuthnCredential,
   StoredWebAuthnCredentialSecret,
   AccountAssetsValuationDetail,
@@ -25,6 +28,8 @@ export type {
   ExchangeSellMethod,
   ExchangeSpecificMethod,
   WebAuthnAlgorithm,
+  WebAuthnAssertion,
+  WebAuthnAssertionRequest,
   WebAuthnJwk,
   WebAuthnTransport,
   WebAuthnUserVerification,

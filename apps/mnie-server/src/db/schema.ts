@@ -38,6 +38,15 @@ export const sbiPasskeys = sqliteTable('sbi_passkeys', {
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 })
 
+export const authManagers = sqliteTable('auth_managers', {
+  id: text('id').primaryKey(),
+  kind: text('kind', { enum: ['bitwarden'] }).notNull(),
+  label: text('label').notNull(),
+  keyringAccount: text('keyring_account').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+})
+
 export const accountProfiles = sqliteTable('account_profiles', {
   id: text('id').primaryKey(),
   provider: text('provider', {

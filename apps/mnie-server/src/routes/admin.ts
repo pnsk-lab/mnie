@@ -16,10 +16,11 @@ import {
   type SmbcDirectSession,
 } from '@mnie/provider-smbc-direct'
 import type { PlaintextStoredWebAuthnCredential } from '@mnie/provider-sbi-sec'
+import { createBitwardenAuthManager } from '@mnie/auth-bitwarden'
 import type { AvailabilityCheckResult } from '@mnie/types'
 import type { AppBindings } from '../context'
 import type { CronSystem } from '../cron'
-import { accountProfiles, sbiPasskeys } from '../db/schema'
+import { accountProfiles, authManagers, sbiPasskeys } from '../db/schema'
 import {
   createApiKey,
   listApiKeys,
@@ -34,11 +35,28 @@ import { connectSbi } from '../rpc/sbi-session'
 import { ensureInitialAssetValuations, latestAssetValuations } from '../assets'
 
 export interface StoredSbiPasskeySecret {
-  credential: PlaintextStoredWebAuthnCredential
+  source?: SbiPasskeySource
+  /** Legacy shape used before passkey sources were introduced. */
+  credential?: PlaintextStoredWebAuthnCredential
   tradePassword?: string
   deviceId?: string
   session?: unknown
 }
+
+interface StoredBitwardenAuthManagerSecret {
+  dataPath?: string
+}
+
+export type SbiPasskeySource =
+  | { kind: 'json'; credential: PlaintextStoredWebAuthnCredential }
+  | {
+      kind: 'bitwarden'
+      masterPassword: string
+      rpId: string
+      dataPath?: string
+      origin?: string
+      credentialId?: string
+    }
 
 export interface StoredSmbcDirectSecret {
   user: string
@@ -144,6 +162,86 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
         keyringAccount: undefined,
       })),
     })
+  })
+
+  app.get('/auth-managers', async (c) => {
+    const rows = await c.get('db').select().from(authManagers).orderBy(authManagers.createdAt)
+    return c.json({
+      authManagers: rows.map(({ keyringAccount: _keyringAccount, ...manager }) => manager),
+    })
+  })
+
+  app.post('/auth-managers/bitwarden', async (c) => {
+    const body = await c.req.json<{ label?: string; dataPath?: string }>()
+    if (!body.label?.trim()) return c.json({ error: 'label is required' }, 400)
+    const id = randomId('auth')
+    const keyringAccount = `auth-manager:${id}`
+    await saveSecret(keyringAccount, {
+      dataPath: body.dataPath?.trim() || undefined,
+    } satisfies StoredBitwardenAuthManagerSecret)
+    const now = new Date()
+    await c.get('db').insert(authManagers).values({
+      id,
+      kind: 'bitwarden',
+      label: body.label.trim(),
+      keyringAccount,
+      createdAt: now,
+      updatedAt: now,
+    })
+    return c.json(
+      {
+        authManager: {
+          id,
+          kind: 'bitwarden',
+          label: body.label.trim(),
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      201,
+    )
+  })
+
+  app.delete('/auth-managers/:id', async (c) => {
+    const [row] = await c
+      .get('db')
+      .select()
+      .from(authManagers)
+      .where(eq(authManagers.id, c.req.param('id')))
+      .limit(1)
+    if (!row) return c.json({ error: 'auth manager not found' }, 404)
+    await deleteSecret(row.keyringAccount)
+    await c.get('db').delete(authManagers).where(eq(authManagers.id, row.id))
+    return c.json({ ok: true })
+  })
+
+  app.post('/auth-managers/:id/fill', async (c) => {
+    const [row] = await c
+      .get('db')
+      .select()
+      .from(authManagers)
+      .where(eq(authManagers.id, c.req.param('id')))
+      .limit(1)
+    if (!row) return c.json({ error: 'auth manager not found' }, 404)
+    const body = await c.req.json<{ provider?: string; masterPassword?: string }>()
+    if (!body.masterPassword) return c.json({ error: 'masterPassword is required' }, 400)
+    const config = c.get('config')
+    const providerUrl =
+      body.provider === 'sbisec'
+        ? config.authBaseUrl
+        : body.provider === 'smbc-direct'
+          ? (config.smbcDirectLoginBaseUrl ?? config.smbcDirectBaseUrl)
+          : body.provider === 'mobilesuica'
+            ? config.mobileSuicaBaseUrl
+            : body.provider === 'paypay-bank'
+              ? config.payPayBankBaseUrl
+              : undefined
+    if (!providerUrl) return c.json({ error: 'provider origin is not configured' }, 400)
+    const origin = new URL(providerUrl).origin
+    const secret = await readSecret<StoredBitwardenAuthManagerSecret>(row.keyringAccount)
+    const manager = createBitwardenAuthManager({ ...secret, masterPassword: body.masterPassword })
+    const credentials = await manager.credentials({ origin })
+    return c.json({ credentials })
   })
 
   app.get('/profiles', async (c) => {
@@ -516,19 +614,34 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
   app.post('/sbi-passkeys', async (c) => {
     const body = await c.req.json<{
       label?: string
-      credential?: PlaintextStoredWebAuthnCredential
+      source?: SbiPasskeySource
       tradePassword?: string
       deviceId?: string
     }>()
-    if (!body.label?.trim() || !body.credential) {
-      return c.json({ error: 'label and credential are required' }, 400)
+    if (!body.label?.trim()) {
+      return c.json({ error: 'label is required' }, 400)
+    }
+    if (!body.source || typeof body.source !== 'object') {
+      return c.json({ error: 'source is required' }, 400)
+    }
+    if (body.source.kind === 'json' && !body.source.credential) {
+      return c.json({ error: 'source.credential is required' }, 400)
+    }
+    if (
+      body.source.kind === 'bitwarden' &&
+      (!body.source.masterPassword?.trim() || !body.source.rpId?.trim())
+    ) {
+      return c.json({ error: 'source.masterPassword and source.rpId are required' }, 400)
+    }
+    if (body.source.kind !== 'json' && body.source.kind !== 'bitwarden') {
+      return c.json({ error: 'unsupported source.kind' }, 400)
     }
 
     const now = new Date()
     const id = randomId('sbi')
     const keyringAccount = `sbi-passkey:${id}`
     await saveSecret(keyringAccount, {
-      credential: body.credential,
+      source: body.source,
       tradePassword: body.tradePassword,
       deviceId: body.deviceId,
     } satisfies StoredSbiPasskeySecret)

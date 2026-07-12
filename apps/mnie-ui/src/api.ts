@@ -37,6 +37,38 @@ export interface SbiPasskey {
   updatedAt: string
 }
 
+export interface AuthManagerConfig {
+  id: string
+  kind: 'bitwarden'
+  label: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface FilledAuthCredential {
+  id: string
+  name: string
+  username?: string
+  password?: string
+  passkeys: Array<{
+    credentialId: string
+    rpId: string
+    userName?: string
+    portableCredential?: unknown
+  }>
+}
+
+export type SbiPasskeySource =
+  | { kind: 'json'; credential: unknown }
+  | {
+      kind: 'bitwarden'
+      masterPassword: string
+      rpId: string
+      dataPath?: string
+      origin?: string
+      credentialId?: string
+    }
+
 export interface AccountProfile {
   id: string
   provider: 'sbisec' | 'smbc-direct' | 'mobilesuica' | 'paypay-bank'
@@ -141,9 +173,31 @@ export const revokeApiKey = (id: string) =>
 
 export const listSbiPasskeys = () => request<{ passkeys: SbiPasskey[] }>('/admin/sbi-passkeys')
 
+export const listAuthManagers = () =>
+  request<{ authManagers: AuthManagerConfig[] }>('/admin/auth-managers')
+
+export const saveBitwardenAuthManager = (payload: { label: string; dataPath?: string }) =>
+  request<{ authManager: AuthManagerConfig }>('/admin/auth-managers/bitwarden', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+
+export const deleteAuthManager = (id: string) =>
+  request<{ ok: true }>(`/admin/auth-managers/${id}`, { method: 'DELETE' })
+
+export const fillFromAuthManager = (
+  id: string,
+  provider: AccountProfile['provider'],
+  masterPassword: string,
+) =>
+  request<{ credentials: FilledAuthCredential[] }>(`/admin/auth-managers/${id}/fill`, {
+    method: 'POST',
+    body: JSON.stringify({ provider, masterPassword }),
+  })
+
 export const saveSbiPasskey = (payload: {
   label: string
-  credential: unknown
+  source: SbiPasskeySource
   tradePassword?: string
   deviceId?: string
 }) =>

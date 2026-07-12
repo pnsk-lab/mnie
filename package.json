@@ -28,7 +28,8 @@
   "devDependencies": {
     "@repo/tsconfig": "workspace:*",
     "@types/bun": "latest",
-    "vite-plus": "^0.1.24"
+    "vite-plus": "^0.1.24",
+    "vitest": "^4.1.10"
   },
   "peerDependencies": {
     "typescript": "^5"

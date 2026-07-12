@@ -1,5 +1,5 @@
 {
-  "name": "@mnie/provider-smbc-direct",
+  "name": "@mnie/auth-bitwarden",
   "license": "MIT",
   "type": "module",
   "module": "./dist/index.mjs",
@@ -7,19 +7,19 @@
   "exports": {
     ".": {
       "types": "./src/index.ts",
-      "bun": "./src/index.ts",
       "import": "./dist/index.mjs"
     }
   },
   "scripts": {
-    "build": "cd ../.. && cd packages/provider-smbc-direct && vp pack",
+    "build": "cd ../.. && cd packages/auth-bitwarden && vp pack",
     "dev": "vp pack --watch",
     "clean": "rm -rf dist",
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@mnie/provider-sbi-sec": "workspace:*",
     "@mnie/types": "workspace:*",
-    "iconv-lite": "^0.7.3"
+    "@node-rs/argon2": "^2.0.2"
   },
   "devDependencies": {
     "@repo/tsconfig": "workspace:*",

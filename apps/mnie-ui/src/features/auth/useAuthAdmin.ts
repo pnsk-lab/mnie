@@ -7,12 +7,16 @@ import {
   createLoginOptions,
   createSetupOptions,
   deleteAccountProfile,
+  deleteAuthManager,
+  fillFromAuthManager,
   getStatus,
   listApiKeys,
+  listAuthManagers,
   listSbiPasskeys,
   listAccountProfiles,
   listCronJobs,
   saveSbiPasskey,
+  saveBitwardenAuthManager,
   saveSmbcDirectProfile,
   savePayPayBankProfile,
   updateApiKeySettings,
@@ -21,6 +25,7 @@ import {
   verifySetup,
   type ApiKey,
   type AccountProfile,
+  type AuthManagerConfig,
   type AuthStatus,
   type CronJob,
   type ProfileAvailability,
@@ -32,6 +37,7 @@ export const useAuthAdmin = () => {
   const status = ref<AuthStatus>({ configured: true, authenticated: false })
   const apiKeys = ref<ApiKey[]>([])
   const sbiPasskeys = ref<SbiPasskey[]>([])
+  const authManagers = ref<AuthManagerConfig[]>([])
   const profiles = ref<AccountProfile[]>([])
   const profileAvailability = ref<Record<string, ProfileAvailability>>({})
   const profileAvailabilityCheckedAt = ref<Record<string, number>>({})
@@ -45,7 +51,11 @@ export const useAuthAdmin = () => {
   const newApiKeySettings = ref(defaultApiKeyPolicy())
   const newApiToken = ref('')
   const sbiLabel = ref('Main profile')
-  const sbiCredentialJson = ref('')
+  const authManagerLabel = ref('Bitwarden')
+  const authManagerDataPath = ref('')
+  const authManagerMasterPassword = ref('')
+  const selectedAuthManagerId = ref('')
+  const sbiAuthCredential = ref<unknown>()
   const tradePassword = ref('')
   const sbiDeviceId = ref('')
   const smbcLabel = ref('SMBC Direct')
@@ -70,6 +80,8 @@ export const useAuthAdmin = () => {
     if (status.value.authenticated) {
       apiKeys.value = (await listApiKeys()).apiKeys.filter((key) => !key.revokedAt)
       sbiPasskeys.value = (await listSbiPasskeys()).passkeys
+      authManagers.value = (await listAuthManagers()).authManagers
+      selectedAuthManagerId.value ||= authManagers.value[0]?.id ?? ''
       profiles.value = (await listAccountProfiles()).profiles
       for (const profile of profiles.value) {
         if (
@@ -161,17 +173,73 @@ export const useAuthAdmin = () => {
   }
 
   const addSbiPasskey = async () => {
+    if (!sbiAuthCredential.value) {
+      throw new Error('Auth Manager からパスキーを読み込んでください')
+    }
     const { passkey } = await saveSbiPasskey({
       label: sbiLabel.value,
-      credential: JSON.parse(sbiCredentialJson.value),
+      source: {
+        kind: 'json',
+        credential: sbiAuthCredential.value,
+      },
       tradePassword: tradePassword.value || undefined,
       deviceId: sbiDeviceId.value || undefined,
     })
     selectedProfileId.value = passkey.id
-    sbiCredentialJson.value = ''
+    sbiAuthCredential.value = undefined
     tradePassword.value = ''
     sbiDeviceId.value = ''
     await refresh()
+  }
+
+  const addAuthManager = async () => {
+    const { authManager } = await saveBitwardenAuthManager({
+      label: authManagerLabel.value,
+      dataPath: authManagerDataPath.value.trim() || undefined,
+    })
+    selectedAuthManagerId.value = authManager.id
+    await refresh()
+  }
+
+  const removeAuthManager = async (id: string) => {
+    await deleteAuthManager(id)
+    if (selectedAuthManagerId.value === id) selectedAuthManagerId.value = ''
+    await refresh()
+  }
+
+  const fillProviderCredentials = async (provider: AccountProfile['provider']) => {
+    if (!selectedAuthManagerId.value) throw new Error('Auth Manager が設定されていません')
+    if (!authManagerMasterPassword.value) throw new Error('Master Password を入力してください')
+    const credentials = await fillFromAuthManager(
+      selectedAuthManagerId.value,
+      provider,
+      authManagerMasterPassword.value,
+    )
+      .then((result) => result.credentials)
+      .finally(() => {
+        authManagerMasterPassword.value = ''
+      })
+    if (credentials.length !== 1) {
+      throw new Error(`認証情報を1件に特定できませんでした（${credentials.length}件）`)
+    }
+    const credential = credentials[0]!
+    if (provider === 'sbisec') {
+      if (credential.passkeys.length !== 1) {
+        throw new Error(`パスキーを1件に特定できませんでした（${credential.passkeys.length}件）`)
+      }
+      sbiAuthCredential.value = credential.passkeys[0]!.portableCredential
+      if (!sbiAuthCredential.value) throw new Error('パスキーをエクスポートできませんでした')
+      return
+    }
+    if (provider === 'smbc-direct') {
+      smbcUser.value = credential.username ?? ''
+      smbcPassword.value = credential.password ?? ''
+      return
+    }
+    if (provider === 'paypay-bank') {
+      payPayBankBranchNo.value = credential.username ?? ''
+      payPayBankPassword.value = credential.password ?? ''
+    }
   }
 
   const removeSbiPasskey = async (id: string) => {
@@ -213,6 +281,7 @@ export const useAuthAdmin = () => {
     status,
     apiKeys,
     sbiPasskeys,
+    authManagers,
     profiles,
     profileAvailability,
     profileAvailabilityCheckedAt,
@@ -225,7 +294,11 @@ export const useAuthAdmin = () => {
     newApiKeySettings,
     newApiToken,
     sbiLabel,
-    sbiCredentialJson,
+    authManagerLabel,
+    authManagerDataPath,
+    authManagerMasterPassword,
+    selectedAuthManagerId,
+    sbiAuthCredential,
     tradePassword,
     sbiDeviceId,
     smbcLabel,
@@ -243,6 +316,9 @@ export const useAuthAdmin = () => {
     setupOwnerPasskey,
     loginWithPasskey,
     addSbiPasskey,
+    addAuthManager,
+    removeAuthManager,
+    fillProviderCredentials,
     addSmbcDirectProfile,
     addPayPayBankProfile,
     removeSbiPasskey,

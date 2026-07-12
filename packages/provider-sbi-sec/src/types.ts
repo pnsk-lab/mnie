@@ -76,6 +76,26 @@ export type PlaintextStoredWebAuthnCredential = Omit<StoredWebAuthnCredential, '
   secretPlaintext: StoredWebAuthnCredentialSecret
 }
 
+export interface WebAuthnAssertionRequest {
+  challenge: string
+  rpId: string
+}
+
+export interface WebAuthnAssertion {
+  id: string
+  rawId: string
+  clientDataJSON: string
+  authenticatorData: string
+  signature: string
+  userHandle: string
+}
+
+export interface PasskeyAssertionProvider {
+  readonly rpId: string
+  readonly origin: string
+  createAssertion(request: WebAuthnAssertionRequest): Promise<WebAuthnAssertion> | WebAuthnAssertion
+}
+
 export interface PasskeyLoginResponse {
   type: 'passkey-login-response'
   requestUrl: string
@@ -127,20 +147,7 @@ export interface MainSiteSession {
   authPromise?: Promise<MainSiteAuthCache>
 }
 
-export interface SbiSession {
-  mtsBaseUrl: string
-  izanagiBaseUrl?: string
-  foreignStock?: ForeignStockSession
-  mainSite?: MainSiteSession
-  profile: AccountProfile
-  loginResponse: PasskeyLoginResponse
-  tradePassword?: string
-  deviceIdRegistered?: boolean
-  tradeAuthentication?: SbiTradeAuthenticationOptions
-}
-
-export interface LoginWithPasskeyOptions {
-  passkeyCredential: PlaintextStoredWebAuthnCredential
+export interface SbiEndpointOptions {
   authBaseUrl?: string
   mtsBaseUrl?: string
   izanagiBaseUrl?: string
@@ -158,6 +165,24 @@ export interface LoginWithPasskeyOptions {
   mainSiteExchangeOrderConfirmPath?: string
   mainSiteExchangeOrderCompletePath?: string
 }
+
+export interface SbiSession {
+  mtsBaseUrl: string
+  izanagiBaseUrl?: string
+  foreignStock?: ForeignStockSession
+  mainSite?: MainSiteSession
+  profile: AccountProfile
+  loginResponse: PasskeyLoginResponse
+  tradePassword?: string
+  deviceIdRegistered?: boolean
+  tradeAuthentication?: SbiTradeAuthenticationOptions
+}
+
+export type LoginWithPasskeyOptions = SbiEndpointOptions &
+  (
+    | { passkeyCredential: PlaintextStoredWebAuthnCredential; passkeyProvider?: never }
+    | { passkeyProvider: PasskeyAssertionProvider; passkeyCredential?: never }
+  )
 
 export interface SbiClientOptions {
   tradePassword?: string

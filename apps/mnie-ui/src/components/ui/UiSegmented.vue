@@ -5,7 +5,7 @@ import { computed } from 'vue'
 
 const props = defineProps<{
   modelValue: T
-  options: Array<{ label: string; value: T; tone?: 'buy' | 'sell' }>
+  options: ReadonlyArray<{ label: string; value: T; tone?: 'buy' | 'sell' }>
 }>()
 
 const groupId = `segmented-indicator-${Math.random().toString(36).slice(2)}`

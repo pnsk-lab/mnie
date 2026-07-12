@@ -1,0 +1,18 @@
+export {
+  decryptString,
+  deriveMasterKey,
+  keyFromBytes,
+  stretchKey,
+  type BitwardenKdfConfig,
+  type SymmetricKey,
+} from './crypto'
+export {
+  defaultBitwardenDataJsonPath,
+  openBitwardenVault,
+  openBitwardenVaultFromObject,
+  type BitwardenPasskey,
+  type BitwardenCredential,
+  type BitwardenVault,
+} from './vault'
+export { createBitwardenPasskeyProvider, type BitwardenPasskeyProviderOptions } from './provider'
+export { createBitwardenAuthManager, type BitwardenAuthManagerOptions } from './auth-manager'
