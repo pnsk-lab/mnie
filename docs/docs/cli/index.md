@@ -68,6 +68,24 @@ mnie rpc call account.positions.cash \
 Omit `--profile` after selecting a default with `mnie profile use`. Keep it explicit in automation when multiple environments exist.
 :::
 
+## Export Beancount
+
+Export posted money transactions for a date range as standard Beancount plaintext.
+
+```text
+mnie export beancount --from <YYYY-MM-DD> --to <YYYY-MM-DD> [--profile <name>] [--profile-id <id>]
+```
+
+```bash
+mnie export beancount \
+  --from 2026-01-01 \
+  --to 2026-06-30 \
+  --profile local \
+  > main.bean
+```
+
+All financial profiles are included unless `--profile-id` is supplied. Source accounts are derived under `Assets:Mnie`, uncategorized counterpart accounts balance each entry, and metadata preserves the Mnie transaction, profile, and kind IDs. Unsupported, non-posted, or non-money transactions fail the command instead of producing a partial ledger.
+
 ## Trade
 
 Read operations can be called directly. Live placement, correction, and cancellation require explicit trading permission in their JSON parameters.
@@ -92,4 +110,5 @@ mnie profile use <name>
 mnie login --origin <origin>
 mnie rpc methods
 mnie rpc call <method> [json-params]
+mnie export beancount --from <YYYY-MM-DD> --to <YYYY-MM-DD> [--profile <name>] [--profile-id <id>]
 ```
