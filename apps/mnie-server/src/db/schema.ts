@@ -69,6 +69,25 @@ export const assetValuations = sqliteTable('asset_valuations', {
   capturedAt: integer('captured_at', { mode: 'timestamp_ms' }).notNull(),
 })
 
+export const historyTransactions = sqliteTable(
+  'history_transactions',
+  {
+    profileId: text('profile_id').notNull(),
+    transactionId: text('transaction_id').notNull(),
+    occurredAt: integer('occurred_at', { mode: 'timestamp_ms' }).notNull(),
+    transaction: text('transaction_json', { mode: 'json' }).$type<unknown>().notNull(),
+    fetchedAt: integer('fetched_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.profileId, table.transactionId] })],
+)
+
+export const historySyncs = sqliteTable('history_syncs', {
+  profileId: text('profile_id').primaryKey(),
+  coveredFrom: integer('covered_from', { mode: 'timestamp_ms' }).notNull(),
+  coveredTo: integer('covered_to', { mode: 'timestamp_ms' }).notNull(),
+  fetchedAt: integer('fetched_at', { mode: 'timestamp_ms' }).notNull(),
+})
+
 export const apiKeys = sqliteTable(
   'api_keys',
   {

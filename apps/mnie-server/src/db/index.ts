@@ -96,6 +96,28 @@ export const createDb = (path: string) => {
     ON asset_valuations (profile_id, captured_at DESC)
   `)
   sqlite.run(`
+    CREATE TABLE IF NOT EXISTS history_transactions (
+      profile_id TEXT NOT NULL,
+      transaction_id TEXT NOT NULL,
+      occurred_at INTEGER NOT NULL,
+      transaction_json TEXT NOT NULL,
+      fetched_at INTEGER NOT NULL,
+      PRIMARY KEY (profile_id, transaction_id)
+    )
+  `)
+  sqlite.run(`
+    CREATE INDEX IF NOT EXISTS history_transactions_profile_occurred_idx
+    ON history_transactions (profile_id, occurred_at DESC)
+  `)
+  sqlite.run(`
+    CREATE TABLE IF NOT EXISTS history_syncs (
+      profile_id TEXT PRIMARY KEY,
+      covered_from INTEGER NOT NULL,
+      covered_to INTEGER NOT NULL,
+      fetched_at INTEGER NOT NULL
+    )
+  `)
+  sqlite.run(`
     INSERT OR IGNORE INTO account_profiles (id, provider, label, keyring_account, created_at, updated_at)
     SELECT id, 'sbisec', label, keyring_account, created_at, updated_at FROM sbi_passkeys
   `)

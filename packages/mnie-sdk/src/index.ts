@@ -52,7 +52,7 @@ export const createLocalWorkspace = (
   const providers = new Map(entries.map((entry) => [entry.profile.id, entry]))
   if (providers.size !== entries.length) throw new Error('profile IDs must be unique')
   return {
-    operations: () => ['profiles.list', 'portfolio.valuation.get'],
+    operations: () => ['profiles.list', 'portfolio.valuation.get', 'history.list'],
     profiles: async () => entries.map((entry) => entry.profile),
     profile: (profileId) => {
       const entry = providers.get(profileId)
@@ -61,6 +61,9 @@ export const createLocalWorkspace = (
     },
     invoke: async (name, request) => {
       if (name === 'profiles.list') return entries.map((entry) => entry.profile) as never
+      if (name === 'history.list') {
+        throw new Error('local workspace history.list requires a persistent history store')
+      }
       if (name !== 'portfolio.valuation.get')
         throw new Error(`unsupported workspace operation: ${name}`)
       const input = request as { baseCurrency: string; profileIds?: string[] }

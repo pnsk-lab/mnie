@@ -104,6 +104,7 @@ export const createProvider = (profile: SmbcDirectProfile): FinancialProvider<Co
       'accounts.list',
       'balances.list',
       'transactions.list',
+      'history.list',
       'transfers.recipients.list',
     ],
     checkAvailability: async () => {
@@ -164,6 +165,21 @@ export const createProvider = (profile: SmbcDirectProfile): FinancialProvider<Co
             : { ...base, kind: 'withdrawal' as const, direction: 'debit' as const }
         })
         return { items } as Page<Transaction> as never
+      }
+      if (name === 'history.list') {
+        const input = request as HistoryListRequest
+        if (input.kinds?.some((kind) => kind !== 'transaction')) {
+          throw new Error('SMBC Direct history.list supports transaction history only')
+        }
+        const transactions = (await createProvider(profile).invoke('transactions.list', input))
+          .items
+        return {
+          items: transactions.map((transaction) => ({
+            kind: 'transaction' as const,
+            occurredAt: transaction.occurredAt,
+            transaction,
+          })),
+        } as Page<HistoryItem> as never
       }
       if (name === 'transfers.recipients.list') {
         const value = await profile.getTransferRecipients()
@@ -865,6 +881,8 @@ import type {
   Balance,
   CommonOperations,
   FinancialProvider,
+  HistoryItem,
+  HistoryListRequest,
   Page,
   Transaction,
 } from '@mnie/types'

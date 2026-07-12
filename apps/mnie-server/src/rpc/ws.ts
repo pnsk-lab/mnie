@@ -15,6 +15,7 @@ import { readSecret, saveSecret } from '../security/keyring'
 import { assertApiKeyMethodAllowed } from '../security/trade-limits'
 import { connectSbi } from './sbi-session'
 import { fetchAssetValuation } from '../assets'
+import { listHistory } from '../history'
 
 interface JsonRpcRequest {
   jsonrpc?: '2.0'
@@ -145,7 +146,7 @@ const handleRpc = async (
   request: JsonRpcRequest,
 ) => {
   if (request.method === 'workspace.operations') {
-    return result(request.id, ['profiles.list', 'portfolio.valuation.get'])
+    return result(request.id, ['profiles.list', 'portfolio.valuation.get', 'history.list'])
   }
   if (request.method === 'workspace.invoke') {
     assertReadScope(state)
@@ -160,6 +161,9 @@ const handleRpc = async (
           label: profile.label,
         })),
       )
+    }
+    if (params.operation === 'history.list') {
+      return result(request.id, await listHistory(db, config, params.input ?? {}))
     }
     if (params.operation === 'portfolio.valuation.get') {
       const baseCurrency = String(params.input?.baseCurrency ?? 'JPY')

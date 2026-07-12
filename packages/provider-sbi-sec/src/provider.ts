@@ -3,6 +3,8 @@ import type {
   Balance,
   CommonOperations,
   FinancialProvider,
+  HistoryItem,
+  HistoryListRequest,
   InvestmentOperations,
   InvestmentOrder,
   InvestmentPosition,
@@ -63,6 +65,7 @@ const createProvider = (client: SbiClientMethods): FinancialProvider<SbiSecOpera
       'balances.list',
       'assets.valuation.get',
       'transactions.list',
+      'history.list',
       'investments.positions.list',
       'investments.orders.list',
       'market.index.major',
@@ -216,6 +219,20 @@ const createProvider = (client: SbiClientMethods): FinancialProvider<SbiSecOpera
           },
         }))
         return { items: transactions } as Page<Transaction> as never
+      }
+      if (name === 'history.list') {
+        const input = request as HistoryListRequest
+        if (input.kinds?.some((kind) => kind !== 'transaction')) {
+          throw new Error('SBI Securities history.list supports transaction history only')
+        }
+        const transactions = (await createProvider(client).invoke('transactions.list', input)).items
+        return {
+          items: transactions.map((transaction) => ({
+            kind: 'transaction' as const,
+            occurredAt: transaction.occurredAt,
+            transaction,
+          })),
+        } as Page<HistoryItem> as never
       }
       throw new Error(`unsupported SBI Securities operation: ${name}`)
     },

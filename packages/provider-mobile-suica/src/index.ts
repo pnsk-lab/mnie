@@ -91,7 +91,7 @@ export const createProvider = (
     descriptor: { id: 'mobile-suica', name: 'Mobile Suica' },
     accountId: account.id,
     capabilities: () => ['accounts:read', 'transactions:read', 'transit-cards:read'],
-    operations: () => ['accounts.list', 'transactions.list'],
+    operations: () => ['accounts.list', 'transactions.list', 'history.list'],
     checkAvailability: async () => {
       try {
         const readHistory = historyReaders.get(profile)
@@ -112,13 +112,28 @@ export const createProvider = (
         }
       }
     },
-    invoke: async (name) => {
+    invoke: async (name, request) => {
       if (name === 'accounts.list') return { items: [account] } as Page<Account> as never
       if (name === 'transactions.list') {
         const readHistory = historyReaders.get(profile)
         if (!readHistory) throw new Error('Mobile Suica profile does not have a transaction reader')
         const items = (await readHistory()).map((row) => transactionFromHistoryRow(account.id, row))
         return { items } as Page<Transaction> as never
+      }
+      if (name === 'history.list') {
+        const input = request as HistoryListRequest
+        if (input.kinds?.some((kind) => kind !== 'transaction')) {
+          throw new Error('Mobile Suica history.list supports transaction history only')
+        }
+        const transactions = (await createProvider(profile).invoke('transactions.list', input))
+          .items
+        return {
+          items: transactions.map((transaction) => ({
+            kind: 'transaction' as const,
+            occurredAt: transaction.occurredAt,
+            transaction,
+          })),
+        } as Page<HistoryItem> as never
       }
       throw new Error(`unsupported Mobile Suica operation: ${name}`)
     },
@@ -573,4 +588,12 @@ export const importSession = async (session: MobileSuicaSession): Promise<Mobile
   jar.import(session.cookies)
   return createProfile(baseURL, session.user, session.password, jar, historyUrl)
 }
-import type { Account, CommonOperations, FinancialProvider, Page, Transaction } from '@mnie/types'
+import type {
+  Account,
+  CommonOperations,
+  FinancialProvider,
+  HistoryItem,
+  HistoryListRequest,
+  Page,
+  Transaction,
+} from '@mnie/types'

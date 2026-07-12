@@ -87,6 +87,24 @@ export interface AssetValuation {
   capturedAt: string
 }
 
+export interface HistoryItem {
+  kind: 'transaction' | 'valuation' | 'snapshot'
+  profileId?: string
+  occurredAt: string
+  transaction?: MobileSuicaTransaction & { accountId: string }
+  snapshot?: {
+    accountId: string
+    capturedAt: string
+    balances: unknown[]
+    valuation?: {
+      amount: { currency: string; value: string }
+      asOf: string
+      holdingsAmount?: { currency: string; value: string }
+      cashAmount?: { currency: string; value: string }
+    }
+  }
+}
+
 export type ProfileAvailability =
   | { ok: true; checkedAt?: string }
   | {
@@ -213,6 +231,20 @@ export const listAccountProfiles = () => request<{ profiles: AccountProfile[] }>
 
 export const listLatestAssetValuations = () =>
   request<{ valuations: AssetValuation[] }>('/admin/asset-valuations/latest')
+
+export const listHistory = (
+  input: {
+    profileIds?: string[]
+    from?: string
+    to?: string
+    kinds?: Array<'transaction' | 'valuation' | 'snapshot'>
+    limit?: number
+  } = {},
+) =>
+  request<{ items: HistoryItem[] }>('/admin/history', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
 
 export const checkAccountProfileAvailability = () =>
   request<{ availability: Record<string, ProfileAvailability> }>('/admin/profiles/availability', {

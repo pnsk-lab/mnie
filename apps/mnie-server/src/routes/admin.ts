@@ -33,6 +33,7 @@ import { deleteSecret, saveSecret } from '../security/keyring'
 import { readSecret } from '../security/keyring'
 import { connectSbi } from '../rpc/sbi-session'
 import { ensureInitialAssetValuations, latestAssetValuations } from '../assets'
+import { listHistory } from '../history'
 
 export interface StoredSbiPasskeySecret {
   source?: SbiPasskeySource
@@ -254,6 +255,11 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
   app.get('/asset-valuations/latest', async (c) => {
     await ensureInitialAssetValuations(c.get('db'), c.get('config'))
     return c.json({ valuations: await latestAssetValuations(c.get('db')) })
+  })
+
+  app.post('/history', async (c) => {
+    const input = await c.req.json<Record<string, unknown>>().catch(() => ({}))
+    return c.json(await listHistory(c.get('db'), c.get('config'), input))
   })
 
   let availabilityRequest:

@@ -188,6 +188,25 @@ export interface DateRangeRequest extends PageRequest {
   to?: string
 }
 
+export type HistoryKind = 'transaction' | 'valuation' | 'snapshot'
+
+export interface HistoryListRequest extends DateRangeRequest {
+  kinds?: HistoryKind[]
+}
+
+export interface AssetSnapshot {
+  accountId: string
+  capturedAt: string
+  balances: Balance[]
+  valuation?: AssetValuation
+  positions?: InvestmentPosition[]
+}
+
+export type HistoryItem =
+  | { kind: 'transaction'; occurredAt: string; profileId?: string; transaction: Transaction }
+  | { kind: 'valuation'; occurredAt: string; profileId?: string; valuation: AssetValuation }
+  | { kind: 'snapshot'; occurredAt: string; profileId?: string; snapshot: AssetSnapshot }
+
 export interface Page<Item> {
   items: Item[]
   nextCursor?: string
@@ -323,6 +342,7 @@ export type CommonOperations = {
   'balances.list': OperationDefinition<{ accountId?: string }, Balance[]>
   'assets.valuation.get': OperationDefinition<{ accountId?: string }, AssetValuation>
   'transactions.list': OperationDefinition<DateRangeRequest, Page<Transaction>>
+  'history.list': OperationDefinition<HistoryListRequest, Page<HistoryItem>>
   'transfers.recipients.list': OperationDefinition<PageRequest, Page<TransferRecipient>>
 }
 
@@ -330,6 +350,10 @@ export type FinancialOperations = CommonOperations & InvestmentOperations & Pens
 
 export type WorkspaceOperations = {
   'profiles.list': OperationDefinition<{}, ProfileDescriptor[]>
+  'history.list': OperationDefinition<
+    HistoryListRequest & { profileIds?: string[] },
+    Page<HistoryItem>
+  >
   'portfolio.valuation.get': OperationDefinition<
     { baseCurrency: string; profileIds?: string[] },
     PortfolioValuation

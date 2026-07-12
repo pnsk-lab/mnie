@@ -1,6 +1,13 @@
 import iconv from 'iconv-lite'
 import { parse, type HTMLElement } from 'node-html-parser'
-import type { FinancialProvider, PensionOperations } from '@mnie/types'
+import type {
+  CommonOperations,
+  FinancialProvider,
+  HistoryItem,
+  HistoryListRequest,
+  Page,
+  PensionOperations,
+} from '@mnie/types'
 
 export type {
   PensionContribution,
@@ -83,7 +90,7 @@ export class Nissay401kAuthError extends Nissay401kError {
   override name = 'Nissay401kAuthError'
 }
 
-export type Nissay401kOperations = PensionOperations
+export type Nissay401kOperations = PensionOperations & Pick<CommonOperations, 'history.list'>
 
 export interface Nissay401kProfile extends FinancialProvider<Nissay401kOperations> {
   readonly baseURL: string
@@ -280,6 +287,7 @@ export const createNissay401kClient = (options: Nissay401kClientOptions): Nissay
         'pension.assets.current.get',
         'pension.contribution.get',
         'pension.assets.history.list',
+        'history.list',
       ],
       checkAvailability: async () => {
         try {
@@ -294,6 +302,25 @@ export const createNissay401kClient = (options: Nissay401kClientOptions): Nissay
         if (name === 'pension.assets.current.get') return result.getCurrentAssets() as never
         if (name === 'pension.contribution.get') return result.getContribution() as never
         if (name === 'pension.assets.history.list') return result.getHistoricalAssets() as never
+        if (name === 'history.list') {
+          const input = request as HistoryListRequest
+          if (input.kinds?.some((kind) => kind !== 'valuation')) {
+            throw new Nissay401kError('Nissay 401k history.list supports valuation history only')
+          }
+          const history = await result.getHistoricalAssets()
+          const items: HistoryItem[] = history.entries.map((entry) => {
+            const occurredAt = entry.date.toISOString()
+            return {
+              kind: 'valuation',
+              occurredAt,
+              valuation: {
+                amount: { currency: 'JPY', value: String(entry.totalAsset) },
+                asOf: occurredAt,
+              },
+            }
+          })
+          return { items } as Page<HistoryItem> as never
+        }
         throw new Error(`unsupported Nissay 401k operation: ${name}`)
       },
       exportSession: () => ({ baseURL, ...values, cookies: jar.export() }),
