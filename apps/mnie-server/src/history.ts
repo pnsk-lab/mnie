@@ -2,12 +2,12 @@ import { and, asc, eq, gte, inArray, lte } from 'drizzle-orm'
 import type { HistoryItem, HistoryListRequest, Transaction } from '@mnie/types'
 import type { Db } from './db'
 import { accountProfiles, assetValuations, historySyncs, historyTransactions } from './db/schema'
-import { withProfileLock } from './profile-lock'
 import type { ProviderRegistry } from './providers/registry'
 
 const refreshIntervalMs = 5 * 60 * 60_000
 const defaultRangeMs = 30 * 24 * 60 * 60_000
 const initialHistoryFrom = new Date(0)
+const smbcDirectInitialHistoryFrom = new Date('2019-01-01T00:00:00+09:00')
 type Profile = typeof accountProfiles.$inferSelect
 
 const requestedRange = (request: HistoryListRequest) => {
@@ -40,13 +40,16 @@ const syncTransactions = async (
         throw new Error(`${profile.provider} does not provide transaction history`)
       }
       const fetchPage = async (rangeFrom: Date, rangeTo: Date): Promise<HistoryItem[]> => {
-        const input = providers.historyListInput(profile, rangeFrom, rangeTo)
+        const range = providers.normalizeHistoryRange(profile, rangeFrom, rangeTo)
+        if (!range) return []
+        const [effectiveFrom, effectiveTo] = range
+        const input = providers.historyListInput(profile, effectiveFrom, effectiveTo)
 
         try {
           const page = (await provider.invoke('history.list', input)) as { items: HistoryItem[] }
           return page.items
         } catch (cause) {
-          const split = providers.splitHistoryRange(profile, cause, rangeFrom, rangeTo)
+          const split = providers.splitHistoryRange(profile, cause, effectiveFrom, effectiveTo)
           if (!split) throw cause
           const [leftFrom, leftTo, rightFrom, rightTo] = split
           const left = await fetchPage(leftFrom, leftTo)
@@ -112,16 +115,14 @@ export const listHistory = async (
     const allowCachedCurrentRange = request.to == null
     for (const profile of profiles) {
       try {
-        await withProfileLock(profile.id, () =>
-          syncTransactions(
-            db,
-            providers,
-            profile,
-            from,
-            to,
-            allowCachedCurrentRange,
-            request.forceRefresh === true,
-          ),
+        await syncTransactions(
+          db,
+          providers,
+          profile,
+          from,
+          to,
+          allowCachedCurrentRange,
+          request.forceRefresh === true,
         )
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause)
@@ -234,10 +235,14 @@ export const syncInitialHistory = async (
   providers: ProviderRegistry,
   profileId: string,
 ) => {
+  const profile = await providers.profile(profileId)
   const history = await listHistory(db, providers, {
     profileIds: [profileId],
     kinds: ['transaction'],
-    from: initialHistoryFrom.toISOString(),
+    from:
+      profile.provider === 'smbc-direct'
+        ? smbcDirectInitialHistoryFrom.toISOString()
+        : initialHistoryFrom.toISOString(),
     to: new Date().toISOString(),
   })
   const errors = history.errors.filter((error) => error.profileId === profileId)

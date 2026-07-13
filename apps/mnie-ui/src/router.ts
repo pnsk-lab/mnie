@@ -10,7 +10,7 @@ export const router = createRouter({
   routes: [
     { path: '/', redirect: '/portfolio' },
     { path: '/portfolio', name: 'portfolio', component: RouteStub },
-    { path: '/trade/:id', name: 'trade', component: RouteStub },
+    { path: '/trade/:id?', name: 'trade', component: RouteStub },
     { path: '/history', name: 'history', component: RouteStub },
     { path: '/api-keys', redirect: '/settings/api-keys' },
     { path: '/settings', redirect: '/settings/api-keys' },

@@ -29,7 +29,11 @@ export interface ProfileDescriptor {
   id: string
   provider: ProviderDescriptor
   label: string
+  category: ProviderCategory
+  defaultColor: string
 }
+
+export type ProviderCategory = 'brokerage' | 'bank' | 'transit' | 'pension' | 'other'
 
 export interface Money {
   /** ISO 4217 currency code. */
@@ -94,6 +98,28 @@ export interface PortfolioValuation {
   completeness: 'complete' | 'partial'
   components: PortfolioValuationComponent[]
   errors: PortfolioValuationError[]
+}
+
+export interface PortfolioOverviewComponent {
+  profile: ProfileDescriptor
+  accounts: Account[]
+  valuation?: AssetValuation
+  balances?: Balance[]
+  positions?: InvestmentPosition[]
+  orders?: InvestmentOrder[]
+}
+
+export interface PortfolioOverviewError {
+  profileId: string
+  providerId: string
+  operation: string
+  message: string
+}
+
+export interface PortfolioOverview {
+  components: PortfolioOverviewComponent[]
+  errors: PortfolioOverviewError[]
+  asOf: string
 }
 
 export type TransactionDirection = 'credit' | 'debit' | 'neutral'
@@ -245,6 +271,10 @@ export interface InvestmentPosition {
   unrealizedProfitLoss?: Money
   unrealizedProfitLossRate?: string
   accountInformation?: string
+  /** Legacy provider market identifier; prefer venue for new integrations. */
+  market?: string
+  /** Opaque provider holding identifier. */
+  subClientSeqNo?: string
 }
 
 export interface InvestmentTrade {
@@ -313,6 +343,10 @@ export interface InvestmentOrderRequest {
     expiresOn?: string
   }
   allowTransaction?: true
+  /** Sell the complete addressed holding instead of a monetary amount. */
+  sellAll?: boolean
+  /** Opaque provider holding identifier returned by investments.positions.list. */
+  subClientSeqNo?: string
 }
 
 export type InvestmentOrderSizing =
@@ -377,6 +411,31 @@ export interface InvestmentOrderCancelRequest {
   allowTransaction: true
 }
 
+/** Confirmation-only placement used by providers that retain the preview server-side. */
+export interface InvestmentOrderCreateRequest {
+  confirmationToken: string
+  allowTransaction: true
+}
+
+export interface InvestmentOrderReceipt {
+  id?: string
+  accountId: string
+  instrumentId: string
+  instrumentName?: string
+  side: 'buy' | 'sell'
+  amount: Money
+  message?: string
+}
+
+export interface InvestmentInstrument {
+  id: string
+  name: string
+  market: string
+  code?: string
+  imageUrl?: string
+  price?: Money
+}
+
 export interface InvestmentOrder {
   id: string
   accountId: string
@@ -390,6 +449,7 @@ export interface InvestmentOrder {
   unexecutedQuantity?: string
   executedQuantity?: string
   price?: Money
+  amount?: Money
   orderedAt?: string
   expiresAt?: string
   statusText?: string
@@ -414,13 +474,21 @@ export type InvestmentOperations = {
     InvestmentPosition
   >
   'investments.orders.preview': OperationDefinition<InvestmentOrderRequest, InvestmentOrderPreview>
-  'investments.orders.create': OperationDefinition<InvestmentOrderPlacement, InvestmentOrder>
+  'investments.orders.create': OperationDefinition<
+    InvestmentOrderPlacement | InvestmentOrderCreateRequest,
+    InvestmentOrder | InvestmentOrderReceipt
+  >
   'investments.orders.replace.preview': OperationDefinition<
     InvestmentOrderChangeRequest,
     InvestmentOrderPreview
   >
   'investments.orders.replace': OperationDefinition<InvestmentOrderChangeRequest, InvestmentOrder>
   'investments.orders.cancel': OperationDefinition<InvestmentOrderCancelRequest, InvestmentOrder>
+  'investments.instruments.search': OperationDefinition<
+    { query?: string; market?: string },
+    Page<InvestmentInstrument>
+  >
+  'investments.instruments.get': OperationDefinition<{ instrumentId: string }, InvestmentInstrument>
   'investments.orders.list': OperationDefinition<
     PageRequest & { accountId?: string; status?: InvestmentOrder['status'] },
     Page<InvestmentOrder>

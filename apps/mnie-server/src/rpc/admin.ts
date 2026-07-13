@@ -7,7 +7,9 @@ import type { Db } from '../db'
 import { accountProfiles, authManagers } from '../db/schema'
 import { forceSyncHistory } from '../history'
 import type { StoredBitwardenAuthManagerSecret } from '../providers/credentials'
+import type { StoredPayPaySecSecret } from '../providers/credentials'
 import type { ProviderRegistry } from '../providers/registry'
+import { loadPortfolioOverview, type OverviewProfile } from '../portfolio-overview'
 import {
   createApiKey,
   listApiKeys,
@@ -80,7 +82,18 @@ export class AdminRpcService {
     if (operation === 'profiles.list') {
       const rows = await this.providers.profiles()
       return {
-        profiles: rows.map(({ keyringAccount: _keyringAccount, ...profile }) => profile),
+        profiles: rows.map(({ keyringAccount: _keyringAccount, ...profile }) => {
+          const descriptor = this.providers.descriptor({
+            ...profile,
+            keyringAccount: _keyringAccount,
+          })
+          return {
+            ...profile,
+            providerName: descriptor.provider.name,
+            category: descriptor.category,
+            defaultColor: descriptor.defaultColor,
+          }
+        }),
       }
     }
     if (operation === 'profiles.create') return this.createProfile(input)
@@ -141,6 +154,17 @@ export class AdminRpcService {
     if (operation === 'assets.valuations.latest') {
       await ensureInitialAssetValuations(this.db, this.providers)
       return { valuations: await latestAssetValuations(this.db) }
+    }
+    if (operation === 'portfolio.overview.get') {
+      const profiles = await this.providers.profiles()
+      return loadPortfolioOverview(
+        profiles.map(
+          (profile): OverviewProfile => ({
+            descriptor: this.providers.descriptor(profile),
+            use: (action) => this.providers.use(profile, ({ provider }) => action(provider)),
+          }),
+        ),
+      )
     }
     if (operation === 'history.sync') {
       return forceSyncHistory(this.db, this.providers, {
@@ -218,6 +242,14 @@ export class AdminRpcService {
     const color = requiredString(input, 'color').toLowerCase()
     if (!/^#[0-9a-f]{6}$/.test(color)) throw new Error('color must be a hex color')
     const profile = await this.providers.profile(id)
+    const tradePassword = optionalString(input.tradePassword)
+    if (tradePassword) {
+      if (profile.provider !== 'paypay-sec') {
+        throw new Error('tradePassword can only be updated for PayPay Securities')
+      }
+      const secret = await readSecret<StoredPayPaySecSecret>(profile.keyringAccount)
+      await saveSecret(profile.keyringAccount, { ...secret, tradePassword })
+    }
     const now = new Date()
     await this.db
       .update(accountProfiles)

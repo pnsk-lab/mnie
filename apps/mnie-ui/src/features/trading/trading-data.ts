@@ -23,6 +23,7 @@ export const emptyStock: Stock = {
   code: '',
   name: '未選択',
   symbol: '',
+  routeId: '',
   searchText: '',
   country: '日本',
   market: '',
@@ -46,6 +47,10 @@ export const isRecord = (value: unknown): value is RecordLike =>
 export const asRecord = (value: unknown): RecordLike => (isRecord(value) ? value : {})
 
 export const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : [])
+
+const homeAssetHistoryWindowMs = 30 * 24 * 60 * 60_000
+export const homeAssetHistoryFrom = (now = Date.now()) =>
+  new Date(now - homeAssetHistoryWindowMs).toISOString()
 
 export const numberValue = (value: unknown, fallback = 0): number => {
   if (typeof value === 'number' && Number.isFinite(value)) return value
@@ -78,10 +83,56 @@ const nullableNumberValue = (value: unknown): number | null => {
 export const textValue = (value: unknown, fallback = ''): string =>
   typeof value === 'string' && value ? value : fallback
 
+export const uniqueStocksByIdentity = (stocks: Stock[]): Stock[] => {
+  const unique = new Map<string, Stock>()
+  for (const stock of stocks) {
+    const key = `${stock.market}:${stock.code}`
+    if (!unique.has(key)) unique.set(key, stock)
+  }
+  return [...unique.values()]
+}
+
+export const positionsForStock = (positions: Position[], stock: Pick<Stock, 'code' | 'market'>) =>
+  positions.filter(
+    (position) =>
+      position.code === stock.code &&
+      (!position.market || !stock.market || position.market === stock.market),
+  )
+
+export interface BrokerageAssetPart {
+  providerId: string
+  providerName: string
+  color: string
+  holdingsValue: number
+  cashValue: number
+}
+
+export const groupBrokerageAssets = (parts: BrokerageAssetPart[]) => {
+  const groups = new Map<
+    string,
+    BrokerageAssetPart & { id: string; label: string; value: number }
+  >()
+  for (const part of parts) {
+    const current = groups.get(part.providerId)
+    const holdingsValue = (current?.holdingsValue ?? 0) + part.holdingsValue
+    const cashValue = (current?.cashValue ?? 0) + part.cashValue
+    groups.set(part.providerId, {
+      ...part,
+      id: `provider:${part.providerId}`,
+      label: part.providerName,
+      color: current?.color || part.color,
+      holdingsValue,
+      cashValue,
+      value: holdingsValue + cashValue,
+    })
+  }
+  return [...groups.values()]
+}
+
 const issueSymbol = (code: string, market: string) => (market ? `${market}:${code}` : code)
 
 const countryFromMarket = (market: string) =>
-  market === 'XNAS' || market === 'XNYS' || market === 'ARCX' ? '米国' : '日本'
+  market === 'XNAS' || market === 'XNYS' || market === 'ARCX' || market === 'usa' ? '米国' : '日本'
 
 export const issueFrom = (value: unknown) => {
   const issue = asRecord(value)
@@ -136,10 +187,17 @@ const boxFromHistory = (history: number[]) => {
   return { min: at(0), q1: at(0.25), median: at(0.5), q3: at(0.75), max: at(1) }
 }
 
+const normalizeInstrumentName = (value: string) =>
+  value
+    .replace(/(?:\s*[|｜\-–—:：]\s*)?取引詳細\s*$/, '')
+    .replace(/^[\s●○◉•・]+|[\s●○◉•・]+$/g, '')
+    .trim()
+
 export const stockFromIssue = (issue: IssueLike): Stock => ({
   code: issue.code,
-  name: issue.name || issue.code,
+  name: normalizeInstrumentName(issue.name) || issue.code,
   symbol: issue.code ? issueSymbol(issue.code, issue.market) : '',
+  routeId: issue.code ? issueSymbol(issue.code, issue.market) : '',
   searchText: issue.searchText,
   country: countryFromMarket(issue.market),
   market: issue.market,
@@ -156,6 +214,45 @@ export const stockFromIssue = (issue: IssueLike): Stock => ({
   history: [0, 0],
   box: { min: 0, q1: 0, median: 0, q3: 0, max: 0 },
 })
+
+const unsafeInstrumentName = (value: string) =>
+  !value.trim() || /証券会社|PayPay証券株式会社|^PayPay証券$/.test(value)
+
+export const stockFromInvestmentInstrument = (value: unknown): Stock | null => {
+  const item = asRecord(value)
+  const code = textValue(item.id, textValue(item.instrumentId))
+  if (!code) return null
+  const market = textValue(item.market)
+  const rawName = normalizeInstrumentName(textValue(item.name, textValue(item.instrumentName)))
+  const name = unsafeInstrumentName(rawName) ? code : rawName
+  const stock = stockFromIssue({ code, market, name })
+  const displayCode = textValue(item.code, code)
+  const price = numberValue(asRecord(item.price).value)
+  return {
+    ...stock,
+    symbol: displayCode,
+    price,
+    history: price ? [price, price] : stock.history,
+    box: price ? { min: price, q1: price, median: price, q3: price, max: price } : stock.box,
+  }
+}
+
+export const mergeInvestmentInstrument = (current: Stock, value: unknown): Stock => {
+  const detail = stockFromInvestmentInstrument(value)
+  if (!detail) return current
+  const detailName = detail.name
+  const currentName = normalizeInstrumentName(current.name)
+  return {
+    ...current,
+    ...detail,
+    name: unsafeInstrumentName(detailName) || detailName === detail.code ? currentName : detailName,
+    market: detail.market || current.market,
+    country: detail.market ? detail.country : current.country,
+    price: detail.price || current.price,
+    history: detail.price ? detail.history : current.history,
+    box: detail.price ? detail.box : current.box,
+  }
+}
 
 export const stockFromPosition = (position: Position): Stock => {
   const price = position.quantity ? Math.round(position.marketValue / position.quantity) : 0
@@ -430,19 +527,29 @@ export const chartNoticeFromIssueChart = (value: unknown): ChartNotice | null =>
 export const positionFromApi = (value: unknown): Position | null => {
   const item = asRecord(value)
   if (typeof item.instrumentId === 'string') {
+    const quantity = numberValue(item.quantity)
     const marketValue = numberValue(asRecord(item.marketValue).value)
     const profitLoss = numberValue(asRecord(item.unrealizedProfitLoss).value)
     const accountType = textValue(item.accountType)
+    const costBasis = marketValue - profitLoss
+    const avgPrice =
+      nullableNumberValue(asRecord(item.averagePrice).value) ??
+      (quantity && costBasis ? costBasis / quantity : 0)
+    const currentPrice =
+      nullableNumberValue(asRecord(item.currentPrice).value) ??
+      (quantity && marketValue ? marketValue / quantity : null)
     return {
       code: item.instrumentId,
       name: textValue(item.instrumentName, item.instrumentId),
-      market: textValue(item.venue),
-      quantity: numberValue(item.quantity),
-      avgPrice: numberValue(asRecord(item.averagePrice).value),
-      currentPrice: nullableNumberValue(asRecord(item.currentPrice).value),
+      market: textValue(item.venue, textValue(item.market)),
+      quantity,
+      avgPrice,
+      currentPrice,
       marketValue,
       profitLoss,
-      profitLossRate: numberValue(item.unrealizedProfitLossRate),
+      profitLossRate:
+        nullableNumberValue(item.unrealizedProfitLossRate) ??
+        (costBasis ? (profitLoss / costBasis) * 100 : 0),
       type:
         item.positionType === 'margin'
           ? '信用'
@@ -450,6 +557,7 @@ export const positionFromApi = (value: unknown): Position | null => {
             ? accountTypeLabel(accountType)
             : '現物',
       accountType: accountType || undefined,
+      subClientSeqNo: textValue(item.subClientSeqNo) || undefined,
     }
   }
   const issue = issueFrom(item.issue)
@@ -501,6 +609,7 @@ export const orderFromApi = (value: unknown): OrderRow | null => {
       unexecutedQuantity: nullableNumberValue(item.unexecutedQuantity),
       executedQuantity,
       price: nullableNumberValue(asRecord(item.price).value),
+      amount: nullableNumberValue(asRecord(item.amount).value),
       status,
       accountType: textValue(item.accountType),
       cancelable: typeof item.cancelable === 'boolean' ? item.cancelable : undefined,
@@ -610,9 +719,11 @@ export const orderQuantityText = (order: OrderRow) =>
   typeof order.quantity === 'number' ? `${order.quantity}株` : '数量不明'
 
 export const orderAmountText = (order: OrderRow) =>
-  typeof order.price === 'number' && typeof order.quantity === 'number'
-    ? currency(order.price * order.quantity)
-    : '約定代金不明'
+  typeof order.amount === 'number'
+    ? currency(Math.abs(order.amount))
+    : typeof order.price === 'number' && typeof order.quantity === 'number'
+      ? currency(order.price * order.quantity)
+      : '約定代金不明'
 
 export const orderHistoryResultNotice = (value: unknown) => {
   const error = asRecord(asRecord(value).error)

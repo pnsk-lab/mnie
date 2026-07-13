@@ -76,9 +76,19 @@ const payPayBankLabel = defineModel<string>('payPayBankLabel', { required: true 
 const payPayBankBranchNo = defineModel<string>('payPayBankBranchNo', { required: true })
 const payPayBankAccountNo = defineModel<string>('payPayBankAccountNo', { required: true })
 const payPayBankPassword = defineModel<string>('payPayBankPassword', { required: true })
+const payPaySecLabel = defineModel<string>('payPaySecLabel', { required: true })
+const payPaySecCredentialJson = defineModel<string>('payPaySecCredentialJson', { required: true })
+const payPaySecTradePassword = defineModel<string>('payPaySecTradePassword', { required: true })
 const editedLabel = ref('')
 const editedColor = ref('')
+const editedTradePassword = ref('')
 const showPasskeyJsonDialog = ref(false)
+const passkeyJsonProvider = ref<'sbisec' | 'paypay-sec'>('sbisec')
+
+const openPasskeyJsonDialog = (provider: 'sbisec' | 'paypay-sec') => {
+  passkeyJsonProvider.value = provider
+  showPasskeyJsonDialog.value = true
+}
 
 const emit = defineEmits<{
   addApiKey: []
@@ -88,14 +98,15 @@ const emit = defineEmits<{
   addSbiPasskey: []
   addAuthManager: []
   removeAuthManager: [id: string]
-  fillProviderCredentials: []
+  fillProviderCredentials: [provider?: AccountProfile['provider']]
   addSmbcDirectProfile: []
   addPayPayBankProfile: []
+  addPayPaySecProfile: []
   finishSmbc2fa: []
   forceProfileAvailability: [profileId: string]
   connect: []
   removeSbiPasskey: [id: string]
-  updateProfile: [id: string, label: string, color: string]
+  updateProfile: [id: string, label: string, color: string, tradePassword?: string]
 }>()
 
 type SettingsSection = 'api-keys' | 'providers' | 'auth-managers'
@@ -143,6 +154,7 @@ watch(
   (profile) => {
     editedLabel.value = profile?.label ?? ''
     editedColor.value = profile ? profileColor(profile) : ''
+    editedTradePassword.value = ''
   },
   { immediate: true },
 )
@@ -512,6 +524,15 @@ const saveEditingApiKey = () => {
                     />
                   </label>
                 </div>
+                <label v-if="selectedProvider === 'paypay-sec'" :class="ui.label">
+                  取引パスワード（変更する場合のみ）
+                  <input
+                    v-model="editedTradePassword"
+                    :class="ui.input"
+                    type="password"
+                    autocomplete="new-password"
+                  />
+                </label>
                 <div v-if="selectedProvider === 'smbc-direct'" class="flex justify-end">
                   <button
                     :class="ui.primaryButton"
@@ -545,7 +566,15 @@ const saveEditingApiKey = () => {
                   <button
                     :class="ui.primaryButton"
                     type="button"
-                    @click="emit('updateProfile', editedProfile.id, editedLabel, editedColor)"
+                    @click="
+                      emit(
+                        'updateProfile',
+                        editedProfile.id,
+                        editedLabel,
+                        editedColor,
+                        editedTradePassword || undefined,
+                      )
+                    "
                   >
                     <Save class="h-4 w-4" aria-hidden="true" /> 保存
                   </button>
@@ -592,7 +621,7 @@ const saveEditingApiKey = () => {
                     type="button"
                     title="パスキー JSON をインポート"
                     aria-label="パスキー JSON をインポート"
-                    @click="showPasskeyJsonDialog = true"
+                    @click="openPasskeyJsonDialog('sbisec')"
                   >
                     <Import class="h-4 w-4" aria-hidden="true" />
                   </button>
@@ -621,6 +650,50 @@ const saveEditingApiKey = () => {
               </div>
               <div class="flex justify-end">
                 <button :class="ui.primaryButton" type="button" @click="emit('addSbiPasskey')">
+                  <Save class="h-4 w-4" aria-hidden="true" /> 保存
+                </button>
+              </div>
+            </template>
+
+            <template v-else-if="selectedProvider === 'paypay-sec'">
+              <label :class="ui.label"
+                >名前<input v-model="payPaySecLabel" :class="ui.input" placeholder="例: PayPay証券"
+              /></label>
+              <div class="grid gap-2">
+                <div class="flex items-center justify-between gap-3">
+                  <span class="text-sm font-bold text-[#d3e3fd]">パスキー JSON</span>
+                  <button
+                    :class="ui.ghostButton"
+                    class="!h-9 !w-9 !p-0"
+                    type="button"
+                    title="パスキー JSON をインポート"
+                    aria-label="パスキー JSON をインポート"
+                    @click="openPasskeyJsonDialog('paypay-sec')"
+                  >
+                    <Import class="h-4 w-4" aria-hidden="true" />
+                  </button>
+                </div>
+                <textarea
+                  v-model="payPaySecCredentialJson"
+                  :class="[ui.input, 'min-h-44 py-3 font-mono text-xs']"
+                  spellcheck="false"
+                  placeholder="{ ... }"
+                ></textarea>
+              </div>
+              <label :class="ui.label"
+                >取引パスワード<input
+                  v-model="payPaySecTradePassword"
+                  :class="ui.input"
+                  type="password"
+                  autocomplete="new-password"
+                  required
+              /></label>
+              <div class="flex justify-end">
+                <button
+                  :class="ui.primaryButton"
+                  type="button"
+                  @click="emit('addPayPaySecProfile')"
+                >
                   <Save class="h-4 w-4" aria-hidden="true" /> 保存
                 </button>
               </div>
@@ -858,7 +931,7 @@ const saveEditingApiKey = () => {
         v-model:selected-auth-manager-id="selectedAuthManagerId"
         v-model:auth-manager-master-password="authManagerMasterPassword"
         @close="showPasskeyJsonDialog = false"
-        @fill="emit('fillProviderCredentials')"
+        @fill="emit('fillProviderCredentials', passkeyJsonProvider)"
       />
       <UiModal
         v-if="unavailableProfile"

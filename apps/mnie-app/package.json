@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "clean": "rm -rf dist ../mnie-ui/dist",
-    "dev": "bun --env-file=../../.env src/dev.ts",
+    "dev": "cd ../.. && vp run sdk-build && cd apps/mnie-app && bun --env-file=../../.env src/dev.ts",
     "build": "bun --filter @repo/mnie-ui build && bun build src/index.ts --target=bun --outdir=dist --external @napi-rs/keyring",
     "start": "bun --env-file=../../.env dist/index.js",
     "typecheck": "tsc"

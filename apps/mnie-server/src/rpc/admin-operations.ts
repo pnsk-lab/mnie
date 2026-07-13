@@ -17,6 +17,7 @@ export const ADMIN_OPERATIONS = [
   'profiles.mobileSuica.login.start',
   'profiles.mobileSuica.login.complete',
   'assets.valuations.latest',
+  'portfolio.overview.get',
   'history.sync',
   'jobs.list',
 ] as const

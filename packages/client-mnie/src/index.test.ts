@@ -40,6 +40,7 @@ test('remote workspace advertises history.list', async () => {
   expect(await workspace.operations()).toEqual([
     'profiles.list',
     'portfolio.valuation.get',
+    'portfolio.overview.get',
     'history.list',
   ])
   workspace.close()

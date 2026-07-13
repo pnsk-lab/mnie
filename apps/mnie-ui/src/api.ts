@@ -72,6 +72,9 @@ export type SbiPasskeySource =
 export interface AccountProfile {
   id: string
   provider: string
+  providerName: string
+  category: 'brokerage' | 'bank' | 'transit' | 'pension' | 'other'
+  defaultColor: string
   label: string
   color: string | null
   createdAt: string
@@ -83,12 +86,63 @@ export interface ProviderDefinition {
   name: string
   kind: string
   authentication: string
+  defaultColor?: string
   credentialFields: Array<{
     name: string
     kind: string
     required: boolean
     secret: boolean
   }>
+}
+
+export interface PortfolioOverviewPosition {
+  id: string
+  accountId: string
+  instrumentId: string
+  instrumentName?: string
+  venue?: string
+  quantity: string
+  positionType: 'cash' | 'margin'
+  marketValue?: { currency: string; value: string }
+  unrealizedProfitLoss?: { currency: string; value: string }
+  accountType?: string
+  subClientSeqNo?: string
+}
+
+export interface PortfolioOverviewOrder {
+  id: string
+  accountId: string
+  instrumentId: string
+  instrumentName?: string
+  side: 'buy' | 'sell'
+  status: 'open' | 'executed' | 'cancelled' | 'expired' | 'rejected' | 'unknown'
+  quantity?: string
+  price?: { currency: string; value: string }
+  orderedAt?: string
+}
+
+export interface PortfolioOverview {
+  components: Array<{
+    profile: {
+      id: string
+      provider: { id: string; name: string }
+      label: string
+      category: AccountProfile['category']
+      defaultColor: string
+    }
+    accounts: Array<{ id: string; providerId: string; kind: string; name: string }>
+    valuation?: {
+      amount: { currency: string; value: string }
+      holdingsAmount?: { currency: string; value: string }
+      cashAmount?: { currency: string; value: string }
+      asOf: string
+    }
+    balances?: unknown[]
+    positions?: PortfolioOverviewPosition[]
+    orders?: PortfolioOverviewOrder[]
+  }>
+  errors: Array<{ profileId: string; providerId: string; operation: string; message: string }>
+  asOf: string
 }
 
 export interface AssetValuation {
@@ -342,6 +396,8 @@ export const listProviderDefinitions = () =>
 export const listLatestAssetValuations = () =>
   adminRequest<{ valuations: AssetValuation[] }>('assets.valuations.latest')
 
+export const getPortfolioOverview = () => adminRequest<PortfolioOverview>('portfolio.overview.get')
+
 export const listHistory = (
   input: {
     profileIds?: string[]
@@ -395,11 +451,24 @@ export const savePayPayBankProfile = (payload: {
     credentials: payload,
   })
 
+export const savePayPaySecProfile = (payload: {
+  label: string
+  credential: unknown
+  tradePassword: string
+}) =>
+  adminRequest<{ profile: AccountProfile }>('profiles.create', {
+    providerId: 'paypay-sec',
+    label: payload.label,
+    credentials: payload,
+  })
+
 export const deleteAccountProfile = (id: string) =>
   adminRequest<{ ok: true }>('profiles.delete', { id })
 
-export const updateAccountProfile = (id: string, payload: { label: string; color: string }) =>
-  adminRequest<{ profile: AccountProfile }>('profiles.update', { id, ...payload })
+export const updateAccountProfile = (
+  id: string,
+  payload: { label: string; color: string; tradePassword?: string },
+) => adminRequest<{ profile: AccountProfile }>('profiles.update', { id, ...payload })
 
 export const createMobileSuicaCaptcha = (payload: {
   label: string
