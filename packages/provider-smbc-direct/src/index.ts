@@ -671,7 +671,10 @@ const createProfile = (
         depositsTotal: parseYen(result.response.nyukinGoukei, 'deposit total'),
         withdrawalsTotal: parseYen(result.response.syukkinGoukei, 'withdrawal total'),
         transactions: result.response.meisai.map((entry) => {
-          const amount = parseYen(entry.amount, 'transaction amount')
+          // Transaction direction carries the debit/credit sign. Keep the
+          // provider-neutral transaction amount absolute, as required by
+          // Amount, even when SMBC returns withdrawals as negative values.
+          const amount = Math.abs(parseYen(entry.amount, 'transaction amount'))
           return {
             id: String(entry.meisaiId ?? ''),
             date: transactionDate(entry.dispDate, endDate),

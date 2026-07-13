@@ -61,6 +61,31 @@ test('renders balanced debit and credit transactions with opens and metadata', (
 `)
 })
 
+test('normalizes signed transaction amounts to absolute values', () => {
+  const output = formatBeancount([
+    transactionItem({
+      amount: { kind: 'money', money: { currency: 'JPY', value: '-1500' } },
+    }),
+  ])
+
+  expect(output).toContain('Assets:Mnie:BankMain  -1500 JPY')
+  expect(output).not.toContain('--1500')
+})
+
+test('excludes neutral transactions from the export', () => {
+  const output = formatBeancount([
+    transactionItem({
+      id: 'neutral',
+      direction: 'neutral',
+      amount: null,
+    }),
+    transactionItem({ id: 'posted' }),
+  ])
+
+  expect(output).toContain('mnie-id: "posted"')
+  expect(output).not.toContain('mnie-id: "neutral"')
+})
+
 test('returns only the operating currency for empty history', () => {
   expect(formatBeancount([])).toBe('option "operating_currency" "JPY"\n')
 })
@@ -90,7 +115,6 @@ describe('unsupported transactions', () => {
     ['invalid date suffix', transactionItem({}, { occurredAt: '2026-05-05garbage' })],
     ['invalid time', transactionItem({}, { occurredAt: '2026-05-05T99:99:99Z' })],
     ['pending status', transactionItem({ status: 'pending' })],
-    ['neutral direction', transactionItem({ direction: 'neutral' })],
     ['investment trade', transactionItem({ kind: 'investment-trade' })],
     ['missing amount', transactionItem({ amount: null })],
     [

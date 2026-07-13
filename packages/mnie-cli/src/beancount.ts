@@ -65,7 +65,8 @@ const prepare = (item: HistoryItem): PreparedTransaction => {
   }
   const { currency, value } = amount.money
   if (!currencyPattern.test(currency)) transactionError(transaction.id, 'currency is invalid')
-  if (!decimalPattern.test(value)) transactionError(transaction.id, 'amount is invalid')
+  const absoluteValue = value.startsWith('-') ? value.slice(1) : value
+  if (!decimalPattern.test(absoluteValue)) transactionError(transaction.id, 'amount is invalid')
   return {
     date: calendarDate(item.occurredAt, transaction.id),
     id: transaction.id,
@@ -76,7 +77,7 @@ const prepare = (item: HistoryItem): PreparedTransaction => {
     counterAccount: direction === 'credit' ? 'Income:Uncategorized' : 'Expenses:Uncategorized',
     direction,
     currency,
-    amount: value,
+    amount: absoluteValue,
     occurredAt: item.occurredAt,
   }
 }
@@ -89,7 +90,9 @@ interface OpenDirective {
 const compare = (left: string, right: string) => left.localeCompare(right)
 
 export const formatBeancount = (items: HistoryItem[]) => {
-  const transactions = items.map(prepare)
+  const transactions = items
+    .filter((item) => item.kind !== 'transaction' || item.transaction.direction !== 'neutral')
+    .map(prepare)
   const profileByAccount = new Map<string, string>()
   for (const transaction of transactions) {
     const existing = profileByAccount.get(transaction.account)
