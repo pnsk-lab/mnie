@@ -4,7 +4,9 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json bun.lock tsconfig.json vite.config.ts ./
+COPY scripts/download-capsolve-model.ts scripts/download-capsolve-model.ts
 COPY packages/auth-bitwarden/package.json packages/auth-bitwarden/package.json
+COPY packages/capsolve-sp/package.json packages/capsolve-sp/package.json
 COPY packages/provider-sbi-sec/package.json packages/provider-sbi-sec/package.json
 COPY packages/provider-mobile-suica/package.json packages/provider-mobile-suica/package.json
 COPY packages/provider-paypay/package.json packages/provider-paypay/package.json

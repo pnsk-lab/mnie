@@ -203,7 +203,7 @@ const profileProxy = (
 export const connectMnie = async (options: ConnectMnieOptions): Promise<MnieWorkspace> => {
   const rpc = new JsonRpcConnection(options)
   const workspace: MnieWorkspace = {
-    operations: async () => ['profiles.list', 'portfolio.valuation.get'] as const,
+    operations: async () => ['profiles.list', 'portfolio.valuation.get', 'history.list'] as const,
     profiles: () =>
       rpc.call('workspace.invoke', { operation: 'profiles.list', input: {} }) as Promise<
         ProfileDescriptor[]

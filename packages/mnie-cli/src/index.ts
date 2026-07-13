@@ -6,6 +6,7 @@ import { createServer } from 'node:http'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { connectMnie } from '@repo/client-mnie'
+import { exportBeancount } from './export-beancount'
 
 interface Profile {
   origin: string
@@ -32,6 +33,7 @@ Usage:
   mnie profile use <name>
   mnie rpc methods [--profile <name>]
   mnie rpc call <method> [json-params] [--profile <name>] [--provider sbisec|smbc-direct] [--profile-id <id>]
+  mnie export beancount --from <YYYY-MM-DD> --to <YYYY-MM-DD> [--profile <name>] [--profile-id <id>]
   mnie login --origin <origin> [--profile <name>] [--scopes <scopes>] [--storage file|keyring]
 
 Examples:
@@ -311,6 +313,15 @@ const main = async () => {
   }
   if (command === 'rpc') return rpc([subcommand, ...rest].filter(isString))
   if (command === 'login') return login([subcommand, ...rest].filter(isString))
+  if (command === 'export' && subcommand === 'beancount') {
+    const { positionals, options } = parseOptions(rest)
+    if (positionals.length) throw new Error('export beancount does not accept positional arguments')
+    return exportBeancount(options, {
+      resolveProfile: requireProfile,
+      connect: connectMnie,
+      write: (output) => process.stdout.write(output),
+    })
+  }
   throw new Error(`unknown command: ${command}`)
 }
 
