@@ -241,7 +241,7 @@ const emit = defineEmits<{
 
           <div :class="[ui.chartBox, 'overflow-visible']">
             <RealtimePriceChart
-              v-if="hasQuote(selectedStock)"
+              v-if="hasQuote(selectedStock) || realtimePricePoints.length > 0 || chartNotice"
               ref="priceChart"
               :points="realtimePricePoints"
               :stock-name="selectedStock.name"

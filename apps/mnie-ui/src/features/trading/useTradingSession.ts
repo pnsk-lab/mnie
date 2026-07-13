@@ -1164,19 +1164,29 @@ export const useTradingSession = (
     realtimePricePoints.value = []
 
     const stock = selectedStock.value
-    if (
-      !connected.value ||
-      !stock.code ||
-      !providerOperations.value.has('market.issue.pollBoard.subscribe')
-    )
+    if (!connected.value || !stock.code || !providerOperations.value.has('market.issue.board'))
       return
-    const timeZone = selectedStockTimeZone.value
-    if (!timeZone || !isMarketSessionOpen(stock.market, timeZone)) return
-
-    appendRealtimePricePoint(stock.price)
-
     const requestId = ++boardPollingRequestId
     try {
+      const board = await rpcCallOptional<RecordLike>(
+        'market.issue.board',
+        {
+          issueCode: stock.code,
+          market: stock.market,
+        },
+        10_000,
+      )
+      if (requestId !== boardPollingRequestId) return
+
+      const quotedStock = stockFromBoard(board, stock)
+      mergeStocks([quotedStock])
+
+      const timeZone = selectedStockTimeZone.value
+      if (!timeZone || !isMarketSessionOpen(quotedStock.market, timeZone)) return
+
+      appendRealtimePricePoint(quotedStock.price)
+      if (!providerOperations.value.has('market.issue.pollBoard.subscribe')) return
+
       const subscribed = await rpcCall<RecordLike>('market.issue.pollBoard.subscribe', {
         issueCode: stock.code,
         market: stock.market,
@@ -1246,13 +1256,17 @@ export const useTradingSession = (
       if (!timeZone) {
         throw new Error(`Unsupported market timezone for ${stock.market || stock.country}`)
       }
-      const chart = await rpcCall<RecordLike>('market.issue.chart', {
-        issueCode: stock.code,
-        market: stock.market,
-        period: chartOptions.period,
-        unit: chartOptions.unit,
-        count: chartOptions.count,
-      })
+      const chart = await rpcCallOptional<RecordLike>(
+        'market.issue.chart',
+        {
+          issueCode: stock.code,
+          market: stock.market,
+          period: chartOptions.period,
+          unit: chartOptions.unit,
+          count: chartOptions.count,
+        },
+        20_000,
+      )
       if (requestId !== chartHistoryRequestId) return
       historicalPricePoints.value = pricePointsFromIssueChart(chart, timeZone)
       chartNotice.value = chartNoticeFromIssueChart(chart)
