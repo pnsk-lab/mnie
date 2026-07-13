@@ -20,7 +20,7 @@ import {
   saveSmbcDirectProfile,
   savePayPayBankProfile,
   updateApiKeySettings,
-  updateAccountProfileLabel,
+  updateAccountProfile,
   verifyLogin,
   verifySetup,
   type ApiKey,
@@ -248,8 +248,8 @@ export const useAuthAdmin = () => {
     await refresh()
   }
 
-  const updateProfileLabel = async (id: string, label: string) => {
-    await updateAccountProfileLabel(id, label)
+  const updateProfile = async (id: string, label: string, color: string) => {
+    await updateAccountProfile(id, { label, color })
     await refresh()
   }
 
@@ -322,6 +322,6 @@ export const useAuthAdmin = () => {
     addSmbcDirectProfile,
     addPayPayBankProfile,
     removeSbiPasskey,
-    updateProfileLabel,
+    updateProfile,
   }
 }
