@@ -48,19 +48,27 @@ export const exportBeancount = async (options: CliOptions, dependencies: ExportD
   if (profileId !== undefined && !profileId.trim()) {
     throw new Error('--profile-id must not be empty')
   }
+  const normalizedProfileId = profileId?.trim()
   const resolved = await dependencies.resolveProfile(stringOption(options, 'profile'))
   const workspace = await dependencies.connect({
     baseURL: resolved.profile.origin,
     token: resolved.apiKey,
   })
   try {
-    const page = await workspace.invoke('history.list', {
-      kinds: ['transaction'],
-      from,
-      to: `${to}T23:59:59.999Z`,
-      ...(profileId ? { profileIds: [profileId] } : {}),
-    })
-    dependencies.write(formatBeancount(page.items))
+    const items: HistoryItem[] = []
+    let cursor: string | undefined
+    do {
+      const page = await workspace.invoke('history.list', {
+        kinds: ['transaction'],
+        from,
+        to,
+        ...(normalizedProfileId ? { profileIds: [normalizedProfileId] } : {}),
+        ...(cursor ? { cursor } : {}),
+      })
+      items.push(...page.items)
+      cursor = page.nextCursor
+    } while (cursor)
+    dependencies.write(formatBeancount(items))
   } finally {
     workspace.close()
   }

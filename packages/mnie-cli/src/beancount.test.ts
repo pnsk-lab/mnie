@@ -80,7 +80,7 @@ test('sorts transactions and account currencies deterministically', () => {
 
   expect(output.indexOf('mnie-id: "b"')).toBeLessThan(output.indexOf('mnie-id: "a"'))
   expect(output).toContain('Assets:Mnie:Profile2Wallet')
-  expect(output).toContain('2026-05-05 open Assets:Mnie:Profile2Wallet JPY, USD')
+  expect(output).toContain('2026-05-05 open Assets:Mnie:Profile2Wallet JPY USD')
 })
 
 describe('unsupported transactions', () => {

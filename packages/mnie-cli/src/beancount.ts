@@ -126,7 +126,7 @@ export const formatBeancount = (items: HistoryItem[]) => {
     .sort(([left], [right]) => compare(left, right))
     .map(
       ([account, open]) =>
-        `${open.date} open ${account} ${[...open.currencies].sort(compare).join(', ')}`,
+        `${open.date} open ${account} ${[...open.currencies].sort(compare).join(' ')}`,
     )
   const entries = transactions.map((transaction) => {
     const sourceAmount =

@@ -62,7 +62,7 @@ test('exports filtered transaction history as Beancount', async () => {
     input: {
       kinds: ['transaction'],
       from: '2026-05-01',
-      to: '2026-05-31T23:59:59.999Z',
+      to: '2026-05-31',
       profileIds: ['bank-main'],
     },
   })
@@ -141,7 +141,7 @@ test('omits profileIds when profile-id is not supplied', async () => {
   expect(input).toEqual({
     kinds: ['transaction'],
     from: '2026-05-01',
-    to: '2026-05-31T23:59:59.999Z',
+    to: '2026-05-31',
   })
   expect(input).not.toHaveProperty('profileIds')
 })
