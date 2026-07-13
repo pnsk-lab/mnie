@@ -634,7 +634,7 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
       await c
         .get('db')
         .update(sbiPasskeys)
-        .set({ label: body.label.trim(), updatedAt: now })
+        .set({ label: body.label.trim(), color: body.color.toLowerCase(), updatedAt: now })
         .where(eq(sbiPasskeys.id, profile.id))
     }
     return c.json({

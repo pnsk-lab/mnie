@@ -35,6 +35,7 @@ const props = defineProps<{
     provider: string
     value: number
     ratio: number
+    color: string
   }>
   assetHistory: Array<{
     at: string
@@ -85,8 +86,9 @@ const profileSlices = computed<AssetSlice[]>(() =>
       label: item.label,
       value: item.value,
       color:
-        defaultProviderColors[item.provider as keyof typeof defaultProviderColors] ??
-        profileColors[index % profileColors.length] ??
+        item.color ||
+        defaultProviderColors[item.provider as keyof typeof defaultProviderColors] ||
+        profileColors[index % profileColors.length] ||
         '#9aa0a9',
     })),
   ].filter((item) => item.value > 0),

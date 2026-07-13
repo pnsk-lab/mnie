@@ -6,7 +6,6 @@ export interface AuthStatus {
 export interface ApiKey {
   id: string
   label: string
-  color: string | null
   maxTradesPerHour?: number | null
   maxTradesPer6Hours?: number | null
   maxTradesPerDay?: number | null
