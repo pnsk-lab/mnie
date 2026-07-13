@@ -18,3 +18,7 @@ await profile.logout()
 
 `baseURL` must be an origin. Login credentials may instead be supplied through
 the three environment variables shown above.
+
+The provider exposes `accounts.list`, `balances.list`, `transactions.list`, and
+`history.list`. History requests accept `from` and `to` in `YYYY-MM-DD` format
+and return transaction records only.

@@ -33,7 +33,7 @@ import { deleteSecret, saveSecret } from '../security/keyring'
 import { readSecret } from '../security/keyring'
 import { connectSbi } from '../rpc/sbi-session'
 import { ensureInitialAssetValuations, latestAssetValuations } from '../assets'
-import { listHistory, syncInitialHistory } from '../history'
+import { forceSyncHistory, listHistory, syncInitialHistory } from '../history'
 import { captchaModelPath, createCaptchaSolver, type CaptchaSolver } from '@repo/capsolve-sp'
 
 export interface StoredSbiPasskeySecret {
@@ -270,6 +270,26 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
   app.post('/history', async (c) => {
     const input = await c.req.json<Record<string, unknown>>().catch(() => ({}))
     return c.json(await listHistory(c.get('db'), c.get('config'), input))
+  })
+
+  app.post('/history/sync', async (c) => {
+    const body: { profileId?: string; from?: string; to?: string } = await c.req
+      .json<{ profileId?: string; from?: string; to?: string }>()
+      .catch(() => ({}))
+    if (!body.profileId?.trim()) return c.json({ error: 'profileId is required' }, 400)
+    if (!body.from || !body.to) return c.json({ error: 'from and to are required' }, 400)
+    try {
+      return c.json(
+        await forceSyncHistory(c.get('db'), c.get('config'), {
+          profileId: body.profileId.trim(),
+          from: body.from,
+          to: body.to,
+        }),
+      )
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      return c.json({ error: message }, message.startsWith('profile not found:') ? 404 : 400)
+    }
   })
 
   let availabilityRequest:

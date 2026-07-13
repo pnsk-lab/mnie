@@ -511,18 +511,20 @@ const saveEditingApiKey = () => {
           <article class="grid min-w-0 content-start gap-5 p-0">
             <template v-if="isEditingProvider">
               <template v-if="editedProfile">
-                <label :class="ui.label">
-                  名前
-                  <input v-model="editedLabel" :class="ui.input" />
-                </label>
-                <label :class="ui.label">
-                  色
-                  <input
-                    v-model="editedColor"
-                    type="color"
-                    class="h-10 w-16 cursor-pointer rounded-lg border border-slate-600 bg-transparent p-1"
-                  />
-                </label>
+                <div class="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-4">
+                  <label :class="ui.label">
+                    名前
+                    <input v-model="editedLabel" :class="ui.input" />
+                  </label>
+                  <label :class="ui.label">
+                    色
+                    <input
+                      v-model="editedColor"
+                      type="color"
+                      class="h-12 w-12 cursor-pointer appearance-none rounded-full border-0 bg-transparent p-0"
+                    />
+                  </label>
+                </div>
                 <div v-if="selectedProvider === 'smbc-direct'" class="flex justify-end">
                   <button
                     :class="ui.primaryButton"

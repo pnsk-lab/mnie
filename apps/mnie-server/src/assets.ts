@@ -92,6 +92,7 @@ export const fetchAssetValuation = async (
           branchNo: secret.branchNo,
           accountNo: secret.accountNo,
           password: secret.password,
+          baseURL: config.payPayBankBaseUrl,
         })
     const balances = (await createPayPayBankProvider(imported).invoke(
       'balances.list',

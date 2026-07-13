@@ -177,6 +177,7 @@ export const checkProfileAvailability = async (
           branchNo: secret.branchNo,
           accountNo: secret.accountNo,
           password: secret.password,
+          baseURL: config.payPayBankBaseUrl,
         })
     const result = serializableAvailability(
       await timed(

@@ -60,7 +60,9 @@ const profile = await login({
 | `interest`       | Interest amount           |
 | `interestPoints` | Interest points           |
 
-The currently supported operations are balance retrieval and logout. Transaction history, transfers, term deposits, and other operations are not supported. Call `logout()` from a `finally` block after use to end the session.
+The provider supports account, balance, and transaction-history reads. Transfers, term deposits, and other operations are not supported. Call `logout()` from a `finally` block after use to end the session.
+
+Transaction history is available through the shared `history.list` operation. Pass `from` and `to` as `YYYY-MM-DD` values to request a date range. Only `transaction` history is supported.
 
 ## Reusing a client
 

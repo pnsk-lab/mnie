@@ -18,7 +18,8 @@
   },
   "dependencies": {
     "@mnie/types": "workspace:*",
-    "iconv-lite": "^0.7.2"
+    "iconv-lite": "^0.7.2",
+    "node-html-parser": "^9.0.0"
   },
   "devDependencies": {
     "@repo/tsconfig": "workspace:*",
