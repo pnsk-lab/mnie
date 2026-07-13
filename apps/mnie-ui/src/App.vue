@@ -72,7 +72,7 @@ const {
   authManagerDataPath,
   authManagerMasterPassword,
   selectedAuthManagerId,
-  sbiAuthCredential,
+  sbiCredentialJson,
   tradePassword,
   sbiDeviceId,
   smbcLabel,
@@ -388,7 +388,7 @@ onUnmounted(() => {
           v-model:auth-manager-data-path="authManagerDataPath"
           v-model:auth-manager-master-password="authManagerMasterPassword"
           v-model:selected-auth-manager-id="selectedAuthManagerId"
-          v-model:sbi-auth-credential="sbiAuthCredential"
+          v-model:sbi-credential-json="sbiCredentialJson"
           v-model:trade-password="tradePassword"
           v-model:sbi-device-id="sbiDeviceId"
           v-model:selected-profile-id="selectedProfileId"

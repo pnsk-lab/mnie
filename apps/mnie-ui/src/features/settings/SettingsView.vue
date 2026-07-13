@@ -4,6 +4,7 @@ import {
   Building2,
   ChevronRight,
   ChevronLeft,
+  Import,
   KeyRound,
   Landmark,
   LoaderCircle,
@@ -30,6 +31,7 @@ import type {
   SbiPasskey,
 } from '../../api'
 import ApiKeyPolicyEditor from '../../components/ApiKeyPolicyEditor.vue'
+import AuthManagerPasskeyDialog from '../../components/AuthManagerPasskeyDialog.vue'
 import UiModal from '../../components/ui/UiModal.vue'
 import { ui } from '../../styles/ui'
 import { profileColor } from '../../constants/provider'
@@ -60,7 +62,7 @@ const authManagerMasterPassword = defineModel<string>('authManagerMasterPassword
 const selectedAuthManagerId = defineModel<string>('selectedAuthManagerId', {
   required: true,
 })
-const sbiAuthCredential = defineModel<unknown>('sbiAuthCredential')
+const sbiCredentialJson = defineModel<string>('sbiCredentialJson', { required: true })
 const tradePassword = defineModel<string>('tradePassword', { required: true })
 const sbiDeviceId = defineModel<string>('sbiDeviceId', { required: true })
 const selectedProfileId = defineModel<string>('selectedProfileId', { required: true })
@@ -74,6 +76,7 @@ const payPayBankAccountNo = defineModel<string>('payPayBankAccountNo', { require
 const payPayBankPassword = defineModel<string>('payPayBankPassword', { required: true })
 const editedLabel = ref('')
 const editedColor = ref('')
+const showPasskeyJsonDialog = ref(false)
 
 const emit = defineEmits<{
   addApiKey: []
@@ -83,7 +86,7 @@ const emit = defineEmits<{
   addSbiPasskey: []
   addAuthManager: []
   removeAuthManager: [id: string]
-  fillProviderCredentials: [provider: AccountProfile['provider']]
+  fillProviderCredentials: []
   addSmbcDirectProfile: []
   addPayPayBankProfile: []
   finishSmbc2fa: []
@@ -591,34 +594,26 @@ const saveEditingApiKey = () => {
               <label :class="ui.label"
                 >名前<input v-model="sbiLabel" :class="ui.input" placeholder="例: SBI 証券"
               /></label>
-              <div class="grid gap-3 rounded-[18px] border border-[#30343a] bg-[#111418] p-4">
-                <label :class="ui.label"
-                  >Auth Manager<select v-model="selectedAuthManagerId" :class="ui.input">
-                    <option value="" disabled>認証プロバイダーを選択</option>
-                    <option v-for="manager in authManagers" :key="manager.id" :value="manager.id">
-                      {{ manager.label }}
-                    </option>
-                  </select></label
-                >
-                <label :class="ui.label"
-                  >Master Password<input
-                    v-model="authManagerMasterPassword"
-                    :class="ui.input"
-                    type="password"
-                    autocomplete="off"
-                /></label>
-                <div class="flex flex-wrap items-center justify-between gap-3">
-                  <span class="text-sm text-[#9aa0a9]">
-                    {{ sbiAuthCredential ? 'パスキーを読み込み済み' : 'パスキーは未選択です' }}
-                  </span>
+              <div class="grid gap-2">
+                <div class="flex items-center justify-between gap-3">
+                  <span class="text-sm font-bold text-[#d3e3fd]">パスキー JSON</span>
                   <button
                     :class="ui.ghostButton"
+                    class="!h-9 !w-9 !p-0"
                     type="button"
-                    @click="emit('fillProviderCredentials', 'sbisec')"
+                    title="パスキー JSON をインポート"
+                    aria-label="パスキー JSON をインポート"
+                    @click="showPasskeyJsonDialog = true"
                   >
-                    Auth Manager から読み込む
+                    <Import class="h-4 w-4" aria-hidden="true" />
                   </button>
                 </div>
+                <textarea
+                  v-model="sbiCredentialJson"
+                  :class="[ui.input, 'min-h-44 py-3 font-mono text-xs']"
+                  spellcheck="false"
+                  placeholder="{ ... }"
+                ></textarea>
               </div>
               <div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
                 <label :class="ui.label"
@@ -643,28 +638,6 @@ const saveEditingApiKey = () => {
             </template>
 
             <template v-else-if="selectedProvider === 'smbc-direct'">
-              <div class="grid gap-3 rounded-[18px] border border-[#30343a] bg-[#111418] p-4">
-                <select v-model="selectedAuthManagerId" :class="ui.input">
-                  <option value="" disabled>認証プロバイダーを選択</option>
-                  <option v-for="manager in authManagers" :key="manager.id" :value="manager.id">
-                    {{ manager.label }}
-                  </option>
-                </select>
-                <input
-                  v-model="authManagerMasterPassword"
-                  :class="ui.input"
-                  type="password"
-                  autocomplete="off"
-                  placeholder="Master Password"
-                />
-                <button
-                  :class="ui.ghostButton"
-                  type="button"
-                  @click="emit('fillProviderCredentials', 'smbc-direct')"
-                >
-                  Auth Manager から読み込む
-                </button>
-              </div>
               <template v-if="smbcQrUrl">
                 <div class="grid gap-3 rounded-[18px] border border-[#4c5b72] bg-[#182331] p-4">
                   <h4 class="font-black">生体認証を承認してください</h4>
@@ -725,28 +698,6 @@ const saveEditingApiKey = () => {
               <MobileSuicaPanel />
             </template>
             <template v-else-if="selectedProvider === 'paypay-bank'">
-              <div class="grid gap-3 rounded-[18px] border border-[#30343a] bg-[#111418] p-4">
-                <select v-model="selectedAuthManagerId" :class="ui.input">
-                  <option value="" disabled>認証プロバイダーを選択</option>
-                  <option v-for="manager in authManagers" :key="manager.id" :value="manager.id">
-                    {{ manager.label }}
-                  </option>
-                </select>
-                <input
-                  v-model="authManagerMasterPassword"
-                  :class="ui.input"
-                  type="password"
-                  autocomplete="off"
-                  placeholder="Master Password"
-                />
-                <button
-                  :class="ui.ghostButton"
-                  type="button"
-                  @click="emit('fillProviderCredentials', 'paypay-bank')"
-                >
-                  Auth Manager から読み込む
-                </button>
-              </div>
               <label :class="ui.label"
                 >名前<input v-model="payPayBankLabel" :class="ui.input"
               /></label>
@@ -908,6 +859,15 @@ const saveEditingApiKey = () => {
     </div>
 
     <AnimatePresence>
+      <AuthManagerPasskeyDialog
+        v-if="showPasskeyJsonDialog"
+        key="passkey-json-import"
+        :auth-managers="authManagers"
+        v-model:selected-auth-manager-id="selectedAuthManagerId"
+        v-model:auth-manager-master-password="authManagerMasterPassword"
+        @close="showPasskeyJsonDialog = false"
+        @fill="emit('fillProviderCredentials')"
+      />
       <UiModal
         v-if="unavailableProfile"
         key="availability-detail"

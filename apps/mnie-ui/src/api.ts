@@ -211,11 +211,7 @@ export const saveBitwardenAuthManager = (payload: { label: string; dataPath?: st
 export const deleteAuthManager = (id: string) =>
   request<{ ok: true }>(`/admin/auth-managers/${id}`, { method: 'DELETE' })
 
-export const fillFromAuthManager = (
-  id: string,
-  provider: AccountProfile['provider'],
-  masterPassword: string,
-) =>
+export const fillFromAuthManager = (id: string, provider: 'sbisec', masterPassword: string) =>
   request<{ credentials: FilledAuthCredential[] }>(`/admin/auth-managers/${id}/fill`, {
     method: 'POST',
     body: JSON.stringify({ provider, masterPassword }),

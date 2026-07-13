@@ -232,6 +232,9 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
       .limit(1)
     if (!row) return c.json({ error: 'auth manager not found' }, 404)
     const body = await c.req.json<{ provider?: string; masterPassword?: string }>()
+    if (body.provider !== 'sbisec') {
+      return c.json({ error: 'Auth Manager is only supported for SBI Securities' }, 400)
+    }
     if (!body.masterPassword) return c.json({ error: 'masterPassword is required' }, 400)
     const config = c.get('config')
     const providerUrl =
