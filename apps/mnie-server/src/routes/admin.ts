@@ -616,8 +616,10 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
   })
 
   app.patch('/profiles/:id', async (c) => {
-    const body = await c.req.json<{ label?: string }>()
+    const body = await c.req.json<{ label?: string; color?: string }>()
     if (!body.label?.trim()) return c.json({ error: 'label is required' }, 400)
+    if (!body.color || !/^#[0-9a-fA-F]{6}$/.test(body.color))
+      return c.json({ error: 'color must be a hex color' }, 400)
     const profile = await c.get('db').query.accountProfiles.findFirst({
       where: (table, { eq }) => eq(table.id, c.req.param('id')),
     })
@@ -626,7 +628,7 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
     await c
       .get('db')
       .update(accountProfiles)
-      .set({ label: body.label.trim(), updatedAt: now })
+      .set({ label: body.label.trim(), color: body.color.toLowerCase(), updatedAt: now })
       .where(eq(accountProfiles.id, profile.id))
     if (profile.provider === 'sbisec') {
       await c
@@ -635,7 +637,14 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
         .set({ label: body.label.trim(), updatedAt: now })
         .where(eq(sbiPasskeys.id, profile.id))
     }
-    return c.json({ profile: { ...profile, label: body.label.trim(), updatedAt: now } })
+    return c.json({
+      profile: {
+        ...profile,
+        label: body.label.trim(),
+        color: body.color.toLowerCase(),
+        updatedAt: now,
+      },
+    })
   })
 
   app.post('/sbi-passkeys', async (c) => {

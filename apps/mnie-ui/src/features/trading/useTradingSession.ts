@@ -12,6 +12,7 @@ import {
   searchableMarkets,
 } from '../../constants/trade'
 import { countryTimeZones, marketSessions, marketTimeZones } from '../../constants/market'
+import { profileColor } from '../../constants/provider'
 import type {
   ChartMode,
   ChartRange,
@@ -227,9 +228,9 @@ export const useTradingSession = (
   const totalAssetValueFromAssets = ref<number | null>(null)
   const storedTotalAssetValue = ref<number | null>(null)
   const assetValuations = ref<AssetValuation[]>([])
-  const assetHistory = ref<Array<{ at: string; profileId: string; label: string; value: number }>>(
-    [],
-  )
+  const assetHistory = ref<
+    Array<{ at: string; profileId: string; label: string; value: number; color: string }>
+  >([])
   const storedAssetsLoaded = ref(false)
   const buyingPower = ref(0)
   const holdingsMarketValue = ref(0)
@@ -628,6 +629,12 @@ export const useTradingSession = (
               profiles.value.find((profile) => profile.id === item.profileId)?.label ??
               item.profileId,
             value,
+            color: profileColor(
+              profiles.value.find((profile) => profile.id === item.profileId) ?? {
+                provider: 'sbisec',
+                color: null,
+              },
+            ),
           },
         ]
       })
@@ -672,6 +679,12 @@ export const useTradingSession = (
             profileId,
             label: profiles.value.find((profile) => profile.id === profileId)?.label ?? profileId,
             value: pointValue,
+            color: profileColor(
+              profiles.value.find((profile) => profile.id === profileId) ?? {
+                provider: 'sbisec',
+                color: null,
+              },
+            ),
           }
         })
       })
@@ -702,6 +715,12 @@ export const useTradingSession = (
         label:
           profiles.value.find((profile) => profile.id === item.profileId)?.label ?? item.provider,
         provider: item.provider,
+        color: profileColor(
+          profiles.value.find((profile) => profile.id === item.profileId) ?? {
+            provider: item.provider,
+            color: null,
+          },
+        ),
         value: item.value,
         ratio: totalAssetValue.value ? (item.value / totalAssetValue.value) * 100 : 0,
       })),

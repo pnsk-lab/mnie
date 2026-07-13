@@ -32,6 +32,7 @@ import type {
 import ApiKeyPolicyEditor from '../../components/ApiKeyPolicyEditor.vue'
 import UiModal from '../../components/ui/UiModal.vue'
 import { ui } from '../../styles/ui'
+import { profileColor } from '../../constants/provider'
 import MobileSuicaPanel from './MobileSuicaPanel.vue'
 
 const props = defineProps<{
@@ -72,6 +73,7 @@ const payPayBankBranchNo = defineModel<string>('payPayBankBranchNo', { required:
 const payPayBankAccountNo = defineModel<string>('payPayBankAccountNo', { required: true })
 const payPayBankPassword = defineModel<string>('payPayBankPassword', { required: true })
 const editedLabel = ref('')
+const editedColor = ref('')
 
 const emit = defineEmits<{
   addApiKey: []
@@ -88,7 +90,7 @@ const emit = defineEmits<{
   forceProfileAvailability: [profileId: string]
   connect: []
   removeSbiPasskey: [id: string]
-  updateProfileLabel: [id: string, label: string]
+  updateProfile: [id: string, label: string, color: string]
 }>()
 
 type SettingsSection = 'api-keys' | 'providers' | 'auth-managers'
@@ -137,6 +139,7 @@ watch(
   editedProfile,
   (profile) => {
     editedLabel.value = profile?.label ?? ''
+    editedColor.value = profile ? profileColor(profile) : ''
   },
   { immediate: true },
 )
@@ -509,6 +512,14 @@ const saveEditingApiKey = () => {
                   名前
                   <input v-model="editedLabel" :class="ui.input" />
                 </label>
+                <label :class="ui.label">
+                  色
+                  <input
+                    v-model="editedColor"
+                    type="color"
+                    class="h-10 w-16 cursor-pointer rounded-lg border border-slate-600 bg-transparent p-1"
+                  />
+                </label>
                 <div v-if="selectedProvider === 'smbc-direct'" class="flex justify-end">
                   <button
                     :class="ui.primaryButton"
@@ -542,7 +553,7 @@ const saveEditingApiKey = () => {
                   <button
                     :class="ui.primaryButton"
                     type="button"
-                    @click="emit('updateProfileLabel', editedProfile.id, editedLabel)"
+                    @click="emit('updateProfile', editedProfile.id, editedLabel, editedColor)"
                   >
                     <Save class="h-4 w-4" aria-hidden="true" /> 保存
                   </button>

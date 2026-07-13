@@ -6,6 +6,7 @@ export interface AuthStatus {
 export interface ApiKey {
   id: string
   label: string
+  color: string | null
   maxTradesPerHour?: number | null
   maxTradesPer6Hours?: number | null
   maxTradesPerDay?: number | null
@@ -73,6 +74,7 @@ export interface AccountProfile {
   id: string
   provider: 'sbisec' | 'smbc-direct' | 'mobilesuica' | 'paypay-bank'
   label: string
+  color: string | null
   createdAt: string
   updatedAt: string
 }
@@ -300,10 +302,10 @@ export const savePayPayBankProfile = (payload: {
 export const deleteAccountProfile = (id: string) =>
   request<{ ok: true }>(`/admin/profiles/${id}`, { method: 'DELETE' })
 
-export const updateAccountProfileLabel = (id: string, label: string) =>
+export const updateAccountProfile = (id: string, payload: { label: string; color: string }) =>
   request<{ profile: AccountProfile }>(`/admin/profiles/${id}`, {
     method: 'PATCH',
-    body: JSON.stringify({ label }),
+    body: JSON.stringify(payload),
   })
 
 export const createMobileSuicaCaptcha = (payload: {

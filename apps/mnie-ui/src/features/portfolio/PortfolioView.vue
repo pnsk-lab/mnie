@@ -17,6 +17,7 @@ import {
   signedPercent,
 } from '../../utils/format'
 import { orderAmountText, orderHistoryKey, orderQuantityText } from '../trading/trading-data'
+import { defaultProviderColors } from '../../constants/provider'
 
 const props = defineProps<{
   showPortfolioSpinner: boolean
@@ -35,7 +36,13 @@ const props = defineProps<{
     value: number
     ratio: number
   }>
-  assetHistory: Array<{ at: string; profileId: string; label: string; value: number }>
+  assetHistory: Array<{
+    at: string
+    profileId: string
+    label: string
+    value: number
+    color: string
+  }>
   positions: Position[]
   recentOrders: OrderRow[]
   cancelingOrderKey: string
@@ -61,10 +68,8 @@ type AssetSlice = {
 }
 
 const profileColors = ['#c29a62', '#9d8cac', '#9fac8d', '#b77f6b', '#aa8999']
-const historyProfileColor = (profileId: string, index: number) =>
-  profileId.startsWith('sbi')
-    ? '#817f9f'
-    : (profileColors[index % profileColors.length] ?? '#9aa0a9')
+const historyProfileColor = (color: string | undefined, index: number) =>
+  color || (profileColors[index % profileColors.length] ?? '#9aa0a9')
 const profileSlices = computed<AssetSlice[]>(() =>
   [
     {
@@ -72,14 +77,17 @@ const profileSlices = computed<AssetSlice[]>(() =>
       profileId: 'sbi',
       label: 'SBI証券',
       value: props.holdingsMarketValue + props.buyingPower,
-      color: '#817f9f',
+      color: defaultProviderColors.sbisec,
     },
     ...props.otherAssetBreakdown.map((item, index) => ({
       id: item.profileId,
       profileId: item.profileId,
       label: item.label,
       value: item.value,
-      color: profileColors[index % profileColors.length] ?? '#9aa0a9',
+      color:
+        defaultProviderColors[item.provider as keyof typeof defaultProviderColors] ??
+        profileColors[index % profileColors.length] ??
+        '#9aa0a9',
     })),
   ].filter((item) => item.value > 0),
 )
@@ -193,14 +201,16 @@ const historyChart = computed(() => {
     .map((item) => ({ ...item, date: new Date(item.at) }))
     .filter((item) => Number.isFinite(item.date.getTime()) && Number.isFinite(item.value))
     .sort((a, b) => a.date.getTime() - b.date.getTime())
-  const providers = [...new Map(events.map((item) => [item.profileId, item.label])).entries()]
+  const providers = [
+    ...new Map(events.map((item) => [item.profileId, [item.label, item.color] as const])).entries(),
+  ]
   const latest = new Map<string, number>()
   const points = events.map((event) => {
     latest.set(event.profileId, event.value)
-    const breakdown = providers.map(([profileId, label], index) => ({
+    const breakdown = providers.map(([profileId, [label, color]], index) => ({
       profileId,
       label,
-      color: historyProfileColor(profileId, index),
+      color: historyProfileColor(color, index),
       value: latest.get(profileId) ?? 0,
     }))
     return {
@@ -233,7 +243,7 @@ const historyChart = computed(() => {
   const y = scaleLinear()
     .domain([min, max + padding])
     .range([historyChartBottom.value, 12])
-  const layers = providers.map(([profileId, label], providerIndex) => {
+  const layers = providers.map(([profileId, [label, color]], providerIndex) => {
     const values = points.map((point) => {
       const y0 = point.breakdown.slice(0, providerIndex).reduce((sum, item) => sum + item.value, 0)
       const value = point.breakdown[providerIndex]?.value ?? 0
@@ -242,7 +252,7 @@ const historyChart = computed(() => {
     return {
       profileId,
       label,
-      color: historyProfileColor(profileId, providerIndex),
+      color: historyProfileColor(color, providerIndex),
       path:
         area<(typeof values)[number]>()
           .x((item) => x(item.date))
