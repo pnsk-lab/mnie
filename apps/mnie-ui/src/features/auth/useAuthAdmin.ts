@@ -15,6 +15,7 @@ import {
   listSbiPasskeys,
   listAccountProfiles,
   listCronJobs,
+  listProviderDefinitions,
   saveSbiPasskey,
   saveBitwardenAuthManager,
   saveSmbcDirectProfile,
@@ -29,6 +30,7 @@ import {
   type AuthStatus,
   type CronJob,
   type ProfileAvailability,
+  type ProviderDefinition,
   type SbiPasskey,
 } from '../../api'
 import { defaultApiKeyPolicy } from './api-key-policy'
@@ -39,6 +41,7 @@ export const useAuthAdmin = () => {
   const sbiPasskeys = ref<SbiPasskey[]>([])
   const authManagers = ref<AuthManagerConfig[]>([])
   const profiles = ref<AccountProfile[]>([])
+  const providerDefinitions = ref<ProviderDefinition[]>([])
   const profileAvailability = ref<Record<string, ProfileAvailability>>({})
   const profileAvailabilityCheckedAt = ref<Record<string, number>>({})
   const profileAvailabilityLoading = ref<Record<string, boolean>>({})
@@ -83,6 +86,7 @@ export const useAuthAdmin = () => {
       authManagers.value = (await listAuthManagers()).authManagers
       selectedAuthManagerId.value ||= authManagers.value[0]?.id ?? ''
       profiles.value = (await listAccountProfiles()).profiles
+      providerDefinitions.value = (await listProviderDefinitions()).providers
       for (const profile of profiles.value) {
         if (
           Date.now() - (profileAvailabilityCheckedAt.value[profile.id] ?? 0) <
@@ -276,6 +280,7 @@ export const useAuthAdmin = () => {
     sbiPasskeys,
     authManagers,
     profiles,
+    providerDefinitions,
     profileAvailability,
     profileAvailabilityCheckedAt,
     profileAvailabilityLoading,

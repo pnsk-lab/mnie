@@ -432,18 +432,24 @@ export const positionFromApi = (value: unknown): Position | null => {
   if (typeof item.instrumentId === 'string') {
     const marketValue = numberValue(asRecord(item.marketValue).value)
     const profitLoss = numberValue(asRecord(item.unrealizedProfitLoss).value)
+    const accountType = textValue(item.accountType)
     return {
       code: item.instrumentId,
       name: textValue(item.instrumentName, item.instrumentId),
-      market: '',
+      market: textValue(item.venue),
       quantity: numberValue(item.quantity),
-      avgPrice: 0,
-      currentPrice: null,
+      avgPrice: numberValue(asRecord(item.averagePrice).value),
+      currentPrice: nullableNumberValue(asRecord(item.currentPrice).value),
       marketValue,
       profitLoss,
-      profitLossRate: 0,
-      type: item.positionType === 'margin' ? '信用' : '現物',
-      accountType: undefined,
+      profitLossRate: numberValue(item.unrealizedProfitLossRate),
+      type:
+        item.positionType === 'margin'
+          ? '信用'
+          : accountType
+            ? accountTypeLabel(accountType)
+            : '現物',
+      accountType: accountType || undefined,
     }
   }
   const issue = issueFrom(item.issue)
@@ -488,20 +494,17 @@ export const orderFromApi = (value: unknown): OrderRow | null => {
       code: item.instrumentId,
       date: textValue(item.orderedAt),
       stock: textValue(item.instrumentName, item.instrumentId),
-      market: '',
+      market: textValue(item.venue),
       side: item.side === 'sell' ? 'sell' : 'buy',
       kind: 'standard',
       quantity,
-      unexecutedQuantity: null,
+      unexecutedQuantity: nullableNumberValue(item.unexecutedQuantity),
       executedQuantity,
       price: nullableNumberValue(asRecord(item.price).value),
       status,
-      orderNumber: '',
-      orderSubNo: '',
-      tradeId: '',
-      accountType: '',
-      cancelable: false,
-      correctable: false,
+      accountType: textValue(item.accountType),
+      cancelable: typeof item.cancelable === 'boolean' ? item.cancelable : undefined,
+      correctable: typeof item.correctable === 'boolean' ? item.correctable : undefined,
     }
   }
   const issue = issueFrom(item.issue)
@@ -557,6 +560,28 @@ export const orderDetailFromApi = (value: unknown): OrderDetail | null => {
 
 export const tradeRecordFromApi = (value: unknown): TradeRecordRow | null => {
   const item = asRecord(value)
+  if (typeof item.instrumentId === 'string') {
+    const tradeDate = textValue(item.tradeDate)
+    const valueDate = textValue(item.valueDate)
+    const type = textValue(item.type, '取引')
+    return {
+      id: textValue(
+        item.id,
+        [item.instrumentId, tradeDate, valueDate, type].filter(Boolean).join(':'),
+      ),
+      code: item.instrumentId,
+      stock: textValue(item.instrumentName, item.instrumentId),
+      market: textValue(item.venue),
+      type,
+      quantity: nullableNumberValue(item.quantity),
+      price: nullableNumberValue(asRecord(item.price).value),
+      amount: nullableNumberValue(asRecord(item.amount).value),
+      tradeDate: tradeDate || undefined,
+      valueDate: valueDate || undefined,
+      accountType: textValue(item.accountType) || undefined,
+      settlementCurrencyCode: textValue(item.settlementCurrency) || undefined,
+    }
+  }
   const issue = issueFrom(item.issue)
   if (!issue.code) return null
   const tradeDate = textValue(item.tradeDate)

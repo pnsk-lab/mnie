@@ -22,14 +22,12 @@ export default defineConfig({
     proxy: {
       '/api': {
         ...proxyToServer,
-        rewrite: (path) => path.replace(/^\/api/, ''),
       },
       '/.well-known': proxyToServer,
       '/authorize': proxyToServer,
       '/token': proxyToServer,
       '/register': proxyToServer,
       '/revoke': proxyToServer,
-      '/oauth': proxyToServer,
     },
   },
 })

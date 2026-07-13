@@ -57,6 +57,7 @@ const {
   sbiPasskeys,
   authManagers,
   profiles,
+  providerDefinitions,
   profileAvailability,
   profileAvailabilityCheckedAt,
   profileAvailabilityLoading,
@@ -404,6 +405,7 @@ onUnmounted(() => {
           :sbi-passkeys="sbiPasskeys"
           :auth-managers="authManagers"
           :profiles="profiles"
+          :provider-definitions="providerDefinitions"
           :profile-availability="profileAvailability"
           :profile-availability-checked-at="profileAvailabilityCheckedAt"
           :profile-availability-loading="profileAvailabilityLoading"

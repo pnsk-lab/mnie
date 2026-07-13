@@ -233,20 +233,121 @@ export interface InvestmentPosition {
   accountId: string
   instrumentId: string
   instrumentName?: string
+  venue?: string
   quantity: string
+  availableQuantity?: string
   positionType: 'cash' | 'margin'
   side?: 'long' | 'short'
+  accountType?: string
+  averagePrice?: Money
+  currentPrice?: Money
   marketValue?: Money
   unrealizedProfitLoss?: Money
+  unrealizedProfitLossRate?: string
+  accountInformation?: string
+}
+
+export interface InvestmentTrade {
+  id: string
+  accountId: string
+  instrumentId: string
+  instrumentName?: string
+  venue?: string
+  type?: string
+  quantity?: string
+  price?: Money
+  amount?: Money
+  tradeDate?: string
+  valueDate?: string
+  accountType?: string
+  settlementCurrency?: string
 }
 
 export interface InvestmentOrderRequest {
   accountId: string
   instrumentId: string
+  /** Listing venue when it differs from the execution venue (for example odd-lot routes). */
+  instrumentVenue?: string
   side: 'buy' | 'sell'
-  quantity: string
+  /** Share/unit quantity. Exactly one of quantity and amount must be supplied. */
+  quantity?: string
+  /** Provider-supported notional order amount (for example PayPay Securities). */
+  amount?: Money
   positionType?: 'cash' | 'margin'
+  /** Provider-neutral account classification selected from operation availability rules. */
+  accountType?: string
+  strategy?:
+    | { kind: 'single' }
+    | {
+        kind: 'stop'
+        trigger: {
+          condition: 'at-or-above' | 'at-or-below'
+          price: Money
+        }
+      }
+    | {
+        kind: 'ifd'
+        exit: {
+          side: 'buy' | 'sell'
+          priceType: 'market' | 'limit'
+          limitPrice?: Money
+        }
+      }
+    | {
+        kind: 'oco'
+        alternative: {
+          priceType: 'market' | 'limit'
+          limitPrice?: Money
+        }
+        trigger: {
+          condition: 'at-or-above' | 'at-or-below'
+          price: Money
+        }
+      }
+  execution?: {
+    priceType: 'market' | 'limit'
+    limitPrice?: Money
+    timing?: 'realtime' | 'opening'
+    venue?: string
+    timeInForce?: 'session' | 'day' | 'week' | 'date'
+    expiresOn?: string
+  }
   allowTransaction?: true
+}
+
+export type InvestmentOrderSizing =
+  | {
+      kind: 'quantity'
+      minimum: string
+      increment: string
+      maximum?: string
+      /** Exchange board lot when the provider distinguishes whole and odd lots. */
+      boardLot?: string
+    }
+  | {
+      kind: 'amount'
+      currency: string
+      minimum: string
+      increment: string
+      maximum?: string
+    }
+
+export interface InvestmentOrderRules {
+  sizing: InvestmentOrderSizing[]
+  priceTypes: Array<'market' | 'limit'>
+  timings: Array<'realtime' | 'opening'>
+  venues?: string[]
+  timeInForce?: Array<'session' | 'day' | 'week' | 'date'>
+  expirationDates?: string[]
+  accountTypes?: string[]
+  priceIncrements?: Array<{
+    increment: Money
+    upTo?: Money
+  }>
+  supportsCorrection?: boolean
+  supportsCancellation?: boolean
+  /** Provider-specific restrictions that cannot be represented structurally. */
+  notices?: string[]
 }
 
 export interface InvestmentOrderPreview {
@@ -255,17 +356,46 @@ export interface InvestmentOrderPreview {
   confirmationToken?: string
 }
 
+export interface InvestmentOrderPlacement extends InvestmentOrderRequest {
+  confirmationToken?: string
+  allowTransaction: true
+}
+
+export interface InvestmentOrderChangeRequest {
+  accountId: string
+  orderId: string
+  quantity?: string
+  limitPrice?: Money
+  confirmationToken?: string
+  allowTransaction: true
+}
+
+export interface InvestmentOrderCancelRequest {
+  accountId: string
+  orderId: string
+  confirmationToken?: string
+  allowTransaction: true
+}
+
 export interface InvestmentOrder {
   id: string
   accountId: string
   instrumentId: string
   instrumentName?: string
+  venue?: string
+  accountType?: string
   side: 'buy' | 'sell'
   status: 'open' | 'executed' | 'cancelled' | 'expired' | 'rejected' | 'unknown'
   quantity?: string
+  unexecutedQuantity?: string
   executedQuantity?: string
   price?: Money
   orderedAt?: string
+  expiresAt?: string
+  statusText?: string
+  cancelable?: boolean
+  correctable?: boolean
+  accountInformation?: string
 }
 
 export type InvestmentOperations = {
@@ -273,10 +403,40 @@ export type InvestmentOperations = {
     PageRequest & { accountId?: string; positionType?: 'cash' | 'margin' },
     Page<InvestmentPosition>
   >
+  'investments.positions.get': OperationDefinition<
+    {
+      accountId?: string
+      instrumentId: string
+      venue: string
+      positionType?: 'cash' | 'margin'
+      accountType?: string
+    },
+    InvestmentPosition
+  >
   'investments.orders.preview': OperationDefinition<InvestmentOrderRequest, InvestmentOrderPreview>
+  'investments.orders.create': OperationDefinition<InvestmentOrderPlacement, InvestmentOrder>
+  'investments.orders.replace.preview': OperationDefinition<
+    InvestmentOrderChangeRequest,
+    InvestmentOrderPreview
+  >
+  'investments.orders.replace': OperationDefinition<InvestmentOrderChangeRequest, InvestmentOrder>
+  'investments.orders.cancel': OperationDefinition<InvestmentOrderCancelRequest, InvestmentOrder>
   'investments.orders.list': OperationDefinition<
     PageRequest & { accountId?: string; status?: InvestmentOrder['status'] },
     Page<InvestmentOrder>
+  >
+  'investments.orders.get': OperationDefinition<
+    {
+      accountId?: string
+      orderId: string
+      instrumentId?: string
+      venue: string
+    },
+    InvestmentOrder
+  >
+  'investments.trades.list': OperationDefinition<
+    PageRequest & { accountId?: string; venue?: string },
+    Page<InvestmentTrade>
   >
 }
 
@@ -376,10 +536,45 @@ export type OperationRequest<Operations, Name extends OperationName<Operations>>
 export type OperationResponse<Operations, Name extends OperationName<Operations>> =
   Operations[Name] extends OperationDefinition<unknown, infer Response> ? Response : never
 
-export type AvailabilityFailureReason = 'CAPTCHA_REQIRED' | '2FA_REQUIRED' | 'UNKNOWN'
+export type AvailabilityFailureReason =
+  | 'CAPTCHA_REQUIRED'
+  /** Legacy misspelling retained for wire compatibility. */
+  | 'CAPTCHA_REQIRED'
+  | '2FA_REQUIRED'
+  | 'AUTHENTICATION_REQUIRED'
+  | 'MARKET_CLOSED'
+  | 'INSTRUMENT_UNSUPPORTED'
+  | 'OPERATION_UNSUPPORTED'
+  | 'PROVIDER_RESTRICTED'
+  | 'UNKNOWN'
 export type AvailabilityCheckResult =
   | { ok: true }
   | { ok: false; message: unknown; reason: AvailabilityFailureReason }
+
+export interface OperationAvailabilityRequest {
+  operation: string
+  input?: unknown
+}
+
+export type OperationAvailability =
+  | {
+      available: true
+      /** Present for investment order operations when known by the provider. */
+      orderRules?: InvestmentOrderRules
+      notices?: string[]
+    }
+  | {
+      available: false
+      reason: AvailabilityFailureReason
+      message: unknown
+      retryAt?: string
+    }
+
+export interface ProviderAvailability {
+  connection: AvailabilityCheckResult
+  operations: Record<string, OperationAvailability>
+  checkedAt: string
+}
 
 /**
  * The public contract of every provider. Provider-specific login is allowed,
@@ -395,6 +590,11 @@ export interface FinancialProvider<Operations = CommonOperations> {
    * Returns the provider failure message instead of throwing when unavailable.
    */
   checkAvailability(): Promise<AvailabilityCheckResult>
+  /**
+   * Checks an operation against provider-, account-, instrument-, and market-specific rules.
+   * Providers may omit this method; callers then derive availability from operations().
+   */
+  checkOperationAvailability?(request: OperationAvailabilityRequest): Promise<OperationAvailability>
   invoke<Name extends OperationName<Operations>>(
     name: Name,
     request: OperationRequest<Operations, Name>,

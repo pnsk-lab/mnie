@@ -628,7 +628,7 @@ const emit = defineEmits<{
         </span>
       </button>
       <p v-if="!viewedStocks.length" :class="[ui.muted, 'p-5 text-sm']">
-        SBIに接続するか検索すると銘柄を表示します
+        対応する証券口座に接続するか検索すると銘柄を表示します
       </p>
     </article>
   </section>

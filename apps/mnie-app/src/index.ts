@@ -20,7 +20,6 @@ const contentTypes: Record<string, string> = {
   '.ico': 'image/x-icon',
 }
 
-app.route('/api', api.app)
 app.route('/', api.app)
 
 const isInsideUiDist = (path: string) => {
@@ -63,3 +62,12 @@ const server = Bun.serve({
 })
 
 console.log(`mnie listening on http://localhost:${server.port}`)
+
+const shutdown = async () => {
+  server.stop(true)
+  await api.close()
+  process.exit(0)
+}
+
+process.once('SIGINT', shutdown)
+process.once('SIGTERM', shutdown)

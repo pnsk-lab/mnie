@@ -71,11 +71,24 @@ export type SbiPasskeySource =
 
 export interface AccountProfile {
   id: string
-  provider: 'sbisec' | 'smbc-direct' | 'mobilesuica' | 'paypay-bank'
+  provider: string
   label: string
   color: string | null
   createdAt: string
   updatedAt: string
+}
+
+export interface ProviderDefinition {
+  id: string
+  name: string
+  kind: string
+  authentication: string
+  credentialFields: Array<{
+    name: string
+    kind: string
+    required: boolean
+    secret: boolean
+  }>
 }
 
 export interface AssetValuation {
@@ -113,12 +126,22 @@ export interface HistoryListError {
 }
 
 export type ProfileAvailability =
-  | { ok: true; checkedAt?: string }
+  | { ok: true; checkedAt?: string; operations?: Record<string, unknown> }
   | {
       ok: false
       message: unknown
-      reason: 'CAPTCHA_REQIRED' | '2FA_REQUIRED' | 'UNKNOWN'
+      reason:
+        | 'CAPTCHA_REQUIRED'
+        | 'CAPTCHA_REQIRED'
+        | '2FA_REQUIRED'
+        | 'AUTHENTICATION_REQUIRED'
+        | 'MARKET_CLOSED'
+        | 'INSTRUMENT_UNSUPPORTED'
+        | 'OPERATION_UNSUPPORTED'
+        | 'PROVIDER_RESTRICTED'
+        | 'UNKNOWN'
       checkedAt?: string
+      operations?: Record<string, unknown>
     }
 
 export interface CronJob {
@@ -141,7 +164,7 @@ export interface MobileSuicaTransaction {
   balanceAfter?: { kind: 'money'; money: { currency: string; value: string } }
 }
 
-const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
+const httpRequest = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(`/api${path}`, {
     cache: 'no-store',
     credentials: 'include',
@@ -155,66 +178,132 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   return response.json() as Promise<T>
 }
 
-export const getStatus = () => request<AuthStatus>('/auth/status')
+interface RpcResponse {
+  id?: number | null
+  result?: unknown
+  error?: { message?: string }
+}
+
+let adminSocket: WebSocket | undefined
+let adminSocketReady: Promise<WebSocket> | undefined
+let adminRpcId = 0
+const adminPending = new Map<
+  number,
+  { resolve(value: unknown): void; reject(reason?: unknown): void }
+>()
+
+const connectAdminSocket = () => {
+  if (adminSocket?.readyState === WebSocket.OPEN) return Promise.resolve(adminSocket)
+  if (adminSocketReady) return adminSocketReady
+  adminSocketReady = new Promise<WebSocket>((resolve, reject) => {
+    const socket = createRpcSocket()
+    socket.addEventListener('open', () => {
+      adminSocket = socket
+      adminSocketReady = undefined
+      resolve(socket)
+    })
+    socket.addEventListener('message', (event) => {
+      let response: RpcResponse
+      try {
+        response = JSON.parse(String(event.data)) as RpcResponse
+      } catch {
+        return
+      }
+      if (typeof response.id !== 'number') return
+      const pending = adminPending.get(response.id)
+      if (!pending) return
+      adminPending.delete(response.id)
+      if (response.error) pending.reject(new Error(response.error.message || 'RPC request failed'))
+      else pending.resolve(response.result)
+    })
+    socket.addEventListener('error', () => reject(new Error('WebSocket connection failed')))
+    socket.addEventListener('close', () => {
+      if (adminSocket === socket) adminSocket = undefined
+      adminSocketReady = undefined
+      for (const pending of adminPending.values()) pending.reject(new Error('WebSocket closed'))
+      adminPending.clear()
+    })
+  })
+  return adminSocketReady
+}
+
+const rpcRequest = async <T>(method: string, params?: unknown): Promise<T> => {
+  const socket = await connectAdminSocket()
+  const id = ++adminRpcId
+  const response = new Promise<T>((resolve, reject) => {
+    adminPending.set(id, { resolve: (value) => resolve(value as T), reject })
+  })
+  socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
+  return response
+}
+
+const adminRequest = <T>(operation: string, input: Record<string, unknown> = {}) =>
+  rpcRequest<T>('admin.invoke', { operation, input })
+
+const workspaceRequest = <T>(operation: string, input: Record<string, unknown> = {}) =>
+  rpcRequest<T>('workspace.invoke', { operation, input })
+
+export const getStatus = () => httpRequest<AuthStatus>('/auth/status')
 
 export const createSetupOptions = (password: string) =>
-  request<{ options: unknown; challengeId: string }>('/auth/setup/options', {
+  httpRequest<{ options: unknown; challengeId: string }>('/auth/setup/options', {
     method: 'POST',
     body: JSON.stringify({ password }),
   })
 
 export const verifySetup = (challengeId: string, response: unknown) =>
-  request<{ ok: true }>('/auth/setup/verify', {
+  httpRequest<{ ok: true }>('/auth/setup/verify', {
     method: 'POST',
     body: JSON.stringify({ challengeId, response }),
   })
 
 export const createLoginOptions = () =>
-  request<{ options: unknown; challengeId: string }>('/auth/login/options', {
+  httpRequest<{ options: unknown; challengeId: string }>('/auth/login/options', {
     method: 'POST',
   })
 
 export const verifyLogin = (challengeId: string, response: unknown) =>
-  request<{ ok: true }>('/auth/login/verify', {
+  httpRequest<{ ok: true }>('/auth/login/verify', {
     method: 'POST',
     body: JSON.stringify({ challengeId, response }),
   })
 
 export const createApiKey = (label: string, settings?: ApiKeySettings) =>
-  request<{ apiKey: ApiKey }>('/admin/api-keys', {
-    method: 'POST',
-    body: JSON.stringify({ label, settings }),
-  })
+  adminRequest<{ apiKey: ApiKey }>('apiKeys.create', { label, settings })
 
-export const listApiKeys = () => request<{ apiKeys: ApiKey[] }>('/admin/api-keys')
+export const listApiKeys = () => adminRequest<{ apiKeys: ApiKey[] }>('apiKeys.list')
 
 export const updateApiKeySettings = (id: string, settings: ApiKeySettings) =>
-  request<{ ok: true }>(`/admin/api-keys/${id}/settings`, {
-    method: 'PATCH',
-    body: JSON.stringify(settings),
-  })
+  adminRequest<{ ok: true }>('apiKeys.update', { id, settings })
 
-export const revokeApiKey = (id: string) =>
-  request<{ ok: true }>(`/admin/api-keys/${id}`, { method: 'DELETE' })
+export const revokeApiKey = (id: string) => adminRequest<{ ok: true }>('apiKeys.revoke', { id })
 
-export const listSbiPasskeys = () => request<{ passkeys: SbiPasskey[] }>('/admin/sbi-passkeys')
+export const listSbiPasskeys = async () => {
+  const { profiles } = await listAccountProfiles()
+  return {
+    passkeys: profiles
+      .filter((profile) => profile.provider === 'sbisec')
+      .map(({ id, label, createdAt, updatedAt }) => ({ id, label, createdAt, updatedAt })),
+  }
+}
 
 export const listAuthManagers = () =>
-  request<{ authManagers: AuthManagerConfig[] }>('/admin/auth-managers')
+  adminRequest<{ authManagers: AuthManagerConfig[] }>('authManagers.list')
 
 export const saveBitwardenAuthManager = (payload: { label: string; dataPath?: string }) =>
-  request<{ authManager: AuthManagerConfig }>('/admin/auth-managers/bitwarden', {
-    method: 'POST',
-    body: JSON.stringify(payload),
+  adminRequest<{ authManager: AuthManagerConfig }>('authManagers.create', {
+    kind: 'bitwarden',
+    ...payload,
   })
 
 export const deleteAuthManager = (id: string) =>
-  request<{ ok: true }>(`/admin/auth-managers/${id}`, { method: 'DELETE' })
+  adminRequest<{ ok: true }>('authManagers.delete', { id })
 
-export const fillFromAuthManager = (id: string, provider: 'sbisec', masterPassword: string) =>
-  request<{ credentials: FilledAuthCredential[] }>(`/admin/auth-managers/${id}/fill`, {
-    method: 'POST',
-    body: JSON.stringify({ provider, masterPassword }),
+export const fillFromAuthManager = (id: string, provider: string, masterPassword: string) =>
+  adminRequest<{ credentials: FilledAuthCredential[] }>('authManagers.credentials.list', {
+    id,
+    providerId: provider,
+    masterPassword,
   })
 
 export const saveSbiPasskey = (payload: {
@@ -223,18 +312,34 @@ export const saveSbiPasskey = (payload: {
   tradePassword?: string
   deviceId?: string
 }) =>
-  request<{ passkey: SbiPasskey }>('/admin/sbi-passkeys', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
+  adminRequest<{ profile: AccountProfile }>('profiles.create', {
+    providerId: 'sbisec',
+    label: payload.label,
+    credentials: {
+      source: payload.source,
+      tradePassword: payload.tradePassword,
+      deviceId: payload.deviceId,
+    },
+  }).then(({ profile }) => ({
+    passkey: {
+      id: profile.id,
+      label: profile.label,
+      createdAt: profile.createdAt,
+      updatedAt: profile.updatedAt,
+    },
+  }))
 
 export const deleteSbiPasskey = (id: string) =>
-  request<{ ok: true }>(`/admin/sbi-passkeys/${id}`, { method: 'DELETE' })
+  adminRequest<{ ok: true }>('profiles.delete', { id })
 
-export const listAccountProfiles = () => request<{ profiles: AccountProfile[] }>('/admin/profiles')
+export const listAccountProfiles = () =>
+  adminRequest<{ profiles: AccountProfile[] }>('profiles.list')
+
+export const listProviderDefinitions = () =>
+  adminRequest<{ providers: ProviderDefinition[] }>('providers.list')
 
 export const listLatestAssetValuations = () =>
-  request<{ valuations: AssetValuation[] }>('/admin/asset-valuations/latest')
+  adminRequest<{ valuations: AssetValuation[] }>('assets.valuations.latest')
 
 export const listHistory = (
   input: {
@@ -244,33 +349,26 @@ export const listHistory = (
     kinds?: Array<'transaction' | 'valuation' | 'snapshot'>
     limit?: number
   } = {},
-) =>
-  request<{ items: HistoryItem[]; errors: HistoryListError[] }>('/admin/history', {
-    method: 'POST',
-    body: JSON.stringify(input),
-  })
+) => workspaceRequest<{ items: HistoryItem[]; errors: HistoryListError[] }>('history.list', input)
 
 export const checkAccountProfileAvailability = () =>
-  request<{ availability: Record<string, ProfileAvailability> }>('/admin/profiles/availability', {
-    method: 'POST',
-  })
-
-export const checkProfileAvailability = (profileId: string) =>
-  request<{ availability: Record<string, ProfileAvailability> }>('/admin/profiles/availability', {
-    method: 'POST',
-    body: JSON.stringify({ profileId }),
-  })
-
-export const checkProfileAvailabilityLive = (profileId: string) =>
-  request<{ availability: Record<string, ProfileAvailability> }>(
-    '/admin/profiles/availability/live',
-    {
-      method: 'POST',
-      body: JSON.stringify({ profileId }),
-    },
+  adminRequest<{ availability: Record<string, ProfileAvailability> }>(
+    'profiles.availability.cached',
   )
 
-export const listCronJobs = () => request<{ jobs: CronJob[] }>('/admin/cron-jobs')
+export const checkProfileAvailability = (profileId: string) =>
+  adminRequest<{ availability: Record<string, ProfileAvailability> }>(
+    'profiles.availability.cached',
+    { profileId },
+  )
+
+export const checkProfileAvailabilityLive = (profileId: string) =>
+  adminRequest<{ availability: Record<string, ProfileAvailability> }>(
+    'profiles.availability.refresh',
+    { profileId },
+  )
+
+export const listCronJobs = () => adminRequest<{ jobs: CronJob[] }>('jobs.list')
 
 export const saveSmbcDirectProfile = (payload: {
   label: string
@@ -278,9 +376,10 @@ export const saveSmbcDirectProfile = (payload: {
   password: string
   accountItemCode?: string
 }) =>
-  request<{ profile: AccountProfile }>('/admin/profiles/smbc-direct', {
-    method: 'POST',
-    body: JSON.stringify(payload),
+  adminRequest<{ profile: AccountProfile }>('profiles.create', {
+    providerId: 'smbc-direct',
+    label: payload.label,
+    credentials: payload,
   })
 
 export const savePayPayBankProfile = (payload: {
@@ -289,45 +388,38 @@ export const savePayPayBankProfile = (payload: {
   accountNo: string
   password: string
 }) =>
-  request<{ profile: AccountProfile }>('/admin/profiles/paypay-bank', {
-    method: 'POST',
-    body: JSON.stringify(payload),
+  adminRequest<{ profile: AccountProfile }>('profiles.create', {
+    providerId: 'paypay-bank',
+    label: payload.label,
+    credentials: payload,
   })
 
 export const deleteAccountProfile = (id: string) =>
-  request<{ ok: true }>(`/admin/profiles/${id}`, { method: 'DELETE' })
+  adminRequest<{ ok: true }>('profiles.delete', { id })
 
 export const updateAccountProfile = (id: string, payload: { label: string; color: string }) =>
-  request<{ profile: AccountProfile }>(`/admin/profiles/${id}`, {
-    method: 'PATCH',
-    body: JSON.stringify(payload),
-  })
+  adminRequest<{ profile: AccountProfile }>('profiles.update', { id, ...payload })
 
 export const createMobileSuicaCaptcha = (payload: {
   label: string
   user: string
   password: string
 }) =>
-  request<{ id: string; imageDataUrl: string; suggestedAnswer: string }>(
-    '/admin/mobilesuica/captcha',
-    {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    },
-  )
+  adminRequest<{ interactionId: string; imageDataUrl: string; suggestedAnswer: string }>(
+    'profiles.mobileSuica.login.start',
+    payload,
+  ).then(({ interactionId, ...interaction }) => ({ id: interactionId, ...interaction }))
 
 export const createMobileSuicaReauthCaptcha = (profileId: string) =>
-  request<{ id: string; imageDataUrl: string; suggestedAnswer: string }>(
-    `/admin/mobilesuica/reauth/${profileId}/captcha`,
-    {
-      method: 'POST',
-    },
-  )
+  adminRequest<{ interactionId: string; imageDataUrl: string; suggestedAnswer: string }>(
+    'profiles.mobileSuica.login.start',
+    { profileId },
+  ).then(({ interactionId, ...interaction }) => ({ id: interactionId, ...interaction }))
 
 export const submitMobileSuicaCaptcha = (id: string, answer: string) =>
-  request<{ profile: { id: string } }>(`/admin/mobilesuica/captcha/${id}`, {
-    method: 'POST',
-    body: JSON.stringify({ answer }),
+  adminRequest<{ profile: { id: string } }>('profiles.mobileSuica.login.complete', {
+    interactionId: id,
+    answer,
   })
 
 export const createRpcSocket = () => {

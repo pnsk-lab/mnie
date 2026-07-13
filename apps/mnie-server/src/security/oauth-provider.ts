@@ -16,7 +16,7 @@ import { randomToken, sha256 } from './crypto'
 const CODE_TTL_MS = 10 * 60 * 1000
 const ACCESS_TOKEN_TTL_SECONDS = 60 * 60
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000
-const DEFAULT_SCOPES = ['read', 'write', 'trade', 'mcp'] as const
+const DEFAULT_SCOPES = ['read', 'trade'] as const
 
 export const createOAuthAuthorizationCode = async (
   db: Db,
@@ -30,7 +30,7 @@ export const createOAuthAuthorizationCode = async (
   },
 ) => {
   const now = new Date()
-  const code = `mcp_code_${randomToken()}`
+  const code = `oauth_code_${randomToken()}`
   await db.insert(oauthAuthorizationCodes).values({
     code,
     clientId: options.clientId,

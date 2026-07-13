@@ -75,11 +75,11 @@ const historyProfileColor = (color: string | undefined, index: number) =>
 const profileSlices = computed<AssetSlice[]>(() =>
   [
     {
-      id: 'sbi',
-      profileId: 'sbi',
-      label: 'SBI証券',
+      id: 'brokerage',
+      profileId: 'brokerage',
+      label: '証券口座',
       value: props.holdingsMarketValue + props.buyingPower,
-      color: defaultProviderColors.sbisec,
+      color: '#91a9c7',
     },
     ...props.otherAssetBreakdown.map((item, index) => ({
       id: item.profileId,
@@ -96,21 +96,21 @@ const profileSlices = computed<AssetSlice[]>(() =>
 )
 
 const detailSlices = computed<AssetSlice[]>(() => {
-  const sbi = profileSlices.value.find((item) => item.id === 'sbi')
+  const brokerage = profileSlices.value.find((item) => item.id === 'brokerage')
   const details: AssetSlice[] = []
-  if (props.holdingsMarketValue > 0 && sbi) {
+  if (props.holdingsMarketValue > 0 && brokerage) {
     details.push({
-      id: 'sbi-stocks',
-      profileId: 'sbi',
+      id: 'brokerage-stocks',
+      profileId: 'brokerage',
       label: '株式',
       value: props.holdingsMarketValue,
       color: '#91a9c7',
     })
   }
-  if (props.buyingPower > 0 && sbi) {
+  if (props.buyingPower > 0 && brokerage) {
     details.push({
-      id: 'sbi-cash',
-      profileId: 'sbi',
+      id: 'brokerage-cash',
+      profileId: 'brokerage',
       label: '余力',
       value: props.buyingPower,
       color: '#c58468',
@@ -118,7 +118,7 @@ const detailSlices = computed<AssetSlice[]>(() => {
   }
   details.push(
     ...profileSlices.value
-      .filter((item) => item.id !== 'sbi')
+      .filter((item) => item.id !== 'brokerage')
       .map((item) => ({ ...item, id: `${item.id}-balance`, label: '残高' })),
   )
   return details
@@ -825,7 +825,7 @@ const confirmCancel = () => {
         <div v-else-if="dataLoading" :class="[ui.muted, ui.emptyState]">
           <Spinner />
         </div>
-        <p v-else :class="[ui.muted, ui.emptyState]">SBIに接続すると保有銘柄を表示します</p>
+        <p v-else :class="[ui.muted, ui.emptyState]">証券口座に接続すると保有銘柄を表示します</p>
         <p v-if="positionDetailError" :class="ui.dialogNote">{{ positionDetailError }}</p>
       </div>
     </article>
@@ -870,7 +870,7 @@ const confirmCancel = () => {
           {{
             orderHistoryLoaded
               ? orderHistoryNotice
-                ? `SBI SDK は取引履歴なしを返しました (${orderHistoryNotice})`
+                ? `プロバイダは取引履歴なしを返しました (${orderHistoryNotice})`
                 : '該当する取引履歴はありません'
               : '取引履歴はまだ取得されていません'
           }}
@@ -896,7 +896,7 @@ const confirmCancel = () => {
       <div v-else-if="dataLoading" :class="[ui.muted, ui.emptyState]">
         <Spinner />
       </div>
-      <p v-else :class="[ui.muted, ui.emptyState]">SBIに接続すると指数を表示します</p>
+      <p v-else :class="[ui.muted, ui.emptyState]">対応する証券口座に接続すると指数を表示します</p>
     </article>
   </section>
 
