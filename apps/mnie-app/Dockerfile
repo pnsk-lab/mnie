@@ -5,6 +5,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY package.json bun.lock tsconfig.json vite.config.ts ./
 COPY packages/auth-bitwarden/package.json packages/auth-bitwarden/package.json
+COPY packages/capsolve-sp/package.json packages/capsolve-sp/package.json
 COPY packages/provider-sbi-sec/package.json packages/provider-sbi-sec/package.json
 COPY packages/provider-mobile-suica/package.json packages/provider-mobile-suica/package.json
 COPY packages/provider-paypay/package.json packages/provider-paypay/package.json
