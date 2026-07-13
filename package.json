@@ -21,7 +21,8 @@
     "model:download": "bun scripts/download-capsolve-model.ts",
     "fmt": "vp check --fix",
     "sdk:build": "vp run sdk-build",
-    "typecheck": "vp run typecheck:all"
+    "typecheck": "vp run typecheck:all",
+    "mnie": "cd packages/mnie-cli && bun mnie"
   },
   "dependencies": {
     "iconv-lite": "^0.7.3",

@@ -57,6 +57,23 @@ const yyyymmdd = (date: Date) =>
 const yyyyMmDd = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 
+const isTooManyTransactionsError = (cause: unknown) =>
+  cause instanceof Error && cause.message.includes('02194-E')
+
+const splitDateRange = (from: Date, to: Date): [Date, Date, Date, Date] | undefined => {
+  const start = new Date(from)
+  start.setHours(0, 0, 0, 0)
+  const end = new Date(to)
+  end.setHours(0, 0, 0, 0)
+  if (start >= end) return undefined
+
+  const middle = new Date(start.getTime() + Math.floor((end.getTime() - start.getTime()) / 2))
+  middle.setHours(0, 0, 0, 0)
+  const next = new Date(middle)
+  next.setDate(next.getDate() + 1)
+  return [from, middle, next, to]
+}
+
 const providerFor = async (
   db: Db,
   config: ServerConfig,
@@ -129,16 +146,33 @@ const syncTransactions = async (
   if (fresh && sync.coveredFrom <= from && (allowCachedCurrentRange || sync.coveredTo >= to)) return
 
   const { provider, persist } = await providerFor(db, config, profile, forceLogin)
-  const input =
-    profile.provider === 'smbc-direct'
-      ? { from: yyyymmdd(from), to: yyyymmdd(to), kinds: ['transaction'] as const }
-      : profile.provider === 'paypay-bank'
-        ? { from: yyyyMmDd(from), to: yyyyMmDd(to), kinds: ['transaction'] as const }
-        : { kinds: ['transaction'] as const }
+  const fetchPage = async (rangeFrom: Date, rangeTo: Date): Promise<HistoryItem[]> => {
+    const input =
+      profile.provider === 'smbc-direct'
+        ? { from: yyyymmdd(rangeFrom), to: yyyymmdd(rangeTo), kinds: ['transaction'] as const }
+        : profile.provider === 'paypay-bank'
+          ? { from: yyyyMmDd(rangeFrom), to: yyyyMmDd(rangeTo), kinds: ['transaction'] as const }
+          : { kinds: ['transaction'] as const }
+
+    try {
+      const page = (await provider.invoke('history.list', input)) as { items: HistoryItem[] }
+      return page.items
+    } catch (cause) {
+      const split =
+        profile.provider === 'smbc-direct' && isTooManyTransactionsError(cause)
+          ? splitDateRange(rangeFrom, rangeTo)
+          : undefined
+      if (!split) throw cause
+      const [leftFrom, leftTo, rightFrom, rightTo] = split
+      const left = await fetchPage(leftFrom, leftTo)
+      const right = await fetchPage(rightFrom, rightTo)
+      return [...left, ...right]
+    }
+  }
   try {
-    const page = (await provider.invoke('history.list', input)) as { items: HistoryItem[] }
+    const items = await fetchPage(from, to)
     const fetchedAt = new Date()
-    for (const item of page.items) {
+    for (const item of items) {
       if (item.kind !== 'transaction') continue
       const occurredAt = new Date(item.occurredAt)
       if (!Number.isFinite(occurredAt.getTime())) {
