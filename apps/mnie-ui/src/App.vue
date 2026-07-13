@@ -96,7 +96,7 @@ const {
   addSmbcDirectProfile,
   addPayPayBankProfile,
   removeSbiPasskey,
-  updateProfileLabel,
+  updateProfile,
 } = useAuthAdmin()
 
 const {
@@ -424,7 +424,7 @@ onUnmounted(() => {
           @force-profile-availability="forceProfileAvailability"
           @connect="connect"
           @remove-sbi-passkey="removeSbiPasskey"
-          @update-profile-label="updateProfileLabel"
+          @update-profile="updateProfile"
         />
       </template>
     </section>

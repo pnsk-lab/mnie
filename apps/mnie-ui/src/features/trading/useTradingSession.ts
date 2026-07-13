@@ -12,6 +12,7 @@ import {
   searchableMarkets,
 } from '../../constants/trade'
 import { countryTimeZones, marketSessions, marketTimeZones } from '../../constants/market'
+import { profileColor } from '../../constants/provider'
 import type {
   ChartMode,
   ChartRange,
@@ -228,9 +229,9 @@ export const useTradingSession = (
   const storedSbiHoldingsMarketValue = ref(0)
   const storedSbiBuyingPower = ref(0)
   const assetValuations = ref<AssetValuation[]>([])
-  const assetHistory = ref<Array<{ at: string; profileId: string; label: string; value: number }>>(
-    [],
-  )
+  const assetHistory = ref<
+    Array<{ at: string; profileId: string; label: string; value: number; color: string }>
+  >([])
   const storedAssetsLoaded = ref(false)
   const assetHistoryLoading = ref(false)
   const buyingPower = ref(0)
@@ -633,6 +634,12 @@ export const useTradingSession = (
                   profiles.value.find((profile) => profile.id === item.profileId)?.label ??
                   item.profileId,
                 value,
+                color: profileColor(
+                  profiles.value.find((profile) => profile.id === item.profileId) ?? {
+                    provider: 'sbisec',
+                    color: null,
+                  },
+                ),
               },
             ]
           })
@@ -680,6 +687,12 @@ export const useTradingSession = (
                 label:
                   profiles.value.find((profile) => profile.id === profileId)?.label ?? profileId,
                 value: pointValue,
+                color: profileColor(
+                  profiles.value.find((profile) => profile.id === profileId) ?? {
+                    provider: 'sbisec',
+                    color: null,
+                  },
+                ),
               }
             })
           })
@@ -716,6 +729,12 @@ export const useTradingSession = (
         label:
           profiles.value.find((profile) => profile.id === item.profileId)?.label ?? item.provider,
         provider: item.provider,
+        color: profileColor(
+          profiles.value.find((profile) => profile.id === item.profileId) ?? {
+            provider: item.provider,
+            color: null,
+          },
+        ),
         value: item.value,
         ratio: totalAssetValue.value ? (item.value / totalAssetValue.value) * 100 : 0,
       })),

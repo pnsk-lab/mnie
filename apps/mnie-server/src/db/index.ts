@@ -46,11 +46,18 @@ export const createDb = (path: string) => {
     CREATE TABLE IF NOT EXISTS sbi_passkeys (
       id TEXT PRIMARY KEY,
       label TEXT NOT NULL,
+      color TEXT,
       keyring_account TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )
   `)
+  const sbiPasskeyColumns = sqlite
+    .query<{ name: string }, []>('PRAGMA table_info(sbi_passkeys)')
+    .all()
+    .map((column) => column.name)
+  if (!sbiPasskeyColumns.includes('color'))
+    sqlite.run('ALTER TABLE sbi_passkeys ADD COLUMN color TEXT')
   sqlite.run(`
     CREATE TABLE IF NOT EXISTS auth_managers (
       id TEXT PRIMARY KEY,
@@ -66,11 +73,18 @@ export const createDb = (path: string) => {
       id TEXT PRIMARY KEY,
       provider TEXT NOT NULL,
       label TEXT NOT NULL,
+      color TEXT,
       keyring_account TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )
   `)
+  const accountProfileColumns = sqlite
+    .query<{ name: string }, []>('PRAGMA table_info(account_profiles)')
+    .all()
+    .map((column) => column.name)
+  if (!accountProfileColumns.includes('color'))
+    sqlite.run('ALTER TABLE account_profiles ADD COLUMN color TEXT')
   sqlite.run(`
     CREATE TABLE IF NOT EXISTS asset_valuations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

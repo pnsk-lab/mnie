@@ -33,6 +33,7 @@ export const sessions = sqliteTable('sessions', {
 export const sbiPasskeys = sqliteTable('sbi_passkeys', {
   id: text('id').primaryKey(),
   label: text('label').notNull(),
+  color: text('color'),
   keyringAccount: text('keyring_account').notNull(),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
@@ -53,6 +54,7 @@ export const accountProfiles = sqliteTable('account_profiles', {
     enum: ['sbisec', 'smbc-direct', 'mobilesuica', 'paypay-bank'],
   }).notNull(),
   label: text('label').notNull(),
+  color: text('color'),
   keyringAccount: text('keyring_account').notNull(),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
