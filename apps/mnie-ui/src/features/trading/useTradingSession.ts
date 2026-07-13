@@ -5,6 +5,7 @@ import {
   listLatestAssetValuations,
   type AccountProfile,
   type AssetValuation,
+  type ProviderDefinition,
 } from '../../api'
 import {
   cashOrderAccountTypeOptions as defaultCashOrderAccountTypeOptions,
@@ -30,6 +31,7 @@ import type {
   OrderPreview,
   OrderRow,
   Position,
+  ProviderPosition,
   RealtimePricePoint,
   RpcMessage,
   Stock,
@@ -187,6 +189,7 @@ const priceMatchesStep = (price: number, step: number) => {
 export const useTradingSession = (
   selectedProfileId: Ref<string>,
   profiles: Ref<AccountProfile[]>,
+  providerDefinitions: Ref<ProviderDefinition[]>,
 ) => {
   const selectedStockCode = ref('')
   const selectedStockId = ref('')
@@ -246,6 +249,7 @@ export const useTradingSession = (
   const orderHistoryLoaded = ref(false)
   const orderHistoryNotice = ref('')
   const positions = ref<Position[]>([])
+  const storedProviderPositions = ref<ProviderPosition[]>([])
   const stocks = ref<Stock[]>([])
   const historicalPricePoints = ref<RealtimePricePoint[]>([])
   const chartNotice = ref<ChartNotice | null>(null)
@@ -585,13 +589,6 @@ export const useTradingSession = (
     }
     return baseStocks
   })
-  const selectedPosition = computed(() =>
-    positions.value.find(
-      (position) =>
-        position.code === selectedStock.value.code &&
-        position.market === selectedStock.value.market,
-    ),
-  )
   const recentOrders = computed(() => orders.value.slice(0, 2))
   const totalAssetValue = computed(() => storedTotalAssetValue.value ?? 0)
 
@@ -624,6 +621,35 @@ export const useTradingSession = (
           }
           const sortedHistory = history.items.sort((a, b) =>
             a.occurredAt.localeCompare(b.occurredAt),
+          )
+          const latestPositionSnapshots = new Map<string, (typeof history.items)[number]>()
+          for (const item of sortedHistory) {
+            if (item.kind === 'snapshot' && item.profileId && item.snapshot?.positions) {
+              latestPositionSnapshots.set(item.profileId, item)
+            }
+          }
+          storedProviderPositions.value = [...latestPositionSnapshots.entries()].flatMap(
+            ([profileId, item]) => {
+              const profile = profileFor(profileId)
+              const providerName =
+                providerDefinitions.value.find((provider) => provider.id === profile.provider)
+                  ?.name ?? profile.provider
+              return (item.snapshot?.positions ?? []).flatMap((raw) => {
+                const position = positionFromApi(raw)
+                return position
+                  ? [
+                      {
+                        ...position,
+                        profileId,
+                        profileLabel: profile.label,
+                        providerId: profile.provider,
+                        providerName,
+                        color: profileColor(profile),
+                      },
+                    ]
+                  : []
+              })
+            },
           )
           const historyValues = new Map<string, number>()
           const forwardPoints = sortedHistory.flatMap((item) => {
@@ -752,6 +778,29 @@ export const useTradingSession = (
         ratio: totalAssetValue.value ? (item.value / totalAssetValue.value) * 100 : 0,
       })),
   )
+  const providerHoldingsBreakdown = computed(() => {
+    const providerNames = new Map(
+      providerDefinitions.value.map((provider) => [provider.id, provider.name]),
+    )
+    const grouped = new Map<
+      string,
+      { providerId: string; label: string; value: number; color: string; profiles: number }
+    >()
+    for (const valuation of assetValuations.value) {
+      if (valuation.currency !== 'JPY' || valuation.holdingsValue == null) continue
+      const profile = profiles.value.find((candidate) => candidate.id === valuation.profileId)
+      const providerId = profile?.provider ?? valuation.provider
+      const current = grouped.get(providerId)
+      grouped.set(providerId, {
+        providerId,
+        label: current?.label ?? providerNames.get(providerId) ?? providerId,
+        value: (current?.value ?? 0) + valuation.holdingsValue,
+        color: current?.color ?? profileColor(profile ?? { provider: providerId, color: null }),
+        profiles: (current?.profiles ?? 0) + 1,
+      })
+    }
+    return [...grouped.values()].sort((a, b) => b.value - a.value)
+  })
   const stockAssetRatio = computed(() => {
     if (!totalAssetValue.value) return 0
     return (storedBrokerageHoldingsValue.value / totalAssetValue.value) * 100
@@ -761,6 +810,37 @@ export const useTradingSession = (
     return (storedBrokerageCashValue.value / totalAssetValue.value) * 100
   })
   const selectedStockTimeZone = computed(() => timeZoneForStock(selectedStock.value))
+  const selectedStockProviderPositions = computed<ProviderPosition[]>(() => {
+    const selectedProfile = profiles.value.find((profile) => profile.id === selectedProfileId.value)
+    const providerName = selectedProfile
+      ? (providerDefinitions.value.find((provider) => provider.id === selectedProfile.provider)
+          ?.name ?? selectedProfile.provider)
+      : ''
+    const live = selectedProfile
+      ? positions.value.map((position) => ({
+          ...position,
+          profileId: selectedProfile.id,
+          profileLabel: selectedProfile.label,
+          providerId: selectedProfile.provider,
+          providerName,
+          color: profileColor(selectedProfile),
+        }))
+      : []
+    return [
+      ...storedProviderPositions.value.filter(
+        (position) => position.profileId !== selectedProfileId.value,
+      ),
+      ...live,
+    ]
+      .filter(
+        (position) =>
+          position.code === selectedStock.value.code &&
+          (!selectedStock.value.market ||
+            !position.market ||
+            position.market === selectedStock.value.market),
+      )
+      .sort((a, b) => b.marketValue - a.marketValue)
+  })
   const chartPricePoints = computed(() => {
     const points = [...historicalPricePoints.value, ...realtimePricePoints.value]
     const timeZone = selectedStockTimeZone.value
@@ -1855,7 +1935,7 @@ export const useTradingSession = (
     markets,
     viewedStocks,
     filteredStocks,
-    selectedPosition,
+    selectedStockProviderPositions,
     recentOrders,
     totalAssetValue,
     portfolioBuyingPower: storedBrokerageCashValue,
@@ -1863,6 +1943,7 @@ export const useTradingSession = (
     stockAssetRatio,
     cashAssetRatio,
     otherAssetBreakdown,
+    providerHoldingsBreakdown,
     assetHistory,
     assetHistoryLoading,
     hasQuote,

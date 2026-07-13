@@ -159,7 +159,7 @@ const {
   markets,
   viewedStocks,
   filteredStocks,
-  selectedPosition,
+  selectedStockProviderPositions,
   recentOrders,
   totalAssetValue,
   portfolioBuyingPower,
@@ -167,6 +167,7 @@ const {
   stockAssetRatio,
   cashAssetRatio,
   otherAssetBreakdown,
+  providerHoldingsBreakdown,
   assetHistory,
   assetHistoryLoading,
   hasQuote,
@@ -189,11 +190,17 @@ const {
   smbcQrUrl,
   smbcBalance,
   finishSmbc2fa,
-} = useTradingSession(selectedProfileId, profiles)
+} = useTradingSession(selectedProfileId, profiles, providerDefinitions)
 
 const finishSmbc2faAndRefreshAvailability = async () => {
   await finishSmbc2fa()
   if (selectedProfileId.value) await forceProfileAvailability(selectedProfileId.value)
+}
+
+const selectTradingProfile = (profileId: string) => {
+  if (!profileId || profileId === selectedProfileId.value) return
+  selectedProfileId.value = profileId
+  connect()
 }
 
 const { oauthApproval, oauthSettings, loadOAuthApproval, approveOAuth } = useOAuthApproval()
@@ -264,7 +271,15 @@ onUnmounted(() => {
 
 <template>
   <main :class="isOAuthRoute ? ui.oauthShell : ui.appShell">
-    <AppSidebar v-if="!isOAuthRoute" :active-tab="activeTab" @navigate="navigate" />
+    <AppSidebar
+      v-if="!isOAuthRoute"
+      :active-tab="activeTab"
+      :profiles="profiles"
+      :provider-definitions="providerDefinitions"
+      :selected-profile-id="selectedProfileId"
+      @navigate="navigate"
+      @select-profile="selectTradingProfile"
+    />
 
     <section :class="isOAuthRoute ? ui.oauthWorkspace : ui.workspace">
       <AppHeader v-if="!isOAuthRoute && activeTab !== 'settings'" :active-tab="activeTab" />
@@ -298,6 +313,7 @@ onUnmounted(() => {
           :stock-asset-ratio="stockAssetRatio"
           :cash-asset-ratio="cashAssetRatio"
           :other-asset-breakdown="otherAssetBreakdown"
+          :provider-holdings-breakdown="providerHoldingsBreakdown"
           :asset-history="assetHistory"
           :asset-history-loading="assetHistoryLoading"
           :positions="positions"
@@ -336,7 +352,7 @@ onUnmounted(() => {
           v-model:chart-range="chartRange"
           :viewed-stocks="viewedStocks"
           :selected-stock="selectedStock"
-          :selected-position="selectedPosition"
+          :provider-positions="selectedStockProviderPositions"
           :connected="connected"
           :order-quantity="orderQuantity"
           :estimated-amount="estimatedAmount"

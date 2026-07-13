@@ -110,6 +110,7 @@ export interface HistoryItem {
     accountId: string
     capturedAt: string
     balances: unknown[]
+    positions?: unknown[]
     valuation?: {
       amount: { currency: string; value: string }
       asOf: string

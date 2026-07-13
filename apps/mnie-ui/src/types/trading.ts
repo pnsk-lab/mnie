@@ -171,3 +171,11 @@ export interface Position {
   type?: string
   accountType?: CashOrderAccountType | string
 }
+
+export interface ProviderPosition extends Position {
+  profileId: string
+  profileLabel: string
+  providerId: string
+  providerName: string
+  color: string
+}

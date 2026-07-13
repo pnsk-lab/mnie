@@ -37,6 +37,13 @@ const props = defineProps<{
     ratio: number
     color: string
   }>
+  providerHoldingsBreakdown: Array<{
+    providerId: string
+    label: string
+    value: number
+    color: string
+    profiles: number
+  }>
   assetHistory: Array<{
     at: string
     profileId: string
@@ -774,6 +781,35 @@ const confirmCancel = () => {
         </button>
       </div>
       <div :class="ui.holdingsBody">
+        <div
+          v-if="providerHoldingsBreakdown.length"
+          class="grid gap-2 border-b border-[#30343a] p-4 sm:grid-cols-2 xl:grid-cols-3"
+          aria-label="プロバイダ別保有額"
+        >
+          <div
+            v-for="provider in providerHoldingsBreakdown"
+            :key="provider.providerId"
+            class="flex items-center justify-between gap-3 rounded-2xl bg-[#22272e] px-4 py-3"
+          >
+            <span class="flex min-w-0 items-center gap-2.5">
+              <i
+                class="size-2.5 shrink-0 rounded-full"
+                :style="{ backgroundColor: provider.color }"
+                aria-hidden="true"
+              ></i>
+              <span class="grid min-w-0">
+                <strong class="truncate text-sm">{{ provider.label }}</strong>
+                <small class="truncate text-[#8f949d]">
+                  {{ provider.providerId
+                  }}<template v-if="provider.profiles > 1">
+                    ・ {{ provider.profiles }}口座</template
+                  >
+                </small>
+              </span>
+            </span>
+            <strong class="shrink-0 text-sm">{{ currency(provider.value) }}</strong>
+          </div>
+        </div>
         <div :class="ui.holdingsHead">
           <span>銘柄</span>
           <span>タイプ</span>
