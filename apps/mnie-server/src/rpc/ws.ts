@@ -15,7 +15,7 @@ import { readSecret, saveSecret } from '../security/keyring'
 import { assertApiKeyMethodAllowed } from '../security/trade-limits'
 import { connectSbi } from './sbi-session'
 import { fetchAssetValuation } from '../assets'
-import { listHistory } from '../history'
+import { listHistory, syncInitialHistory } from '../history'
 
 interface JsonRpcRequest {
   jsonrpc?: '2.0'
@@ -118,7 +118,7 @@ const connectProvider = async (
   throw new Error(`provider is not connected by this server: ${profile.provider}`)
 }
 
-const finishSmbc2fa = async (db: Db, state: RpcSocketState) => {
+const finishSmbc2fa = async (db: Db, config: ServerConfig, state: RpcSocketState) => {
   if (state.provider !== 'smbc-direct' || !state.smbcChallenge || !state.profileId) {
     throw new Error('SMBC Direct two-factor authentication is not pending')
   }
@@ -136,6 +136,7 @@ const finishSmbc2fa = async (db: Db, state: RpcSocketState) => {
     ...secret,
     session: await state.providerClient.exportSession(),
   })
+  await syncInitialHistory(db, config, state.profileId)
   return { connected: true, provider: 'smbc-direct', profileId: state.profileId }
 }
 
@@ -279,7 +280,7 @@ const handleRpc = async (
   }
   if (request.method === 'provider.finish2fa') {
     assertReadScope(state)
-    return result(request.id, await finishSmbc2fa(db, state))
+    return result(request.id, await finishSmbc2fa(db, config, state))
   }
   if (
     !request.method ||

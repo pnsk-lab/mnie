@@ -128,8 +128,6 @@ const {
   connected,
   dataLoading,
   searchLoading,
-  buyingPower,
-  holdingsMarketValue,
   totalProfitLoss,
   totalProfitLossRate,
   marketIndexes,
@@ -163,10 +161,13 @@ const {
   selectedPosition,
   recentOrders,
   totalAssetValue,
+  portfolioBuyingPower,
+  portfolioHoldingsMarketValue,
   stockAssetRatio,
   cashAssetRatio,
   otherAssetBreakdown,
   assetHistory,
+  assetHistoryLoading,
   hasQuote,
   selectStock,
   selectStockByCode,
@@ -288,8 +289,8 @@ onUnmounted(() => {
           v-if="activeTab === 'portfolio'"
           :show-portfolio-spinner="showPortfolioSpinner"
           :total-asset-value="totalAssetValue"
-          :buying-power="buyingPower"
-          :holdings-market-value="holdingsMarketValue"
+          :buying-power="portfolioBuyingPower"
+          :holdings-market-value="portfolioHoldingsMarketValue"
           :total-profit-loss="totalProfitLoss"
           :total-profit-loss-rate="totalProfitLossRate"
           :market-indexes="marketIndexes"
@@ -297,6 +298,7 @@ onUnmounted(() => {
           :cash-asset-ratio="cashAssetRatio"
           :other-asset-breakdown="otherAssetBreakdown"
           :asset-history="assetHistory"
+          :asset-history-loading="assetHistoryLoading"
           :positions="positions"
           :recent-orders="recentOrders"
           :canceling-order-key="cancelingOrderKey"

@@ -27,6 +27,7 @@ import { withProfileLock } from './profile-lock'
 
 const refreshIntervalMs = 5 * 60 * 60_000
 const defaultRangeMs = 30 * 24 * 60 * 60_000
+const initialHistoryFrom = new Date(0)
 type Profile = typeof accountProfiles.$inferSelect
 
 const requestedRange = (request: HistoryListRequest) => {
@@ -85,10 +86,11 @@ const syncTransactions = async (
   profile: Profile,
   from: Date,
   to: Date,
+  allowCachedCurrentRange: boolean,
 ) => {
   const [sync] = await db.select().from(historySyncs).where(eq(historySyncs.profileId, profile.id))
   const fresh = sync && Date.now() - sync.fetchedAt.getTime() < refreshIntervalMs
-  if (fresh && sync.coveredFrom <= from && sync.coveredTo >= to) return
+  if (fresh && sync.coveredFrom <= from && (allowCachedCurrentRange || sync.coveredTo >= to)) return
 
   const { provider, persist } = await providerFor(db, config, profile)
   const input =
@@ -100,19 +102,23 @@ const syncTransactions = async (
     const fetchedAt = new Date()
     for (const item of page.items) {
       if (item.kind !== 'transaction') continue
+      const occurredAt = new Date(item.occurredAt)
+      if (!Number.isFinite(occurredAt.getTime())) {
+        throw new Error(`provider returned invalid transaction date: ${item.occurredAt}`)
+      }
       await db
         .insert(historyTransactions)
         .values({
           profileId: profile.id,
           transactionId: item.transaction.id,
-          occurredAt: new Date(item.occurredAt),
+          occurredAt,
           transaction: item.transaction,
           fetchedAt,
         })
         .onConflictDoUpdate({
           target: [historyTransactions.profileId, historyTransactions.transactionId],
           set: {
-            occurredAt: new Date(item.occurredAt),
+            occurredAt,
             transaction: item.transaction,
             fetchedAt,
           },
@@ -147,9 +153,12 @@ export const listHistory = async (
   const errors: Array<{ profileId: string; providerId: string; message: string }> = []
 
   if (kinds.has('transaction')) {
+    const allowCachedCurrentRange = request.to == null
     for (const profile of profiles.filter((item) => item.provider !== 'paypay-bank')) {
       try {
-        await withProfileLock(profile.id, () => syncTransactions(db, config, profile, from, to))
+        await withProfileLock(profile.id, () =>
+          syncTransactions(db, config, profile, from, to, allowCachedCurrentRange),
+        )
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause)
         errors.push({ profileId: profile.id, providerId: profile.provider, message })
@@ -223,4 +232,21 @@ export const listHistory = async (
   items.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))
   const limit = request.limit ?? items.length
   return { items: items.slice(0, limit), errors }
+}
+
+export const syncInitialHistory = async (db: Db, config: ServerConfig, profileId: string) => {
+  const history = await listHistory(db, config, {
+    profileIds: [profileId],
+    kinds: ['transaction'],
+    from: initialHistoryFrom.toISOString(),
+    to: new Date().toISOString(),
+  })
+  const errors = history.errors.filter((error) => error.profileId === profileId)
+  if (errors.length) {
+    throw new Error(
+      `Initial history synchronization failed: ${errors.map((error) => error.message).join('; ')}`,
+    )
+  }
+  return history.items.filter((item) => item.kind === 'transaction' && item.profileId === profileId)
+    .length
 }

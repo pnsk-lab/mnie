@@ -33,7 +33,7 @@ import { deleteSecret, saveSecret } from '../security/keyring'
 import { readSecret } from '../security/keyring'
 import { connectSbi } from '../rpc/sbi-session'
 import { ensureInitialAssetValuations, latestAssetValuations } from '../assets'
-import { listHistory } from '../history'
+import { listHistory, syncInitialHistory } from '../history'
 import { captchaModelPath, createCaptchaSolver, type CaptchaSolver } from '@repo/capsolve-sp'
 
 export interface StoredSbiPasskeySecret {
@@ -457,6 +457,7 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
         createdAt: now,
         updatedAt: now,
       })
+      await syncInitialHistory(c.get('db'), c.get('config'), pending.id)
     } else {
       await c
         .get('db')
@@ -687,6 +688,7 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
       createdAt: now,
       updatedAt: now,
     })
+    await syncInitialHistory(c.get('db'), c.get('config'), id)
 
     return c.json(
       { passkey: { id, label: body.label.trim(), createdAt: now, updatedAt: now } },

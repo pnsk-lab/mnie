@@ -224,13 +224,15 @@ export const useTradingSession = (
   const smbcBalance = ref<{ amount: number; displayValue: string } | null>(null)
   const dataLoading = ref(false)
   const searchLoading = ref(false)
-  const totalAssetValueFromAssets = ref<number | null>(null)
   const storedTotalAssetValue = ref<number | null>(null)
+  const storedSbiHoldingsMarketValue = ref(0)
+  const storedSbiBuyingPower = ref(0)
   const assetValuations = ref<AssetValuation[]>([])
   const assetHistory = ref<Array<{ at: string; profileId: string; label: string; value: number }>>(
     [],
   )
   const storedAssetsLoaded = ref(false)
+  const assetHistoryLoading = ref(false)
   const buyingPower = ref(0)
   const holdingsMarketValue = ref(0)
   const totalProfitLoss = ref(0)
@@ -453,17 +455,7 @@ export const useTradingSession = (
   })
   const estimatedAmount = computed(() => Math.max(0, orderQuantity.value * orderPrice.value))
   const hasQuote = (stock: Stock) => stock.price > 0
-  const hasAccountSummary = computed(
-    () =>
-      connected.value ||
-      Boolean(positions.value.length) ||
-      orderHistoryLoaded.value ||
-      holdingsMarketValue.value > 0 ||
-      buyingPower.value > 0,
-  )
-  const showPortfolioSpinner = computed(
-    () => !storedAssetsLoaded.value && (dataLoading.value || !hasAccountSummary.value),
-  )
+  const showPortfolioSpinner = computed(() => !storedAssetsLoaded.value)
   const cashOrderKey = computed(() =>
     JSON.stringify({
       issueCode: selectedStock.value.code,
@@ -583,115 +575,137 @@ export const useTradingSession = (
     ),
   )
   const recentOrders = computed(() => orders.value.slice(0, 2))
-  const totalAssetValue = computed(
-    () =>
-      storedTotalAssetValue.value ??
-      totalAssetValueFromAssets.value ??
-      holdingsMarketValue.value + buyingPower.value,
-  )
+  const totalAssetValue = computed(() => storedTotalAssetValue.value ?? 0)
 
   const loadStoredAssetValuations = async () => {
+    assetHistoryLoading.value = true
     try {
-      const from = new Date(Date.now() - 30 * 24 * 60 * 60_000).toISOString()
-      const [{ valuations }, history] = await Promise.all([
-        listLatestAssetValuations(),
-        listHistory({ from, kinds: ['snapshot', 'transaction'] }),
-      ])
-      assetValuations.value = valuations
-      const sortedHistory = history.items.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))
-      const historyValues = new Map<string, number>()
-      const forwardPoints = sortedHistory.flatMap((item) => {
-        if (!item.profileId) return []
-        let value: number | undefined
-        if (item.kind === 'snapshot') {
-          value = Number(item.snapshot?.valuation?.amount.value)
-        } else if (item.kind === 'transaction' && item.transaction) {
-          const transaction = item.transaction
-          const balanceAfter = Number(transaction.balanceAfter?.money.value)
-          if (Number.isFinite(balanceAfter)) {
-            value = balanceAfter
-          } else if (transaction.type !== 'investment-trade') {
-            const amount = Number(transaction.amount?.money.value)
-            const current = historyValues.get(item.profileId)
-            if (current != null && Number.isFinite(amount) && transaction.direction !== 'neutral') {
-              value = current + (transaction.direction === 'credit' ? amount : -amount)
+      const from = new Date(0).toISOString()
+      const valuationsPromise = listLatestAssetValuations()
+        .then(({ valuations }) => {
+          assetValuations.value = valuations
+          const jpy = valuations.filter((item) => item.currency === 'JPY')
+          storedTotalAssetValue.value = jpy.length
+            ? jpy.reduce((sum, item) => sum + item.value, 0)
+            : null
+          const sbi = jpy.find((item) => item.provider === 'sbisec')
+          storedSbiHoldingsMarketValue.value = sbi?.holdingsValue ?? 0
+          storedSbiBuyingPower.value = sbi?.cashValue ?? 0
+        })
+        .finally(() => {
+          storedAssetsLoaded.value = true
+        })
+      const historyPromise = listHistory({ from, kinds: ['snapshot', 'transaction'] })
+        .then((history) => {
+          const sortedHistory = history.items.sort((a, b) =>
+            a.occurredAt.localeCompare(b.occurredAt),
+          )
+          const historyValues = new Map<string, number>()
+          const forwardPoints = sortedHistory.flatMap((item) => {
+            if (!item.profileId) return []
+            let value: number | undefined
+            if (item.kind === 'snapshot') {
+              value = Number(item.snapshot?.valuation?.amount.value)
+            } else if (item.kind === 'transaction' && item.transaction) {
+              const transaction = item.transaction
+              const balanceAfter = Number(transaction.balanceAfter?.money.value)
+              if (Number.isFinite(balanceAfter)) {
+                value = balanceAfter
+              } else if (transaction.type !== 'investment-trade') {
+                const amount = Number(transaction.amount?.money.value)
+                const current = historyValues.get(item.profileId)
+                if (
+                  current != null &&
+                  Number.isFinite(amount) &&
+                  transaction.direction !== 'neutral'
+                ) {
+                  value = current + (transaction.direction === 'credit' ? amount : -amount)
+                }
+              }
             }
-          }
-        }
-        if (value == null || !Number.isFinite(value)) return []
-        historyValues.set(item.profileId, value)
-        return [
-          {
-            at: item.occurredAt,
-            profileId: item.profileId,
-            label:
-              profiles.value.find((profile) => profile.id === item.profileId)?.label ??
-              item.profileId,
-            value,
-          },
-        ]
-      })
-      const backwardPoints = [
-        ...new Set(sortedHistory.flatMap((item) => item.profileId ?? [])),
-      ].flatMap((profileId) => {
-        const profileHistory = sortedHistory.filter((item) => item.profileId === profileId)
-        const firstSnapshotIndex = profileHistory.findIndex(
-          (item) =>
-            item.kind === 'snapshot' &&
-            Number.isFinite(Number(item.snapshot?.valuation?.amount.value)),
-        )
-        if (firstSnapshotIndex < 0) return []
-        let value = Number(profileHistory[firstSnapshotIndex]?.snapshot?.valuation?.amount.value)
-        const transactionGroups = Map.groupBy(
-          profileHistory
-            .slice(0, firstSnapshotIndex)
-            .filter((item) => item.kind === 'transaction' && item.transaction),
-          (item) => item.occurredAt,
-        )
-        return [...transactionGroups.entries()].reverse().map(([occurredAt, items]) => {
-          const explicitBalance = items
-            .map((item) => Number(item.transaction?.balanceAfter?.money.value))
-            .find(Number.isFinite)
-          if (explicitBalance != null) value = explicitBalance
-          const pointValue = value
-          for (const item of items) {
-            const transaction = item.transaction
-            if (!transaction) continue
-            const amount = Number(transaction.amount?.money.value)
-            if (
-              explicitBalance == null &&
-              transaction.type !== 'investment-trade' &&
-              Number.isFinite(amount) &&
-              transaction.direction !== 'neutral'
-            ) {
-              value -= transaction.direction === 'credit' ? amount : -amount
-            }
-          }
-          return {
-            at: occurredAt,
-            profileId,
-            label: profiles.value.find((profile) => profile.id === profileId)?.label ?? profileId,
-            value: pointValue,
+            if (value == null || !Number.isFinite(value)) return []
+            historyValues.set(item.profileId, value)
+            return [
+              {
+                at: item.occurredAt,
+                profileId: item.profileId,
+                label:
+                  profiles.value.find((profile) => profile.id === item.profileId)?.label ??
+                  item.profileId,
+                value,
+              },
+            ]
+          })
+          const backwardPoints = [
+            ...new Set(sortedHistory.flatMap((item) => item.profileId ?? [])),
+          ].flatMap((profileId) => {
+            const profileHistory = sortedHistory.filter((item) => item.profileId === profileId)
+            const firstSnapshotIndex = profileHistory.findIndex(
+              (item) =>
+                item.kind === 'snapshot' &&
+                Number.isFinite(Number(item.snapshot?.valuation?.amount.value)),
+            )
+            if (firstSnapshotIndex < 0) return []
+            let value = Number(
+              profileHistory[firstSnapshotIndex]?.snapshot?.valuation?.amount.value,
+            )
+            const transactionGroups = Map.groupBy(
+              profileHistory
+                .slice(0, firstSnapshotIndex)
+                .filter((item) => item.kind === 'transaction' && item.transaction),
+              (item) => item.occurredAt,
+            )
+            return [...transactionGroups.entries()].reverse().map(([occurredAt, items]) => {
+              const explicitBalance = items
+                .map((item) => Number(item.transaction?.balanceAfter?.money.value))
+                .find(Number.isFinite)
+              if (explicitBalance != null) value = explicitBalance
+              const pointValue = value
+              for (const item of items) {
+                const transaction = item.transaction
+                if (!transaction) continue
+                const amount = Number(transaction.amount?.money.value)
+                if (
+                  explicitBalance == null &&
+                  transaction.type !== 'investment-trade' &&
+                  Number.isFinite(amount) &&
+                  transaction.direction !== 'neutral'
+                ) {
+                  value -= transaction.direction === 'credit' ? amount : -amount
+                }
+              }
+              return {
+                at: occurredAt,
+                profileId,
+                label:
+                  profiles.value.find((profile) => profile.id === profileId)?.label ?? profileId,
+                value: pointValue,
+              }
+            })
+          })
+          assetHistory.value = [...backwardPoints, ...forwardPoints].sort((a, b) =>
+            a.at.localeCompare(b.at),
+          )
+          if (history.errors.length) {
+            reportDataError(
+              history.errors.map((item) => `${item.providerId}: ${item.message}`).join('; '),
+            )
           }
         })
-      })
-      assetHistory.value = [...backwardPoints, ...forwardPoints].sort((a, b) =>
-        a.at.localeCompare(b.at),
+        .finally(() => {
+          assetHistoryLoading.value = false
+        })
+      const [valuationsResult, historyResult] = await Promise.allSettled([
+        valuationsPromise,
+        historyPromise,
+      ])
+      const failure = [valuationsResult, historyResult].find(
+        (result): result is PromiseRejectedResult => result.status === 'rejected',
       )
-      if (history.errors.length) {
-        reportDataError(
-          history.errors.map((item) => `${item.providerId}: ${item.message}`).join('; '),
-        )
-      }
-      const jpy = valuations.filter((item) => item.currency === 'JPY')
-      storedTotalAssetValue.value = jpy.length
-        ? jpy.reduce((sum, item) => sum + item.value, 0)
-        : null
-      const sbi = jpy.find((item) => item.provider === 'sbisec')
-      if (sbi?.holdingsValue != null) holdingsMarketValue.value = sbi.holdingsValue
-      if (sbi?.cashValue != null) buyingPower.value = sbi.cashValue
+      if (failure) throw failure.reason
     } finally {
       storedAssetsLoaded.value = true
+      assetHistoryLoading.value = false
     }
   }
   const otherAssetBreakdown = computed(() =>
@@ -708,11 +722,11 @@ export const useTradingSession = (
   )
   const stockAssetRatio = computed(() => {
     if (!totalAssetValue.value) return 0
-    return (holdingsMarketValue.value / totalAssetValue.value) * 100
+    return (storedSbiHoldingsMarketValue.value / totalAssetValue.value) * 100
   })
   const cashAssetRatio = computed(() => {
     if (!totalAssetValue.value) return 0
-    return (buyingPower.value / totalAssetValue.value) * 100
+    return (storedSbiBuyingPower.value / totalAssetValue.value) * 100
   })
   const selectedStockTimeZone = computed(() => timeZoneForStock(selectedStock.value))
   const chartPricePoints = computed(() => {
@@ -963,7 +977,6 @@ export const useTradingSession = (
     const profitLoss = null
     const profitLossRate = null
 
-    if (valuation !== null) totalAssetValueFromAssets.value = valuation
     if (valuationWithoutDeposit !== null) holdingsMarketValue.value = valuationWithoutDeposit
     if (valuation !== null && valuationWithoutDeposit !== null) {
       buyingPower.value = Math.max(valuation - valuationWithoutDeposit, 0)
@@ -1013,7 +1026,6 @@ export const useTradingSession = (
       if (hasAccountAssets) {
         applyAccountAssets(assetsResult.value)
       } else {
-        totalAssetValueFromAssets.value = null
         reportDataError(
           errorMessage(assetsResult.reason, 'My資産の取得に失敗しました'),
           assetsResult.reason,
@@ -1704,10 +1716,13 @@ export const useTradingSession = (
     selectedPosition,
     recentOrders,
     totalAssetValue,
+    portfolioBuyingPower: storedSbiBuyingPower,
+    portfolioHoldingsMarketValue: storedSbiHoldingsMarketValue,
     stockAssetRatio,
     cashAssetRatio,
     otherAssetBreakdown,
     assetHistory,
+    assetHistoryLoading,
     hasQuote,
     selectStock,
     selectStockByCode,

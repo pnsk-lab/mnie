@@ -1,5 +1,6 @@
 import iconv from 'iconv-lite'
 import type { Account, Balance, CommonOperations, FinancialProvider, Page } from '@mnie/types'
+import { CookieJar } from './cookie-jar'
 
 export interface PayPayBankLoginOptions {
   /** Three-digit branch number. Defaults to `PAYPAY_BANK_BRANCH`. */
@@ -102,36 +103,6 @@ export const normalizePayPayBankOrigin = (value: string | URL): string => {
   }
   return url.origin
 }
-
-class CookieJar {
-  #cookies = new Map<string, string>()
-
-  apply(response: Response) {
-    const headers = response.headers as Headers & { getSetCookie?: () => string[] }
-    const values = headers.getSetCookie?.() ?? splitSetCookie(response.headers.get('set-cookie'))
-    for (const value of values) {
-      const pair = value.split(';', 1)[0]
-      if (!pair) continue
-      const separator = pair.indexOf('=')
-      if (separator > 0) this.#cookies.set(pair.slice(0, separator), pair.slice(separator + 1))
-    }
-  }
-
-  header() {
-    return [...this.#cookies].map(([name, value]) => `${name}=${value}`).join('; ')
-  }
-
-  export() {
-    return Object.fromEntries(this.#cookies)
-  }
-
-  import(cookies: Record<string, string>) {
-    this.#cookies = new Map(Object.entries(cookies))
-  }
-}
-
-const splitSetCookie = (header: string | null) =>
-  header ? header.split(/,(?=\s*[^;,=\s]+=[^;,]*)/g).map((value) => value.trim()) : []
 
 const fetchWithCookies = async (url: URL, init: RequestInit, jar: CookieJar) => {
   const headers = new Headers(init.headers)

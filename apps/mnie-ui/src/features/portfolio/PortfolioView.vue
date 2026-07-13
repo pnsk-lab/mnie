@@ -36,6 +36,7 @@ const props = defineProps<{
     ratio: number
   }>
   assetHistory: Array<{ at: string; profileId: string; label: string; value: number }>
+  assetHistoryLoading: boolean
   positions: Position[]
   recentOrders: OrderRow[]
   cancelingOrderKey: string
@@ -174,6 +175,7 @@ const historySvg = ref<SVGSVGElement | null>(null)
 const historyViewWidth = ref(380)
 const historyViewHeight = ref(190)
 const historyChartBottom = computed(() => historyViewHeight.value - 24)
+const historyZoomRange = ref<{ start: number; end: number } | null>(null)
 let historyResizeObserver: ResizeObserver | undefined
 onMounted(() => {
   historyResizeObserver = new ResizeObserver(([entry]) => {
@@ -186,6 +188,13 @@ onMounted(() => {
 watch(historySvg, (svg) => {
   if (svg && historyResizeObserver) historyResizeObserver.observe(svg)
 })
+watch(
+  () => props.assetHistory,
+  () => {
+    historyZoomRange.value = null
+  },
+  { deep: true },
+)
 onBeforeUnmount(() => historyResizeObserver?.disconnect())
 
 const historyChart = computed(() => {
@@ -216,6 +225,10 @@ const historyChart = computed(() => {
       last: 0,
       min: 0,
       max: 0,
+      domainStart: 0,
+      domainEnd: 0,
+      fullStart: 0,
+      fullEnd: 0,
       points: [],
       xTicks: [],
       yTicks: [],
@@ -224,11 +237,25 @@ const historyChart = computed(() => {
   const values = extent(points, (item) => item.value)
   const firstDate = dates[0] ?? points[0]!.date
   const lastDate = dates[1] ?? firstDate
+  const fullStart = firstDate.getTime()
+  const fullEnd = lastDate.getTime()
+  const requestedRange = historyZoomRange.value
+  const domainStart = new Date(
+    requestedRange ? Math.max(fullStart, Math.min(requestedRange.start, fullEnd)) : fullStart,
+  )
+  const domainEnd = new Date(
+    requestedRange ? Math.min(fullEnd, Math.max(requestedRange.end, fullStart)) : fullEnd,
+  )
+  const xDomain: [Date, Date] =
+    domainEnd > domainStart ? [domainStart, domainEnd] : [firstDate, lastDate]
+  const visiblePoints = points.filter(
+    (point) => point.date >= xDomain[0] && point.date <= xDomain[1],
+  )
   const min = 0
   const max = values[1] ?? min
   const padding = Math.max(max * 0.05, 1)
   const x = scaleTime()
-    .domain([firstDate, lastDate])
+    .domain(xDomain)
     .range([68, historyViewWidth.value - 12])
   const y = scaleLinear()
     .domain([min, max + padding])
@@ -256,7 +283,11 @@ const historyChart = computed(() => {
     last: points.at(-1)?.value ?? 0,
     min,
     max,
-    points: points.map((item) => ({
+    domainStart: xDomain[0].getTime(),
+    domainEnd: xDomain[1].getTime(),
+    fullStart,
+    fullEnd,
+    points: (visiblePoints.length ? visiblePoints : points).map((item) => ({
       ...item,
       x: x(item.date),
       y: y(item.value),
@@ -283,6 +314,118 @@ const showHistoryPoint = (event: MouseEvent) => {
     nearestIndex = index
   })
   hoveredHistoryIndex.value = nearestIndex
+}
+type HistoryRange = { start: number; end: number }
+type HistoryDrag = { pointerId: number; startX: number; range: HistoryRange; moved: boolean }
+type HistoryPinch = { distance: number; range: HistoryRange }
+
+let historyDrag: HistoryDrag | null = null
+let historyPinch: HistoryPinch | null = null
+const historyTouchPointers = new Map<number, { x: number; y: number }>()
+const historyRange = () => {
+  const chart = historyChart.value
+  return { start: chart.domainStart, end: chart.domainEnd }
+}
+const setHistoryRange = (start: number, span: number) => {
+  const chart = historyChart.value
+  const fullSpan = chart.fullEnd - chart.fullStart
+  if (!fullSpan) return
+  const nextSpan = Math.min(fullSpan, Math.max(fullSpan / 20, span))
+  const nextStart = Math.min(chart.fullEnd - nextSpan, Math.max(chart.fullStart, start))
+  historyZoomRange.value = { start: nextStart, end: nextStart + nextSpan }
+  hoveredHistoryIndex.value = null
+}
+const historyPointerRatio = (event: MouseEvent | PointerEvent | WheelEvent) => {
+  const bounds = (event.currentTarget as SVGSVGElement).getBoundingClientRect()
+  if (!bounds.width) return null
+  const plotLeft = 68
+  const plotRight = historyViewWidth.value - 12
+  const pointerX = ((event.clientX - bounds.left) / bounds.width) * historyViewWidth.value
+  return Math.min(1, Math.max(0, (pointerX - plotLeft) / (plotRight - plotLeft)))
+}
+const zoomHistory = (event: WheelEvent) => {
+  const chart = historyChart.value
+  const fullSpan = chart.fullEnd - chart.fullStart
+  const currentSpan = chart.domainEnd - chart.domainStart
+  if (!fullSpan || !currentSpan) return
+
+  const anchorRatio = historyPointerRatio(event)
+  if (anchorRatio == null) return
+  const horizontalDelta = event.shiftKey && !event.deltaX ? event.deltaY : event.deltaX
+  if (Math.abs(horizontalDelta) > Math.abs(event.deltaY) || event.shiftKey) {
+    setHistoryRange(
+      chart.domainStart + (horizontalDelta / (historyViewWidth.value - 80)) * currentSpan,
+      currentSpan,
+    )
+    return
+  }
+  const factor = Math.exp(Math.max(-100, Math.min(100, event.deltaY)) * 0.003)
+  const nextSpan = Math.min(fullSpan, Math.max(fullSpan / 20, currentSpan * factor))
+  const anchor = chart.domainStart + currentSpan * anchorRatio
+  setHistoryRange(anchor - nextSpan * anchorRatio, nextSpan)
+}
+const startHistoryPointer = (event: PointerEvent) => {
+  if (event.pointerType === 'mouse' && event.button !== 0) return
+  const target = event.currentTarget as SVGSVGElement
+  target.setPointerCapture(event.pointerId)
+  event.preventDefault()
+
+  if (event.pointerType === 'touch') {
+    historyTouchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    if (historyTouchPointers.size === 2) {
+      const [first, second] = [...historyTouchPointers.values()]
+      if (!first || !second) return
+      historyDrag = null
+      historyPinch = {
+        distance: Math.hypot(second.x - first.x, second.y - first.y),
+        range: historyRange(),
+      }
+      return
+    }
+  }
+  historyDrag = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    range: historyRange(),
+    moved: false,
+  }
+}
+const moveHistoryPointer = (event: PointerEvent) => {
+  if (event.pointerType === 'touch') {
+    historyTouchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    if (historyPinch && historyTouchPointers.size === 2) {
+      const [first, second] = [...historyTouchPointers.values()]
+      if (!first || !second || !historyPinch.distance) return
+      const ratio = historyPointerRatio(event)
+      if (ratio == null) return
+      const distance = Math.hypot(second.x - first.x, second.y - first.y)
+      const startSpan = historyPinch.range.end - historyPinch.range.start
+      const nextSpan = startSpan * (historyPinch.distance / distance)
+      const anchor = historyPinch.range.start + startSpan * ratio
+      setHistoryRange(anchor - nextSpan * ratio, nextSpan)
+      return
+    }
+  }
+  if (!historyDrag || historyDrag.pointerId !== event.pointerId) {
+    if (event.pointerType === 'mouse') showHistoryPoint(event)
+    return
+  }
+  const bounds = (event.currentTarget as SVGSVGElement).getBoundingClientRect()
+  if (!bounds.width) return
+  const delta = event.clientX - historyDrag.startX
+  if (Math.abs(delta) > 3) historyDrag.moved = true
+  const span = historyDrag.range.end - historyDrag.range.start
+  setHistoryRange(historyDrag.range.start - (delta / bounds.width) * span, span)
+}
+const endHistoryPointer = (event: PointerEvent) => {
+  const drag = historyDrag?.pointerId === event.pointerId ? historyDrag : null
+  if (event.pointerType === 'touch') historyTouchPointers.delete(event.pointerId)
+  if (drag && !drag.moved) showHistoryPoint(event)
+  if (drag) historyDrag = null
+  if (historyTouchPointers.size < 2) historyPinch = null
+}
+const clearHistoryHover = () => {
+  if (!historyDrag && !historyPinch) hoveredHistoryIndex.value = null
 }
 const historyDate = (date: Date) =>
   new Intl.DateTimeFormat('ja-JP', {
@@ -449,15 +592,29 @@ const confirmCancel = () => {
           <svg
             ref="historySvg"
             :viewBox="`0 0 ${historyViewWidth} ${historyViewHeight}`"
-            class="h-full max-h-[24rem] min-h-48 w-full overflow-visible"
+            class="h-full max-h-[24rem] min-h-48 w-full cursor-grab touch-none select-none overflow-visible active:cursor-grabbing"
             role="img"
-            aria-label="過去30日間の総資産推移"
+            aria-label="総資産推移"
             tabindex="0"
-            @mousemove="showHistoryPoint"
-            @mouseleave="hoveredHistoryIndex = null"
+            @wheel.prevent="zoomHistory"
+            @pointerdown="startHistoryPointer"
+            @pointermove="moveHistoryPointer"
+            @pointerup="endHistoryPointer"
+            @pointercancel="endHistoryPointer"
+            @pointerleave="clearHistoryHover"
             @focus="hoveredHistoryIndex = historyChart.points.length - 1"
             @blur="hoveredHistoryIndex = null"
           >
+            <defs>
+              <clipPath id="portfolio-history-clip">
+                <rect
+                  x="68"
+                  y="12"
+                  :width="historyViewWidth - 80"
+                  :height="historyChartBottom - 12"
+                />
+              </clipPath>
+            </defs>
             <g v-for="tick in historyChart.yTicks" :key="tick.value">
               <line
                 x1="68"
@@ -514,31 +671,33 @@ const confirmCancel = () => {
                 {{ historyAxisDate(tick.value) }}
               </text>
             </g>
-            <path
-              v-for="layer in historyChart.layers"
-              :key="layer.profileId"
-              :d="layer.path"
-              :fill="layer.color"
-              fill-opacity="0.72"
-              :aria-label="layer.label"
-            />
-            <g v-if="hoveredHistoryPoint" class="pointer-events-none">
-              <line
-                :x1="hoveredHistoryPoint.x"
-                y1="12"
-                :x2="hoveredHistoryPoint.x"
-                :y2="historyChartBottom"
-                stroke="#59616c"
-                stroke-dasharray="4 4"
+            <g clip-path="url(#portfolio-history-clip)">
+              <path
+                v-for="layer in historyChart.layers"
+                :key="layer.profileId"
+                :d="layer.path"
+                :fill="layer.color"
+                fill-opacity="0.72"
+                :aria-label="layer.label"
               />
-              <circle
-                :cx="hoveredHistoryPoint.x"
-                :cy="hoveredHistoryPoint.y"
-                r="5"
-                fill="#a8c7fa"
-                stroke="#1b1f24"
-                stroke-width="3"
-              />
+              <g v-if="hoveredHistoryPoint" class="pointer-events-none">
+                <line
+                  :x1="hoveredHistoryPoint.x"
+                  y1="12"
+                  :x2="hoveredHistoryPoint.x"
+                  :y2="historyChartBottom"
+                  stroke="#59616c"
+                  stroke-dasharray="4 4"
+                />
+                <circle
+                  :cx="hoveredHistoryPoint.x"
+                  :cy="hoveredHistoryPoint.y"
+                  r="5"
+                  fill="#a8c7fa"
+                  stroke="#1b1f24"
+                  stroke-width="3"
+                />
+              </g>
             </g>
           </svg>
           <AnimatePresence>
@@ -581,6 +740,9 @@ const confirmCancel = () => {
               </span>
             </motion.div>
           </AnimatePresence>
+        </div>
+        <div v-else-if="assetHistoryLoading" :class="ui.emptyState">
+          <Spinner size="lg" />
         </div>
         <div v-else :class="ui.emptyState"><span :class="ui.muted">履歴がありません</span></div>
       </div>

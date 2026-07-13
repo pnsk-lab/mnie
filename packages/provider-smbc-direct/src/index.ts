@@ -405,6 +405,30 @@ const dateParameter = (value: string, name: string) => {
   return value
 }
 
+const transactionDate = (value: unknown, referenceDate: string) => {
+  if (typeof value !== 'string') throw new Error('transaction date was not text')
+  const match = value.trim().match(/^(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日$/)
+  if (!match) throw new Error(`unsupported SMBC Direct transaction date: ${value}`)
+  const month = Number(match[2])
+  const day = Number(match[3])
+  let year = match[1] ? Number(match[1]) : Number(referenceDate.slice(0, 4))
+  let time = Date.UTC(year, month - 1, day)
+  const referenceTime = Date.UTC(
+    Number(referenceDate.slice(0, 4)),
+    Number(referenceDate.slice(4, 6)) - 1,
+    Number(referenceDate.slice(6, 8)),
+  )
+  if (!match[1] && time > referenceTime) {
+    year -= 1
+    time = Date.UTC(year, month - 1, day)
+  }
+  const parsed = new Date(time)
+  if (parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) {
+    throw new Error(`invalid SMBC Direct transaction date: ${value}`)
+  }
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T00:00:00+09:00`
+}
+
 const createProfile = (
   context: LoginContext,
   initialTopPage: { html: string; url: string },
@@ -564,6 +588,10 @@ const createProfile = (
       const endDate = dateParameter(options.endDate, 'endDate')
       if (startDate > endDate) throw new Error('startDate must not be after endDate')
 
+      // A page transition consumes SMBC Direct's form state. Refresh it before
+      // navigating so an imported session never reuses a form consumed by the
+      // previous balance/history operation.
+      await continueSession()
       const { topForm } = topPageForms()
       const detailResponse = await fetchWithCookies(
         new URL('/ib/web/top/TPALTOPaccountFutsuDetail.smbc', context.baseURL),
@@ -637,7 +665,7 @@ const createProfile = (
           `transaction response was rejected: cause=${String(failure.cause ?? '')}; forward=${String(failure.forward ?? '')}; messages=${JSON.stringify(failure.messageList ?? [])}`,
         )
       }
-      return {
+      const transactions: SmbcDirectTransactions = {
         startDate,
         endDate,
         depositsTotal: parseYen(result.response.nyukinGoukei, 'deposit total'),
@@ -646,7 +674,7 @@ const createProfile = (
           const amount = parseYen(entry.amount, 'transaction amount')
           return {
             id: String(entry.meisaiId ?? ''),
-            date: String(entry.dispDate ?? ''),
+            date: transactionDate(entry.dispDate, endDate),
             amount,
             balance: parseYen(entry.torihikigobalance, 'transaction balance'),
             description: String(entry.comment ?? ''),
@@ -654,6 +682,9 @@ const createProfile = (
           }
         }),
       }
+      // Persist a fresh top-page form rather than the one consumed above.
+      await continueSession()
+      return transactions
     },
     async getTransferRecipients() {
       return transferAjax('TFFMIN1Ajaxkakojizensearch', {})
