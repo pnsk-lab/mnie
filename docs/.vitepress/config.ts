@@ -53,6 +53,10 @@ export default defineConfig({
               link: '/docs/providers/paypay-bank',
             },
             {
+              text: 'PayPay Securities',
+              link: '/docs/providers/paypay-sec',
+            },
+            {
               text: 'Mobile Suica',
               link: '/docs/providers/mobilesuica',
             },
