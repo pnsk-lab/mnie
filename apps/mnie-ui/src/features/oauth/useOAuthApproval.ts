@@ -17,7 +17,7 @@ export const useOAuthApproval = () => {
   const oauthApproval = ref<OAuthApprovalState>({
     active: false,
     clientId: '',
-    clientName: 'MCP client',
+    clientName: 'OAuth client',
     redirectUri: '',
     codeChallenge: '',
     scope: '',
@@ -32,7 +32,7 @@ export const useOAuthApproval = () => {
     oauthApproval.value = {
       active: true,
       clientId: url.searchParams.get('client_id') ?? '',
-      clientName: url.searchParams.get('client_id') ?? 'MCP client',
+      clientName: url.searchParams.get('client_id') ?? 'OAuth client',
       redirectUri: url.searchParams.get('redirect_uri') ?? '',
       codeChallenge: url.searchParams.get('code_challenge') ?? '',
       scope: url.searchParams.get('scope') ?? '',

@@ -7,7 +7,7 @@ import type { ApiKeySettings } from '../security/api-keys'
 import { createOAuthAuthorizationCode } from '../security/oauth-provider'
 
 const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]'])
-const supportedScopes = new Set(['read', 'write', 'trade', 'mcp'])
+const supportedScopes = new Set(['read', 'trade'])
 
 const redirectUriAllowed = (redirectUri: string, registeredUris: string[]) => {
   if (registeredUris.includes(redirectUri)) return true

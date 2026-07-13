@@ -36,7 +36,7 @@ import type {
   CashOrderTerm,
   CashOrderTriggerZone,
   OrderKind,
-  Position,
+  ProviderPosition,
   RealtimePricePoint,
   Stock,
   TradeSide,
@@ -67,7 +67,7 @@ const chartRangeOptions: ChartRange[] = ['1D', '3D', '3M', '1Y', 'ALL']
 defineProps<{
   viewedStocks: Stock[]
   selectedStock: Stock
-  selectedPosition?: Position
+  providerPositions: ProviderPosition[]
   connected: boolean
   orderQuantity: number
   estimatedAmount: number
@@ -377,9 +377,35 @@ const emit = defineEmits<{
                   :animate="{ opacity: activeStockInfoTab === 'holding' ? 1 : 0 }"
                   :transition="tabContentTransition"
                 >
-                  <div v-if="selectedPosition" :class="ui.holdingNote">
-                    保有 {{ selectedPosition.quantity }}株 / 平均
-                    {{ currencyForMarket(selectedPosition.avgPrice, selectedPosition.market) }}
+                  <div v-if="providerPositions.length" class="grid gap-2">
+                    <div
+                      v-for="position in providerPositions"
+                      :key="`${position.profileId}:${position.code}:${position.market}`"
+                      class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 rounded-2xl bg-[#22272e] px-4 py-3"
+                    >
+                      <span class="flex min-w-0 items-center gap-2.5">
+                        <i
+                          class="size-2.5 shrink-0 rounded-full"
+                          :style="{ backgroundColor: position.color }"
+                          aria-hidden="true"
+                        ></i>
+                        <span class="grid min-w-0">
+                          <strong class="truncate text-sm">{{ position.providerName }}</strong>
+                          <small class="truncate text-[#8f949d]">{{ position.profileLabel }}</small>
+                        </span>
+                      </span>
+                      <strong class="text-right text-sm">{{ position.quantity }}株</strong>
+                      <small class="pl-5 text-[#9aa0a9]">
+                        評価額 {{ currencyForMarket(position.marketValue, position.market) }}
+                      </small>
+                      <small
+                        class="text-right font-bold"
+                        :class="position.profitLoss >= 0 ? ui.positive : ui.negative"
+                      >
+                        {{ position.profitLoss >= 0 ? '+' : ''
+                        }}{{ currencyForMarket(position.profitLoss, position.market) }}
+                      </small>
+                    </div>
                   </div>
                   <p v-else :class="ui.holdingEmpty">保有なし</p>
                 </motion.div>
@@ -628,7 +654,7 @@ const emit = defineEmits<{
         </span>
       </button>
       <p v-if="!viewedStocks.length" :class="[ui.muted, 'p-5 text-sm']">
-        SBIに接続するか検索すると銘柄を表示します
+        対応する証券口座に接続するか検索すると銘柄を表示します
       </p>
     </article>
   </section>

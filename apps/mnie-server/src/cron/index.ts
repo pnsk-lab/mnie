@@ -1,29 +1,11 @@
-import { eq } from 'drizzle-orm'
-import {
-  createProvider as createSmbcDirectProvider,
-  exportSession as exportSmbcDirectSession,
-  importSession as importSmbcDirectSession,
-  type SmbcDirectSession,
-} from '@mnie/provider-smbc-direct'
-import {
-  createProvider as createMobileSuicaProvider,
-  exportSession as exportMobileSuicaSession,
-  importSession as importMobileSuicaSession,
-} from '@mnie/provider-mobile-suica'
-import type { Db } from '../db'
-import { accountProfiles } from '../db/schema'
-import type { StoredMobileSuicaSecret, StoredSmbcDirectSecret } from '../routes/admin'
-import { readSecret, saveSecret } from '../security/keyring'
-import { checkProfileAvailability, listProfiles, type CachedAvailability } from '../availability'
 import type { ServerConfig } from '../config'
+import type { Db } from '../db'
 import { fetchAssetValuation, saveAssetValuation } from '../assets'
-import { withProfileLock } from '../profile-lock'
-
-const smbcDirectSchedule = '*/5 * * * *'
-const mobileSuicaSchedule = '*/5 * * * *'
+import { checkProfileAvailability, listProfiles, type CachedAvailability } from '../availability'
+import type { ProviderRegistry } from '../providers/registry'
 
 export interface CronJobStatus {
-  id: 'smbc-direct-session' | 'mobilesuica-session'
+  id: string
   label: string
   schedule: string
   running: boolean
@@ -36,198 +18,146 @@ export interface CronSystem {
   jobs(): CronJobStatus[]
   availability(profileId?: string): Record<string, CachedAvailability>
   setAvailability(profileId: string, value: CachedAvailability): void
+  close(): Promise<void>
 }
 
-const assetSchedule = '* * * * *'
-
 const errorMessage = (cause: unknown) =>
-  cause instanceof Error ? cause.message : 'Session maintenance failed'
+  cause instanceof Error
+    ? cause.message
+    : typeof cause === 'string'
+      ? cause
+      : String(cause || 'Provider background operation failed')
 
-export const createCronSystem = (db: Db, config: ServerConfig): CronSystem => {
-  const status: CronJobStatus = {
-    id: 'smbc-direct-session',
-    label: 'SMBC Direct セッション維持',
-    schedule: smbcDirectSchedule,
-    running: false,
+const runExclusive = async (status: CronJobStatus, operation: () => Promise<void>) => {
+  if (status.running) return
+  status.running = true
+  status.lastRunAt = new Date()
+  status.lastError = undefined
+  try {
+    await operation()
+    status.lastSuccessAt = new Date()
+  } catch (cause) {
+    status.lastError = errorMessage(cause)
+    console.error(`${status.label} failed:`, cause)
+  } finally {
+    status.running = false
   }
-  const mobileSuicaStatus: CronJobStatus = {
-    id: 'mobilesuica-session',
-    label: 'モバイル Suica セッション維持',
-    schedule: mobileSuicaSchedule,
-    running: false,
-  }
+}
+
+export const createCronSystem = (
+  db: Db,
+  _config: ServerConfig,
+  providers: ProviderRegistry,
+  options: { start?: boolean } = {},
+): CronSystem => {
   const availabilityCache = new Map<string, CachedAvailability>()
   const availabilityStatus: CronJobStatus = {
-    id: 'profile-availability' as CronJobStatus['id'],
+    id: 'profile-availability',
     label: 'プロフィール利用可否確認',
     schedule: '*/10 * * * *',
     running: false,
   }
-  const runAvailability = async () => {
-    if (availabilityStatus.running) return
-    availabilityStatus.running = true
-    availabilityStatus.lastRunAt = new Date()
-    try {
-      for (const profile of await listProfiles(db)) {
-        availabilityCache.set(profile.id, {
-          result: await checkProfileAvailability(db, config, profile),
-          checkedAt: new Date(),
-        })
-      }
-      availabilityStatus.lastSuccessAt = new Date()
-    } catch (cause) {
-      availabilityStatus.lastError = errorMessage(cause)
-      console.error('Profile availability cron failed:', cause)
-    } finally {
-      availabilityStatus.running = false
-    }
-  }
-  Bun.cron('*/10 * * * *', runAvailability)
-  void runAvailability()
-
-  const assetStatus: CronJobStatus = {
-    id: 'asset-valuations' as CronJobStatus['id'],
-    label: '総資産価値の更新',
-    schedule: assetSchedule,
+  const sessionStatus: CronJobStatus = {
+    id: 'provider-sessions',
+    label: 'プロバイダーセッション維持',
+    schedule: '*/5 * * * *',
     running: false,
   }
+  const assetStatus: CronJobStatus = {
+    id: 'asset-valuations',
+    label: '総資産価値の更新',
+    schedule: '* * * * *',
+    running: false,
+  }
+  const lastSessionRuns = new Map<string, number>()
   const lastAssetRuns = new Map<string, number>()
-  const runAssets = async () => {
-    if (assetStatus.running) return
-    assetStatus.running = true
-    assetStatus.lastRunAt = new Date()
-    assetStatus.lastError = undefined
-    const errors: string[] = []
-    try {
-      for (const profile of await listProfiles(db)) {
-        let availability = availabilityCache.get(profile.id)
-        if (!availability) {
-          availability = {
-            result: await checkProfileAvailability(db, config, profile),
-            checkedAt: new Date(),
-          }
-          availabilityCache.set(profile.id, availability)
-        }
-        if (!availability.result.ok) continue
-        const intervalMs = profile.provider === 'sbisec' ? 5 * 60_000 : 60 * 60_000
-        const previous = lastAssetRuns.get(profile.id) ?? 0
-        if (Date.now() - previous < intervalMs) continue
-        lastAssetRuns.set(profile.id, Date.now())
-        try {
-          const valuation = await fetchAssetValuation(db, config, profile)
-          await saveAssetValuation(db, profile, valuation)
-        } catch (cause) {
-          errors.push(`${profile.label}: ${errorMessage(cause)}`)
-          console.error(`Asset valuation update failed for ${profile.id}:`, cause)
-        }
-      }
-      if (errors.length) throw new Error(errors.join('; '))
-      assetStatus.lastSuccessAt = new Date()
-    } catch (cause) {
-      assetStatus.lastError = errorMessage(cause)
-    } finally {
-      assetStatus.running = false
+  const activeRuns = new Set<Promise<void>>()
+  let closed = false
+
+  const refreshAvailability = async () => {
+    for (const profile of await listProfiles(providers)) {
+      const availability = await checkProfileAvailability(providers, profile)
+      availabilityCache.set(profile.id, {
+        result: availability.connection,
+        operations: availability.operations,
+        checkedAt: new Date(availability.checkedAt),
+      })
     }
   }
-  Bun.cron(assetSchedule, runAssets)
-  void runAssets()
 
-  Bun.cron(smbcDirectSchedule, async () => {
-    if (status.running) return
-    status.running = true
-    status.lastRunAt = new Date()
-    status.lastError = undefined
-    try {
-      const profiles = await db
-        .select()
-        .from(accountProfiles)
-        .where(eq(accountProfiles.provider, 'smbc-direct'))
-      let failed = false
-      for (const profile of profiles) {
-        await withProfileLock(profile.id, async () => {
-          const secret = await readSecret<StoredSmbcDirectSecret>(profile.keyringAccount)
-          if (!secret.session) return
-          const session = secret.session as SmbcDirectSession
-          const smbcProfile = await importSmbcDirectSession(session)
-          const availability = await createSmbcDirectProvider(smbcProfile).checkAvailability()
-          if (!availability.ok) {
-            failed = true
-            status.lastError = errorMessage(availability.message)
-            if (availability.reason === 'UNKNOWN') {
-              console.error('SMBC Direct session cron failed:', availability.message)
-            }
-            return
-          }
-          await saveSecret(profile.keyringAccount, {
-            ...secret,
-            session: exportSmbcDirectSession(smbcProfile),
-          } satisfies StoredSmbcDirectSecret)
-          await db
-            .update(accountProfiles)
-            .set({ updatedAt: new Date() })
-            .where(eq(accountProfiles.id, profile.id))
+  const maintainSessions = async () => {
+    const errors: string[] = []
+    for (const profile of await listProfiles(providers)) {
+      const interval = providers.sessionRefreshIntervalMs(profile)
+      if (!interval) continue
+      const previous = lastSessionRuns.get(profile.id) ?? 0
+      if (Date.now() - previous < interval) continue
+      lastSessionRuns.set(profile.id, Date.now())
+      try {
+        const availability = await providers.availability(profile)
+        availabilityCache.set(profile.id, {
+          result: availability.connection,
+          operations: availability.operations,
+          checkedAt: new Date(availability.checkedAt),
         })
-      }
-      if (!failed) status.lastSuccessAt = new Date()
-    } catch (cause) {
-      status.lastError = errorMessage(cause)
-      console.error('SMBC Direct session cron failed:', cause)
-    } finally {
-      status.running = false
-    }
-  })
-
-  Bun.cron(mobileSuicaSchedule, async () => {
-    if (mobileSuicaStatus.running) return
-    mobileSuicaStatus.running = true
-    mobileSuicaStatus.lastRunAt = new Date()
-    mobileSuicaStatus.lastError = undefined
-    try {
-      const profiles = await db
-        .select()
-        .from(accountProfiles)
-        .where(eq(accountProfiles.provider, 'mobilesuica'))
-      let failed = false
-      for (const profile of profiles) {
-        const secret = await readSecret<StoredMobileSuicaSecret>(profile.keyringAccount)
-        if (!secret.session) continue
-        const mobileSuicaProfile = await importMobileSuicaSession(secret.session)
-        const availability = await createMobileSuicaProvider(mobileSuicaProfile).checkAvailability()
-        if (!availability.ok) {
-          failed = true
-          mobileSuicaStatus.lastError = errorMessage(availability.message)
-          if (availability.reason === 'UNKNOWN') {
-            console.error('Mobile Suica session cron failed:', availability.message)
-          }
-          continue
+        if (!availability.connection.ok) {
+          errors.push(`${profile.label}: ${errorMessage(availability.connection.message)}`)
         }
-        await saveSecret(profile.keyringAccount, {
-          ...secret,
-          session: exportMobileSuicaSession(mobileSuicaProfile),
-        } satisfies StoredMobileSuicaSecret)
-        await db
-          .update(accountProfiles)
-          .set({ updatedAt: new Date() })
-          .where(eq(accountProfiles.id, profile.id))
+      } catch (cause) {
+        errors.push(`${profile.label}: ${errorMessage(cause)}`)
       }
-      if (!failed) mobileSuicaStatus.lastSuccessAt = new Date()
-    } catch (cause) {
-      mobileSuicaStatus.lastError = errorMessage(cause)
-      console.error('Mobile Suica session cron failed:', cause)
-    } finally {
-      mobileSuicaStatus.running = false
     }
-  })
+    if (errors.length) throw new Error(errors.join('; '))
+  }
+
+  const updateAssets = async () => {
+    const errors: string[] = []
+    for (const profile of await listProfiles(providers)) {
+      const availability = availabilityCache.get(profile.id)
+      if (!availability?.result.ok) continue
+      const interval = providers.assetRefreshIntervalMs(profile)
+      const previous = lastAssetRuns.get(profile.id) ?? 0
+      if (Date.now() - previous < interval) continue
+      lastAssetRuns.set(profile.id, Date.now())
+      try {
+        const valuation = await fetchAssetValuation(providers, profile)
+        await saveAssetValuation(db, profile, valuation)
+      } catch (cause) {
+        errors.push(`${profile.label}: ${errorMessage(cause)}`)
+      }
+    }
+    if (errors.length) throw new Error(errors.join('; '))
+  }
+
+  const run = (status: CronJobStatus, operation: () => Promise<void>) => {
+    if (closed) return
+    const active = runExclusive(status, operation)
+    activeRuns.add(active)
+    void active.finally(() => activeRuns.delete(active))
+  }
+  const tasks =
+    options.start === false
+      ? []
+      : [
+          Bun.cron(availabilityStatus.schedule, () => run(availabilityStatus, refreshAvailability)),
+          Bun.cron(sessionStatus.schedule, () => run(sessionStatus, maintainSessions)),
+          Bun.cron(assetStatus.schedule, () => run(assetStatus, updateAssets)),
+        ]
+  if (options.start !== false) {
+    run(availabilityStatus, refreshAvailability)
+    run(sessionStatus, maintainSessions)
+    run(assetStatus, updateAssets)
+  }
 
   return {
-    jobs: () => [
-      { ...status },
-      { ...mobileSuicaStatus },
-      { ...availabilityStatus },
-      { ...assetStatus },
-    ],
+    jobs: () => [{ ...sessionStatus }, { ...availabilityStatus }, { ...assetStatus }],
     availability: (profileId) =>
       Object.fromEntries([...availabilityCache].filter(([id]) => !profileId || id === profileId)),
     setAvailability: (profileId, value) => availabilityCache.set(profileId, value),
+    close: async () => {
+      closed = true
+      for (const task of tasks) task.stop()
+      await Promise.allSettled(activeRuns)
+    },
   }
 }

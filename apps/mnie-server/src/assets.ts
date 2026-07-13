@@ -1,34 +1,8 @@
 import { desc, eq } from 'drizzle-orm'
-import {
-  createProvider as createSmbcProvider,
-  exportSession as exportSmbcSession,
-  importSession as importSmbcSession,
-  type SmbcDirectSession,
-} from '@mnie/provider-smbc-direct'
-import {
-  createProvider as createPayPayBankProvider,
-  exportSession as exportPayPayBankSession,
-  importSession as importPayPayBankSession,
-  login as loginPayPayBank,
-  type PayPayBankSession,
-} from '@mnie/provider-paypay-bank'
-import {
-  createProvider as createMobileSuicaProvider,
-  exportSession as exportMobileSuicaSession,
-  importSession as importMobileSuicaSession,
-} from '@mnie/provider-mobile-suica'
-import type { ServerConfig } from './config'
 import type { AssetValuation } from '@mnie/types'
 import type { Db } from './db'
 import { accountProfiles, assetValuations } from './db/schema'
-import type {
-  StoredMobileSuicaSecret,
-  StoredPayPayBankSecret,
-  StoredSmbcDirectSecret,
-} from './routes/admin'
-import { connectSbi } from './rpc/sbi-session'
-import { readSecret, saveSecret } from './security/keyring'
-import { withProfileLock } from './profile-lock'
+import type { ProviderRegistry } from './providers/registry'
 
 type Profile = typeof accountProfiles.$inferSelect
 type Money = { kind?: string; money?: { currency?: string; value?: string } }
@@ -48,81 +22,42 @@ const readMoney = (amount: unknown) => {
 }
 
 export const fetchAssetValuation = async (
-  db: Db,
-  config: ServerConfig,
+  providers: ProviderRegistry,
   profile: Profile,
 ): Promise<AssetValuationResult> => {
-  if (profile.provider === 'sbisec') {
-    const result = (await (
-      await connectSbi(db, config, profile.id)
-    ).invoke('assets.valuation.get', {})) as AssetValuation
-    const value = Number(result.amount.value)
-    const holdingsValue = Number(result.holdingsAmount?.value)
-    if (!Number.isFinite(value)) throw new Error('SBI provider returned an invalid asset valuation')
-    return {
-      value,
-      currency: result.amount.currency,
-      ...(Number.isFinite(holdingsValue)
-        ? { holdingsValue, cashValue: Math.max(value - holdingsValue, 0) }
-        : {}),
+  return providers.use(profile, async ({ provider }) => {
+    if (provider.operations().includes('assets.valuation.get')) {
+      const result = (await provider.invoke('assets.valuation.get', {})) as AssetValuation
+      const value = Number(result.amount.value)
+      const holdingsValue = Number(result.holdingsAmount?.value)
+      const cashValue = Number(result.cashAmount?.value)
+      if (!Number.isFinite(value)) throw new Error('Provider returned an invalid asset valuation')
+      return {
+        value,
+        currency: result.amount.currency,
+        ...(Number.isFinite(holdingsValue) ? { holdingsValue } : {}),
+        ...(Number.isFinite(cashValue) ? { cashValue } : {}),
+      }
     }
-  }
 
-  if (profile.provider === 'smbc-direct') {
-    return withProfileLock(profile.id, async () => {
-      const secret = await readSecret<StoredSmbcDirectSecret>(profile.keyringAccount)
-      if (!secret.session) throw new Error('SMBC Direct session is not available')
-      const imported = await importSmbcSession(secret.session as SmbcDirectSession)
-      const balances = (await createSmbcProvider(imported).invoke('balances.list', {})) as Array<{
-        amount: unknown
-      }>
-      await saveSecret(profile.keyringAccount, {
-        ...secret,
-        session: exportSmbcSession(imported),
-      } satisfies StoredSmbcDirectSecret)
+    if (provider.operations().includes('balances.list')) {
+      const balances = (await provider.invoke('balances.list', {})) as Array<{ amount: unknown }>
+      if (!balances.length) throw new Error('Provider did not return a balance')
       return readMoney(balances[0]?.amount)
-    })
-  }
+    }
 
-  if (profile.provider === 'paypay-bank') {
-    const secret = await readSecret<StoredPayPayBankSecret>(profile.keyringAccount)
-    const imported = secret.session
-      ? await importPayPayBankSession(secret.session as PayPayBankSession)
-      : await loginPayPayBank({
-          branchNo: secret.branchNo,
-          accountNo: secret.accountNo,
-          password: secret.password,
-          baseURL: config.payPayBankBaseUrl,
-        })
-    const balances = (await createPayPayBankProvider(imported).invoke(
-      'balances.list',
-      {},
-    )) as Array<{
-      amount: unknown
-    }>
-    await saveSecret(profile.keyringAccount, {
-      ...secret,
-      session: exportPayPayBankSession(imported),
-    } satisfies StoredPayPayBankSecret)
-    return readMoney(balances[0]?.amount)
-  }
-
-  const secret = await readSecret<StoredMobileSuicaSecret>(profile.keyringAccount)
-  if (!secret.session) throw new Error('Mobile Suica session is not available')
-  const imported = await importMobileSuicaSession(secret.session)
-  const transactions = (await createMobileSuicaProvider(imported).invoke(
-    'transactions.list',
-    {},
-  )) as { items?: Array<{ occurredAt?: string; balanceAfter?: unknown }> }
-  await saveSecret(profile.keyringAccount, {
-    ...secret,
-    session: exportMobileSuicaSession(imported),
-  } satisfies StoredMobileSuicaSecret)
-  const latest = [...(transactions.items ?? [])]
-    .filter((item) => item.balanceAfter)
-    .sort((a, b) => String(b.occurredAt).localeCompare(String(a.occurredAt)))[0]
-  if (!latest) throw new Error('Mobile Suica did not return a balance')
-  return readMoney(latest.balanceAfter)
+    if (!provider.operations().includes('transactions.list')) {
+      throw new Error('Provider does not expose an asset valuation operation')
+    }
+    const transactions = (await provider.invoke('transactions.list', {})) as {
+      items?: Array<{ occurredAt?: string; balanceAfter?: unknown }>
+    }
+    const latest = [...(transactions.items ?? [])]
+      .filter((item) => item.balanceAfter)
+      .sort((a, b) => String(b.occurredAt).localeCompare(String(a.occurredAt)))[0]
+    if (!latest) throw new Error('Provider did not return a balance')
+    return readMoney(latest.balanceAfter)
+  })
 }
 
 export const saveAssetValuation = async (
@@ -158,7 +93,7 @@ export const latestAssetValuations = async (db: Db) => {
   ).then((rows) => rows.filter((row): row is NonNullable<typeof row> => Boolean(row)))
 }
 
-export const ensureInitialAssetValuations = async (db: Db, config: ServerConfig) => {
+export const ensureInitialAssetValuations = async (db: Db, providers: ProviderRegistry) => {
   const profiles = await db.select().from(accountProfiles).orderBy(accountProfiles.createdAt)
   const existing = await latestAssetValuations(db)
   const existingProfileIds = new Set(existing.map((row) => row.profileId))
@@ -168,7 +103,7 @@ export const ensureInitialAssetValuations = async (db: Db, config: ServerConfig)
       .filter((profile) => !existingProfileIds.has(profile.id))
       .map(async (profile) => {
         try {
-          const valuation = await fetchAssetValuation(db, config, profile)
+          const valuation = await fetchAssetValuation(providers, profile)
           await saveAssetValuation(db, profile, valuation)
         } catch (cause) {
           throw new Error(`Initial asset valuation failed for ${profile.label}`, { cause })

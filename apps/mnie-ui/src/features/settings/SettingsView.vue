@@ -28,6 +28,7 @@ import type {
   AuthManagerConfig,
   CronJob,
   ProfileAvailability,
+  ProviderDefinition,
   SbiPasskey,
 } from '../../api'
 import ApiKeyPolicyEditor from '../../components/ApiKeyPolicyEditor.vue'
@@ -42,6 +43,7 @@ const props = defineProps<{
   sbiPasskeys: SbiPasskey[]
   authManagers: AuthManagerConfig[]
   profiles: AccountProfile[]
+  providerDefinitions: ProviderDefinition[]
   profileAvailability: Record<string, ProfileAvailability>
   profileAvailabilityCheckedAt: Record<string, number>
   profileAvailabilityLoading: Record<string, boolean>
@@ -103,13 +105,11 @@ const router = useRouter()
 const editingApiKey = ref<ApiKey | null>(null)
 const profileToDelete = ref<AccountProfile | null>(null)
 const unavailableProfile = ref<AccountProfile | null>(null)
-const providerIds = ['sbisec', 'smbc-direct', 'mobilesuica', 'paypay-bank'] as const
 const selectedProvider = computed<AccountProfile['provider']>(() => {
   const provider = route.params.provider
-  return typeof provider === 'string' &&
-    providerIds.includes(provider as AccountProfile['provider'])
-    ? (provider as AccountProfile['provider'])
-    : 'sbisec'
+  return typeof provider === 'string' && props.providerDefinitions.some(({ id }) => id === provider)
+    ? provider
+    : (props.providerDefinitions[0]?.id ?? '')
 })
 
 const activeSection = computed<SettingsSection>(() => {
@@ -147,40 +147,27 @@ watch(
   { immediate: true },
 )
 
-const providerCards = computed(() => [
-  {
-    id: 'paypay-bank' as const,
-    label: 'PayPay銀行',
-    description: '銀行口座・残高',
-    icon: WalletCards,
-    connectionCount: props.profiles.filter((profile) => profile.provider === 'paypay-bank').length,
-    connected: props.profiles.some((profile) => profile.provider === 'paypay-bank'),
-  },
-  {
-    id: 'sbisec' as const,
-    label: 'SBI証券',
-    description: '証券口座・取引',
-    icon: Landmark,
-    connectionCount: props.sbiPasskeys.length,
-    connected: props.sbiPasskeys.length > 0,
-  },
-  {
-    id: 'smbc-direct' as const,
-    label: 'SMBC Direct',
-    description: '銀行口座・残高',
-    icon: Building2,
-    connectionCount: props.profiles.filter((profile) => profile.provider === 'smbc-direct').length,
-    connected: props.profiles.some((profile) => profile.provider === 'smbc-direct'),
-  },
-  {
-    id: 'mobilesuica' as const,
-    label: 'モバイルSuica',
-    description: '利用履歴',
-    icon: TrainFront,
-    connectionCount: props.profiles.filter((profile) => profile.provider === 'mobilesuica').length,
-    connected: props.profiles.some((profile) => profile.provider === 'mobilesuica'),
-  },
-])
+const providerPresentation = (provider: ProviderDefinition) => {
+  if (provider.kind === 'brokerage') return { icon: Landmark, description: '証券口座・取引' }
+  if (provider.kind === 'bank') return { icon: Building2, description: '銀行口座・残高' }
+  if (provider.kind === 'transit-card') return { icon: TrainFront, description: '利用履歴' }
+  return { icon: WalletCards, description: provider.kind }
+}
+
+const providerCards = computed(() =>
+  props.providerDefinitions.map((provider) => {
+    const connectionCount = props.profiles.filter(
+      (profile) => profile.provider === provider.id,
+    ).length
+    return {
+      id: provider.id,
+      label: provider.name,
+      ...providerPresentation(provider),
+      connectionCount,
+      connected: connectionCount > 0,
+    }
+  }),
+)
 
 const settingsGroups = [
   {
@@ -737,6 +724,9 @@ const saveEditingApiKey = () => {
                 </button>
               </div>
             </template>
+            <p v-else class="text-sm text-red-300" role="alert">
+              このプロバイダーの認証フォームはまだ実装されていません。登録層に認証処理を追加してください。
+            </p>
           </article>
         </template>
 

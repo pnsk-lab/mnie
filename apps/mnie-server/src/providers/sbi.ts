@@ -9,23 +9,28 @@ import type {
 } from '@mnie/provider-sbi-sec'
 import type { ServerConfig } from '../config'
 import type { Db } from '../db'
-import { sbiPasskeys } from '../db/schema'
-import type { StoredSbiPasskeySecret } from '../routes/admin'
+import { accountProfiles } from '../db/schema'
 import { readSecret, saveSecret } from '../security/keyring'
-import { effectiveSbiDeviceId, effectiveSbiTradePassword } from '../security/sbi-credentials'
+import type { StoredSbiPasskeySecret } from './credentials'
+
+const nonEmpty = (value: string | undefined) => value?.trim() || undefined
 
 export const connectSbi = async (
   db: Db,
   config: ServerConfig,
   profileId: string,
 ): Promise<FinancialProvider<OperationMap>> => {
-  const [row] = await db.select().from(sbiPasskeys).where(eq(sbiPasskeys.id, profileId)).limit(1)
-  if (!row) throw new Error('SBI passkey not found')
+  const [row] = await db
+    .select()
+    .from(accountProfiles)
+    .where(eq(accountProfiles.id, profileId))
+    .limit(1)
+  if (!row || row.provider !== 'sbisec') throw new Error('SBI profile not found')
 
   const secret = await readSecret<StoredSbiPasskeySecret>(row.keyringAccount)
   const clientOptions: SbiClientOptions = {
-    tradePassword: effectiveSbiTradePassword(secret),
-    deviceId: effectiveSbiDeviceId(secret),
+    tradePassword: nonEmpty(secret.tradePassword),
+    deviceId: nonEmpty(secret.deviceId),
   }
   const endpointOptions: SbiEndpointOptions = {
     authBaseUrl: config.authBaseUrl,
@@ -44,8 +49,10 @@ export const connectSbi = async (
     mainSiteExchangeOrderConfirmPath: config.mainSiteExchangeOrderConfirmPath,
     mainSiteExchangeOrderCompletePath: config.mainSiteExchangeOrderCompletePath,
   }
-  const passkeyOptions = passkeyLoginOptions(secret, endpointOptions)
-  const provider = await connectWithPasskey(passkeyOptions, clientOptions)
+  const provider = await connectWithPasskey(
+    passkeyLoginOptions(secret, endpointOptions),
+    clientOptions,
+  )
   await saveSecret(row.keyringAccount, { ...secret, session: await provider.exportSession() })
   return provider as FinancialProvider<OperationMap>
 }
@@ -59,11 +66,9 @@ const passkeyLoginOptions = (
     if (!secret.credential) throw new Error('SBI passkey source is missing')
     return { ...endpointOptions, passkeyCredential: secret.credential }
   }
-
   if (source.kind === 'json') {
     return { ...endpointOptions, passkeyCredential: source.credential }
   }
-
   return {
     ...endpointOptions,
     passkeyProvider: createBitwardenPasskeyProvider({

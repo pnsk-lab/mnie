@@ -30,15 +30,6 @@ export const sessions = sqliteTable('sessions', {
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 })
 
-export const sbiPasskeys = sqliteTable('sbi_passkeys', {
-  id: text('id').primaryKey(),
-  label: text('label').notNull(),
-  color: text('color'),
-  keyringAccount: text('keyring_account').notNull(),
-  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
-})
-
 export const authManagers = sqliteTable('auth_managers', {
   id: text('id').primaryKey(),
   kind: text('kind', { enum: ['bitwarden'] }).notNull(),
@@ -50,9 +41,7 @@ export const authManagers = sqliteTable('auth_managers', {
 
 export const accountProfiles = sqliteTable('account_profiles', {
   id: text('id').primaryKey(),
-  provider: text('provider', {
-    enum: ['sbisec', 'smbc-direct', 'mobilesuica', 'paypay-bank'],
-  }).notNull(),
+  provider: text('provider').notNull(),
   label: text('label').notNull(),
   color: text('color'),
   keyringAccount: text('keyring_account').notNull(),
@@ -114,7 +103,7 @@ export const apiKeyTradeUsage = sqliteTable(
   'api_key_trade_usage',
   {
     apiKeyId: text('api_key_id').notNull(),
-    window: text('window', { enum: ['1h', '3h', '1d'] }).notNull(),
+    window: text('window', { enum: ['1h', '6h', '1d'] }).notNull(),
     hourBucket: text('hour_bucket').notNull(),
     tradeCount: integer('trade_count').notNull().default(0),
     updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),

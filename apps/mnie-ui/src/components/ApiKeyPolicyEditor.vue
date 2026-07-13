@@ -15,15 +15,26 @@ const rpcMethods = [
   'transactions.list',
   'transfers.recipients.list',
   'investments.positions.list',
+  'investments.positions.get',
   'investments.orders.list',
+  'investments.orders.get',
+  'investments.trades.list',
   'investments.orders.preview',
+  'investments.orders.create',
+  'investments.orders.replace.preview',
+  'investments.orders.replace',
+  'investments.orders.cancel',
 ] as const
 
-const tradingMethods = ['investments.orders.preview'] as const
+const tradingMethods = [
+  'investments.orders.create',
+  'investments.orders.replace',
+  'investments.orders.cancel',
+] as const
 
 const tradingMethodSet = new Set<string>(tradingMethods)
 const readMethods = rpcMethods.filter((method) => !tradingMethodSet.has(method))
-const scopes = ['read', 'write', 'trade', 'mcp'] as const
+const scopes = ['read', 'trade'] as const
 
 const toggleScope = (scope: string) => {
   const current = settings.value.scopes ?? []
