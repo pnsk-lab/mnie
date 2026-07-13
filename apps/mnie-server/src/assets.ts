@@ -28,6 +28,7 @@ import type {
 } from './routes/admin'
 import { connectSbi } from './rpc/sbi-session'
 import { readSecret, saveSecret } from './security/keyring'
+import { withProfileLock } from './profile-lock'
 
 type Profile = typeof accountProfiles.$inferSelect
 type Money = { kind?: string; money?: { currency?: string; value?: string } }
@@ -68,17 +69,19 @@ export const fetchAssetValuation = async (
   }
 
   if (profile.provider === 'smbc-direct') {
-    const secret = await readSecret<StoredSmbcDirectSecret>(profile.keyringAccount)
-    if (!secret.session) throw new Error('SMBC Direct session is not available')
-    const imported = await importSmbcSession(secret.session as SmbcDirectSession)
-    const balances = (await createSmbcProvider(imported).invoke('balances.list', {})) as Array<{
-      amount: unknown
-    }>
-    await saveSecret(profile.keyringAccount, {
-      ...secret,
-      session: exportSmbcSession(imported),
-    } satisfies StoredSmbcDirectSecret)
-    return readMoney(balances[0]?.amount)
+    return withProfileLock(profile.id, async () => {
+      const secret = await readSecret<StoredSmbcDirectSecret>(profile.keyringAccount)
+      if (!secret.session) throw new Error('SMBC Direct session is not available')
+      const imported = await importSmbcSession(secret.session as SmbcDirectSession)
+      const balances = (await createSmbcProvider(imported).invoke('balances.list', {})) as Array<{
+        amount: unknown
+      }>
+      await saveSecret(profile.keyringAccount, {
+        ...secret,
+        session: exportSmbcSession(imported),
+      } satisfies StoredSmbcDirectSecret)
+      return readMoney(balances[0]?.amount)
+    })
   }
 
   if (profile.provider === 'paypay-bank') {

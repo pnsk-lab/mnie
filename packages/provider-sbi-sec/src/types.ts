@@ -132,7 +132,17 @@ export interface MainSiteAuthCache {
   baseUrl: string
   assetsUrl: string
   cookieHeader: string
+  cookies?: MainSiteCookie[]
   authenticatedAt: string
+}
+
+export interface MainSiteCookie {
+  name: string
+  value: string
+  domain: string
+  path: string
+  hostOnly: boolean
+  secure: boolean
 }
 
 export interface MainSiteSession {

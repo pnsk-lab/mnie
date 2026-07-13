@@ -2,6 +2,7 @@ import {
   createProvider as createMobileSuicaProvider,
   importSession as importMobileSuicaSession,
   exportSession as exportMobileSuicaSession,
+  login as loginMobileSuica,
 } from '@mnie/provider-mobile-suica'
 import type { AvailabilityCheckResult } from '@mnie/types'
 import {
@@ -27,6 +28,8 @@ import type {
   StoredPayPayBankSecret,
   StoredSmbcDirectSecret,
 } from './routes/admin'
+import { withProfileLock } from './profile-lock'
+import { captchaModelPath, createCaptchaSolver } from '@repo/capsolve-sp'
 
 export interface CachedAvailability {
   result: AvailabilityCheckResult
@@ -55,6 +58,42 @@ const timed = async <T>(operation: Promise<T>, label: string) => {
   }
 }
 
+const automaticMobileSuicaAvailability = async (
+  secret: StoredMobileSuicaSecret,
+  baseURL: string,
+  label: string,
+) => {
+  if (!secret.user || !secret.password)
+    throw new Error('Mobile Suica credentials are not stored; human login is required')
+  const solver = await createCaptchaSolver(captchaModelPath())
+  let result: AvailabilityCheckResult = {
+    ok: false,
+    message: 'Automatic CAPTCHA solving did not run',
+    reason: 'CAPTCHA_REQIRED',
+  }
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const profile = await loginMobileSuica({
+        baseURL,
+        user: secret.user,
+        password: secret.password,
+        onCaptcha: (captcha) => solver.solve(captcha.image),
+      })
+      result = serializableAvailability(
+        await timed(
+          createMobileSuicaProvider(profile).checkAvailability(),
+          `Mobile Suica (${label}) automatic CAPTCHA retry ${attempt + 1}`,
+        ),
+      )
+      secret.session = exportMobileSuicaSession(profile)
+      if (result.ok || result.reason !== 'CAPTCHA_REQIRED') return result
+    } catch (cause) {
+      result = { ok: false, message: message(cause), reason: 'CAPTCHA_REQIRED' }
+    }
+  }
+  return result
+}
+
 export const checkProfileAvailability = async (
   db: Db,
   config: ServerConfig,
@@ -68,27 +107,29 @@ export const checkProfileAvailability = async (
       )
     }
     if (profile.provider === 'smbc-direct') {
-      const secret = await readSecret<StoredSmbcDirectSecret>(profile.keyringAccount)
-      if (!secret.session)
-        return {
-          ok: false,
-          message:
-            'SMBC Direct session is not available; reconnect and finish two-factor authentication',
-          reason: '2FA_REQUIRED',
-        }
-      const smbcProfile = await importSmbcDirectSession(secret.session as SmbcDirectSession)
-      const result = serializableAvailability(
-        await timed(
-          createSmbcDirectProvider(smbcProfile).checkAvailability(),
-          `SMBC Direct (${profile.label})`,
-        ),
-      )
-      if (result.ok)
-        await saveSecret(profile.keyringAccount, {
-          ...secret,
-          session: exportSmbcDirectSession(smbcProfile),
-        } satisfies StoredSmbcDirectSecret)
-      return result
+      return withProfileLock(profile.id, async () => {
+        const secret = await readSecret<StoredSmbcDirectSecret>(profile.keyringAccount)
+        if (!secret.session)
+          return {
+            ok: false,
+            message:
+              'SMBC Direct session is not available; reconnect and finish two-factor authentication',
+            reason: '2FA_REQUIRED' as const,
+          }
+        const smbcProfile = await importSmbcDirectSession(secret.session as SmbcDirectSession)
+        const result = serializableAvailability(
+          await timed(
+            createSmbcDirectProvider(smbcProfile).checkAvailability(),
+            `SMBC Direct (${profile.label})`,
+          ),
+        )
+        if (result.ok)
+          await saveSecret(profile.keyringAccount, {
+            ...secret,
+            session: exportSmbcDirectSession(smbcProfile),
+          } satisfies StoredSmbcDirectSecret)
+        return result
+      })
     }
     if (profile.provider === 'mobilesuica') {
       const secret = await readSecret<StoredMobileSuicaSecret>(profile.keyringAccount)
@@ -105,6 +146,23 @@ export const checkProfileAvailability = async (
           `Mobile Suica (${profile.label})`,
         ),
       )
+      if (!result.ok && result.reason === 'CAPTCHA_REQIRED' && config.mobileSuicaBaseUrl) {
+        try {
+          const automaticResult = await automaticMobileSuicaAvailability(
+            secret,
+            config.mobileSuicaBaseUrl,
+            profile.label,
+          )
+          if (automaticResult.ok)
+            await saveSecret(profile.keyringAccount, {
+              ...secret,
+              session: secret.session,
+            } satisfies StoredMobileSuicaSecret)
+          return automaticResult
+        } catch (cause) {
+          return { ok: false, message: message(cause), reason: 'CAPTCHA_REQIRED' }
+        }
+      }
       if (result.ok)
         await saveSecret(profile.keyringAccount, {
           ...secret,

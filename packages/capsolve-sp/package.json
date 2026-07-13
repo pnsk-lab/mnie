@@ -1,0 +1,19 @@
+{
+  "name": "@repo/capsolve-sp",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "onnxruntime-node": "^1.22.0",
+    "sharp": "^0.34.3"
+  },
+  "devDependencies": {
+    "@repo/tsconfig": "workspace:*",
+    "typescript": "^5"
+  }
+}

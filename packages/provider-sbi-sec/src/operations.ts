@@ -42,6 +42,7 @@ import type {
   TradeSide,
   Watchlist,
 } from './types'
+import type { Transaction } from '@mnie/types'
 
 export interface PagingOptions {
   /** Start index for the result list. Defaults to the first item when omitted. */
@@ -794,6 +795,11 @@ export interface SbiClientMethodOrders {
   exchange: SbiClientMethodExchangeOrder
 }
 
+export interface SbiClientMethodBanking {
+  /** Fetches yen deposit/withdrawal detail history from the main site. */
+  detailHistory(): Promise<Transaction[]>
+}
+
 export interface SbiClientMethods {
   /** Session-related methods. */
   session: SbiClientMethodSession
@@ -807,6 +813,8 @@ export interface SbiClientMethods {
   watchlist: SbiClientMethodWatchlist
   /** Methods for order history, estimates, live placement, and corrections. */
   orders: SbiClientMethodOrders
+  /** Banking detail history methods. */
+  banking: SbiClientMethodBanking
 }
 
 /** A direct SBI client or an authenticated Mnie profile. */

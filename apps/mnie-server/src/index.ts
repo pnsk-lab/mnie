@@ -1,8 +1,10 @@
 import { loadConfig } from './config'
 import { createDb } from './db'
 import { createServerApp } from './app'
+import { assertCaptchaModel } from '@repo/capsolve-sp'
 
 const config = loadConfig()
+await assertCaptchaModel()
 const db = createDb(config.databasePath)
 const { app, websocket } = createServerApp(db, config)
 

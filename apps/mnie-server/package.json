@@ -23,6 +23,7 @@
     "@mnie/types": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@napi-rs/keyring": "^1.2.0",
+    "@repo/capsolve-sp": "workspace:*",
     "@simplewebauthn/server": "^13.1.2",
     "drizzle-orm": "^0.44.2",
     "hono": "^4.8.3",

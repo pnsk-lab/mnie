@@ -341,6 +341,34 @@ const tableRows = (html: string) =>
     ),
   )
 
+const normalizeHistoryDates = (records: ParsedHistoryTableRow[], now = new Date()) => {
+  let inferredYear = now.getFullYear()
+  let previousTime = Number.POSITIVE_INFINITY
+  return records.map((record) => {
+    const match = record.date.trim().match(/^(?:(\d{4})[年/.-])?(\d{1,2})[月/.-](\d{1,2})日?$/)
+    if (!match) throw new Error(`unsupported Mobile Suica history date: ${record.date}`)
+    const explicitYear = match[1] ? Number(match[1]) : undefined
+    const month = Number(match[2])
+    const day = Number(match[3])
+    let year = explicitYear ?? inferredYear
+    let time = Date.UTC(year, month - 1, day)
+    if (new Date(time).getUTCMonth() !== month - 1 || new Date(time).getUTCDate() !== day) {
+      throw new Error(`invalid Mobile Suica history date: ${record.date}`)
+    }
+    if (!explicitYear) {
+      const tomorrow = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+      while (time > Math.min(previousTime, tomorrow)) {
+        year -= 1
+        time = Date.UTC(year, month - 1, day)
+      }
+      inferredYear = year
+    }
+    previousTime = time
+    const isoDate = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T00:00:00+09:00`
+    return { ...record, date: isoDate }
+  })
+}
+
 const parseMobileSuicaUsageHistory = (html: string): ParsedHistoryTableRow[] => {
   const records: ParsedHistoryTableRow[] = []
   for (const cells of tableRows(html)) {
@@ -381,7 +409,7 @@ const parseMobileSuicaUsageHistory = (html: string): ParsedHistoryTableRow[] => 
     if (hasLoginButton) throw new MobileSuicaCaptchaRequiredError('logged out, CAPTCHA is needed')
     throw new Error('usage history page did not include any usage rows')
   }
-  return records
+  return normalizeHistoryDates(records)
 }
 
 const yenAmount = (value: number | null) =>

@@ -23,6 +23,7 @@ import { accountProfiles, assetValuations, historySyncs, historyTransactions } f
 import type { StoredMobileSuicaSecret, StoredSmbcDirectSecret } from './routes/admin'
 import { connectSbi } from './rpc/sbi-session'
 import { readSecret, saveSecret } from './security/keyring'
+import { withProfileLock } from './profile-lock'
 
 const refreshIntervalMs = 5 * 60 * 60_000
 const defaultRangeMs = 30 * 24 * 60 * 60_000
@@ -143,10 +144,17 @@ export const listHistory = async (
   const profiles = (
     await db.select().from(accountProfiles).orderBy(accountProfiles.createdAt)
   ).filter((profile) => !request.profileIds || request.profileIds.includes(profile.id))
+  const errors: Array<{ profileId: string; providerId: string; message: string }> = []
 
   if (kinds.has('transaction')) {
     for (const profile of profiles.filter((item) => item.provider !== 'paypay-bank')) {
-      await syncTransactions(db, config, profile, from, to)
+      try {
+        await withProfileLock(profile.id, () => syncTransactions(db, config, profile, from, to))
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause)
+        errors.push({ profileId: profile.id, providerId: profile.provider, message })
+        console.error(`History synchronization failed for ${profile.id}:`, cause)
+      }
     }
   }
 
@@ -214,5 +222,5 @@ export const listHistory = async (
   }
   items.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))
   const limit = request.limit ?? items.length
-  return { items: items.slice(0, limit) }
+  return { items: items.slice(0, limit), errors }
 }

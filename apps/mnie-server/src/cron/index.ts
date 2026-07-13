@@ -17,6 +17,7 @@ import { readSecret, saveSecret } from '../security/keyring'
 import { checkProfileAvailability, listProfiles, type CachedAvailability } from '../availability'
 import type { ServerConfig } from '../config'
 import { fetchAssetValuation, saveAssetValuation } from '../assets'
+import { withProfileLock } from '../profile-lock'
 
 const smbcDirectSchedule = '*/5 * * * *'
 const mobileSuicaSchedule = '*/5 * * * *'
@@ -143,27 +144,29 @@ export const createCronSystem = (db: Db, config: ServerConfig): CronSystem => {
         .where(eq(accountProfiles.provider, 'smbc-direct'))
       let failed = false
       for (const profile of profiles) {
-        const secret = await readSecret<StoredSmbcDirectSecret>(profile.keyringAccount)
-        if (!secret.session) continue
-        const session = secret.session as SmbcDirectSession
-        const smbcProfile = await importSmbcDirectSession(session)
-        const availability = await createSmbcDirectProvider(smbcProfile).checkAvailability()
-        if (!availability.ok) {
-          failed = true
-          status.lastError = errorMessage(availability.message)
-          if (availability.reason === 'UNKNOWN') {
-            console.error('SMBC Direct session cron failed:', availability.message)
+        await withProfileLock(profile.id, async () => {
+          const secret = await readSecret<StoredSmbcDirectSecret>(profile.keyringAccount)
+          if (!secret.session) return
+          const session = secret.session as SmbcDirectSession
+          const smbcProfile = await importSmbcDirectSession(session)
+          const availability = await createSmbcDirectProvider(smbcProfile).checkAvailability()
+          if (!availability.ok) {
+            failed = true
+            status.lastError = errorMessage(availability.message)
+            if (availability.reason === 'UNKNOWN') {
+              console.error('SMBC Direct session cron failed:', availability.message)
+            }
+            return
           }
-          continue
-        }
-        await saveSecret(profile.keyringAccount, {
-          ...secret,
-          session: exportSmbcDirectSession(smbcProfile),
-        } satisfies StoredSmbcDirectSecret)
-        await db
-          .update(accountProfiles)
-          .set({ updatedAt: new Date() })
-          .where(eq(accountProfiles.id, profile.id))
+          await saveSecret(profile.keyringAccount, {
+            ...secret,
+            session: exportSmbcDirectSession(smbcProfile),
+          } satisfies StoredSmbcDirectSecret)
+          await db
+            .update(accountProfiles)
+            .set({ updatedAt: new Date() })
+            .where(eq(accountProfiles.id, profile.id))
+        })
       }
       if (!failed) status.lastSuccessAt = new Date()
     } catch (cause) {

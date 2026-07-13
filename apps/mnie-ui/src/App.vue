@@ -166,6 +166,7 @@ const {
   stockAssetRatio,
   cashAssetRatio,
   otherAssetBreakdown,
+  assetHistory,
   hasQuote,
   selectStock,
   selectStockByCode,
@@ -295,6 +296,7 @@ onUnmounted(() => {
           :stock-asset-ratio="stockAssetRatio"
           :cash-asset-ratio="cashAssetRatio"
           :other-asset-breakdown="otherAssetBreakdown"
+          :asset-history="assetHistory"
           :positions="positions"
           :recent-orders="recentOrders"
           :canceling-order-key="cancelingOrderKey"

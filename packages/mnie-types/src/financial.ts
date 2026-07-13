@@ -207,6 +207,16 @@ export type HistoryItem =
   | { kind: 'valuation'; occurredAt: string; profileId?: string; valuation: AssetValuation }
   | { kind: 'snapshot'; occurredAt: string; profileId?: string; snapshot: AssetSnapshot }
 
+export interface HistoryListError {
+  profileId: string
+  providerId: string
+  message: string
+}
+
+export interface HistoryListResult extends Page<HistoryItem> {
+  errors: HistoryListError[]
+}
+
 export interface Page<Item> {
   items: Item[]
   nextCursor?: string
@@ -352,7 +362,7 @@ export type WorkspaceOperations = {
   'profiles.list': OperationDefinition<{}, ProfileDescriptor[]>
   'history.list': OperationDefinition<
     HistoryListRequest & { profileIds?: string[] },
-    Page<HistoryItem>
+    HistoryListResult
   >
   'portfolio.valuation.get': OperationDefinition<
     { baseCurrency: string; profileIds?: string[] },

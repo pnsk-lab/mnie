@@ -34,7 +34,7 @@ const requestCaptcha = async () => {
           })
     challengeId.value = challenge.id
     captchaImage.value = challenge.imageDataUrl
-    captchaAnswer.value = ''
+    captchaAnswer.value = challenge.suggestedAnswer
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'CAPTCHA を取得できませんでした'
   } finally {

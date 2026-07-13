@@ -588,7 +588,9 @@ const createProfile = (
       )
       const detailUrl = detailResponse.url
       const detailHtml = await responseText(detailResponse, 'account detail request')
-      const detailForm = formFields(detailHtml, 'AIFCDT3')
+      assertActiveSessionPage(detailHtml)
+      const detailFormName = /\bname=["']AIFCDTL["']/i.test(detailHtml) ? 'AIFCDTL' : 'AIFCDT3'
+      const detailForm = formFields(detailHtml, detailFormName)
       const url = new URL('/ib/ajax/accountinquiry/AIFCDT3Ajaxkikannshokai.smbc', context.baseURL)
       url.searchParams.set('_TOKEN', required(detailForm, '_TOKEN'))
       url.searchParams.set('_FORMID', required(detailForm, '_FORMID'))
@@ -608,7 +610,16 @@ const createProfile = (
         context.jar,
       )
       if (!response.ok) throw new Error(`transaction request failed: HTTP ${response.status}`)
-      const body: unknown = await response.json()
+      const responseBody = iconv.decode(Buffer.from(await response.arrayBuffer()), 'Shift_JIS')
+      let body: unknown
+      try {
+        body = JSON.parse(responseBody)
+      } catch {
+        const title = /<title[^>]*>([^<]*)<\/title>/i.exec(responseBody)?.[1]?.trim()
+        throw new Error(
+          `transaction response was not JSON: HTTP ${response.status}, content-type=${response.headers.get('content-type') ?? 'unknown'}, title=${title ?? 'unknown'}`,
+        )
+      }
       const result = body as {
         success?: unknown
         response?: {
@@ -618,7 +629,13 @@ const createProfile = (
         }
       }
       if (result.success !== true || !result.response || !Array.isArray(result.response.meisai)) {
-        throw new Error('transaction response was invalid')
+        const failure = body as { cause?: unknown; forward?: unknown; messageList?: unknown }
+        if (String(failure.cause).endsWith('.ServiceTimeCheckException')) {
+          throw new Error('SMBC Direct transaction history is unavailable outside service hours')
+        }
+        throw new Error(
+          `transaction response was rejected: cause=${String(failure.cause ?? '')}; forward=${String(failure.forward ?? '')}; messages=${JSON.stringify(failure.messageList ?? [])}`,
+        )
       }
       return {
         startDate,

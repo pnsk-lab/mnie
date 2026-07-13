@@ -225,7 +225,13 @@ const createProvider = (client: SbiClientMethods): FinancialProvider<SbiSecOpera
         if (input.kinds?.some((kind) => kind !== 'transaction')) {
           throw new Error('SBI Securities history.list supports transaction history only')
         }
-        const transactions = (await createProvider(client).invoke('transactions.list', input)).items
+        const [executions, yenDetails] = await Promise.all([
+          createProvider(client).invoke('transactions.list', { accountId: input.accountId }),
+          client.banking.detailHistory(),
+        ])
+        const transactions = [...executions.items, ...yenDetails].sort((left, right) =>
+          left.occurredAt.localeCompare(right.occurredAt),
+        )
         return {
           items: transactions.map((transaction) => ({
             kind: 'transaction' as const,

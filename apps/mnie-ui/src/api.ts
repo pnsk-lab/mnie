@@ -105,6 +105,12 @@ export interface HistoryItem {
   }
 }
 
+export interface HistoryListError {
+  profileId: string
+  providerId: string
+  message: string
+}
+
 export type ProfileAvailability =
   | { ok: true; checkedAt?: string }
   | {
@@ -127,6 +133,7 @@ export interface CronJob {
 export interface MobileSuicaTransaction {
   id: string
   type: string
+  direction: 'credit' | 'debit' | 'neutral'
   occurredAt: string
   description: string
   amount?: { kind: 'money'; money: { currency: string; value: string } }
@@ -241,7 +248,7 @@ export const listHistory = (
     limit?: number
   } = {},
 ) =>
-  request<{ items: HistoryItem[] }>('/admin/history', {
+  request<{ items: HistoryItem[]; errors: HistoryListError[] }>('/admin/history', {
     method: 'POST',
     body: JSON.stringify(input),
   })
@@ -304,15 +311,21 @@ export const createMobileSuicaCaptcha = (payload: {
   user: string
   password: string
 }) =>
-  request<{ id: string; imageDataUrl: string }>('/admin/mobilesuica/captcha', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
+  request<{ id: string; imageDataUrl: string; suggestedAnswer: string }>(
+    '/admin/mobilesuica/captcha',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  )
 
 export const createMobileSuicaReauthCaptcha = (profileId: string) =>
-  request<{ id: string; imageDataUrl: string }>(`/admin/mobilesuica/reauth/${profileId}/captcha`, {
-    method: 'POST',
-  })
+  request<{ id: string; imageDataUrl: string; suggestedAnswer: string }>(
+    `/admin/mobilesuica/reauth/${profileId}/captcha`,
+    {
+      method: 'POST',
+    },
+  )
 
 export const submitMobileSuicaCaptcha = (id: string, answer: string) =>
   request<{ profile: { id: string } }>(`/admin/mobilesuica/captcha/${id}`, {

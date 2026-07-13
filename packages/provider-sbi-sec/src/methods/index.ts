@@ -43,6 +43,7 @@ import type {
   RankingItem,
   SbiMethodError,
   MainSiteAuthCache,
+  MainSiteCookie,
   SbiSession,
   SbiTradeAuthenticationRequest,
   SignedTextValue,
@@ -52,6 +53,7 @@ import type {
   TradeSide,
   Watchlist,
 } from '../types'
+import type { Transaction } from '@mnie/types'
 import type {
   AccountPowerOptions,
   ActualDeliveryOrderPreOrderOptions,
@@ -97,6 +99,9 @@ import { domesticMarketToMts, isUsMarket, mtsMarketToDomestic } from '../markets
 import { createUsStockAdapter } from './us-stock'
 
 const COMM_GATE_PATH = '/mtsmobile/commgate'
+const MEMBER_SITE_ORIGIN = 'https://member.c.sbisec.co.jp'
+const MAIN_SITE_USER_AGENT =
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36'
 const MAIN_SITE_AUTH_CACHE_TTL_MS = 20 * 60 * 1000
 const ISSUE_SEARCH_PATH = '/api/jStockSearchGP.jsp'
 const ISSUE_SUGGEST_PATH = '/api/jStockSuggestGP.jsp'
@@ -465,6 +470,9 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
     },
     watchlist: {
       list: async () => parseWatchlists(await callMts(session, 'F1202', watchlistTrin())),
+    },
+    banking: {
+      detailHistory: async () => fetchYenDetailHistory(session),
     },
     orders: {
       inquiry: {
@@ -1286,6 +1294,227 @@ const exchangeSellMethod = (value: unknown) => {
 
 const stringValue = (value: unknown) => (value == null ? '' : String(value))
 
+interface YenDetailHistoryResponse {
+  depositRecordList?: Array<{
+    payDepDate?: string
+    payDepKbn?: string
+    detailKbn?: string
+    dispAbstract?: string
+    payAmount?: string
+    did?: number
+  }>
+}
+
+const parseYmd = (value: string) => {
+  const parts = value.split(/[/-]/).map((part) => Number(part))
+  if (parts.length !== 3 || parts.some((part) => !Number.isInteger(part))) {
+    throw new Error(`invalid SBI yen detail date: ${value}`)
+  }
+  const [year, month, day] = parts as [number, number, number]
+  return new Date(Date.UTC(year, month - 1, day))
+}
+
+const yenDetailHistoryCsrfTokenFromHtml = (html: string, responseUrl: string) => {
+  const token =
+    html.match(/<meta[^>]+name=["']_csrf["'][^>]+content=["']([^"']+)["']/i)?.[1] ??
+    html.match(/<input[^>]+name=["']_csrf["'][^>]+value=["']([^"']+)["']/i)?.[1] ??
+    html.match(/["']_csrf["']\s*:\s*["']([^"']+)["']/i)?.[1] ??
+    html.match(/csrfToken["']?\s*[:=]\s*["']([^"']+)["']/i)?.[1]
+  if (!token) {
+    throw new Error(
+      `SBI yen detail history page did not include a CSRF token (URL: ${responseUrl}, title: ${textFromTitle(html) ?? '(no title)'})`,
+    )
+  }
+  return token
+}
+
+const fetchYenDetailHistoryPage = async (session: SbiSession, auth: MainSiteAuthCache) => {
+  if (!auth.cookies) throw new Error('SBI main site session does not include scoped cookies')
+  const jar = auth.cookies.map((cookie) => ({ ...cookie }))
+  const siteLinkParam = await fetchMainSiteLinkParam(session)
+  const loginUrl = new URL('/ETGate/', auth.baseUrl)
+  for (const [key, value] of Object.entries(mainSiteAssetLoginParams(siteLinkParam))) {
+    loginUrl.searchParams.set(key, value)
+  }
+
+  const loginResponse = await fetch(loginUrl, {
+    headers: {
+      accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      cookie: cookieHeader(jar, loginUrl),
+      referer: auth.assetsUrl,
+      'user-agent': MAIN_SITE_USER_AGENT,
+    },
+    redirect: 'manual',
+  })
+  updateCookieJar(jar, loginResponse, loginUrl)
+  const loginLocation = loginResponse.headers.get('location')
+  let requestUrl: URL
+  let referer: string
+  if (loginLocation) {
+    requestUrl = new URL(loginLocation, loginUrl)
+    referer = loginUrl.toString()
+  } else {
+    const loginHtml = decodeShiftJis(Buffer.from(await loginResponse.arrayBuffer()))
+    if (!loginResponse.ok) {
+      throw new Error(
+        `SBI yen detail history ETGate login failed with HTTP ${loginResponse.status}`,
+      )
+    }
+    const loginForm = parseHtmlForm(loginHtml, loginUrl)
+    const switchResponse = await fetch(loginForm.action, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie: cookieHeader(jar, loginForm.action),
+        referer: loginUrl.toString(),
+        'user-agent': MAIN_SITE_USER_AGENT,
+      },
+      body: new URLSearchParams(loginForm.fields),
+      redirect: 'manual',
+    })
+    updateCookieJar(jar, switchResponse, loginForm.action)
+    requestUrl = responseLocationUrl(switchResponse, loginForm.action)
+    referer = loginForm.action.toString()
+  }
+
+  for (let redirectCount = 0; redirectCount < 10; redirectCount += 1) {
+    const response = await fetch(requestUrl, {
+      headers: {
+        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        cookie: cookieHeader(jar, requestUrl),
+        referer,
+        'user-agent': MAIN_SITE_USER_AGENT,
+      },
+      redirect: 'manual',
+    })
+    updateCookieJar(jar, response, requestUrl)
+    const location = response.headers.get('location')
+    if (!location) break
+    referer = requestUrl.toString()
+    requestUrl = new URL(location, requestUrl)
+  }
+
+  const entryUrl = new URL('/ETGate/', auth.baseUrl)
+  entryUrl.search = new URLSearchParams({
+    _ControlID: 'WPLETsmR001Control',
+    _PageID: 'WPLETsmR001Sdtl23',
+    _ActionID: 'NoActionID',
+    _DataStoreID: 'DSWPLETsmR001Control',
+    OutSide: 'on',
+    getFlg: 'on',
+    path: 'banking/yen/detail-history',
+  }).toString()
+
+  requestUrl = entryUrl
+  referer = auth.assetsUrl
+  for (let redirectCount = 0; redirectCount < 10; redirectCount += 1) {
+    const response = await fetch(requestUrl, {
+      headers: {
+        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        cookie: cookieHeader(jar, requestUrl),
+        referer,
+        'user-agent': MAIN_SITE_USER_AGENT,
+      },
+      redirect: 'manual',
+    })
+    updateCookieJar(jar, response, requestUrl)
+    const location = response.headers.get('location')
+    if (!location) return { response, cookieHeader: cookieHeader(jar, requestUrl) }
+    referer = requestUrl.toString()
+    requestUrl = new URL(location, requestUrl)
+  }
+  throw new Error('SBI yen detail history navigation exceeded redirect limit')
+}
+
+const fetchYenDetailHistory = async (session: SbiSession): Promise<Transaction[]> => {
+  const auth = await ensureMainSiteAuth(session)
+  const pageUrl = new URL('/banking/yen/detail-history', MEMBER_SITE_ORIGIN)
+  const { response: pageResponse, cookieHeader: bankingCookieHeader } =
+    await fetchYenDetailHistoryPage(session, auth)
+  const pageText = await pageResponse.text()
+  if (!pageResponse.ok) {
+    throw new Error(
+      `SBI yen detail history page failed with HTTP ${pageResponse.status}: ${pageText}`,
+    )
+  }
+  if (pageText.includes('臨時メンテナンス')) {
+    throw new Error('SBI yen detail history is unavailable during temporary maintenance')
+  }
+  const csrfToken = yenDetailHistoryCsrfTokenFromHtml(pageText, pageResponse.url)
+  const requestUrl = new URL('/banking/api/yen/detail/init', MEMBER_SITE_ORIGIN)
+  const response = await fetch(requestUrl, {
+    headers: {
+      accept: 'application/json, text/plain, */*',
+      cookie: bankingCookieHeader,
+      referer: pageUrl.toString(),
+      'user-agent': MAIN_SITE_USER_AGENT,
+      'x-csrf-token': csrfToken,
+    },
+  })
+  const text = await response.text()
+  const contentType = response.headers.get('content-type') ?? ''
+  if (!response.ok) {
+    throw new Error(`SBI yen detail history request failed with HTTP ${response.status}: ${text}`)
+  }
+  if (!contentType.includes('application/json')) {
+    throw new Error('SBI yen detail history request returned non-JSON response')
+  }
+  let body: YenDetailHistoryResponse
+  try {
+    body = JSON.parse(text) as YenDetailHistoryResponse
+  } catch {
+    throw new Error('SBI yen detail history response was not valid JSON')
+  }
+  const accountId = session.profile.accountNumber ?? session.profile.userId ?? 'primary'
+  return (body.depositRecordList ?? [])
+    .map((record): Transaction | null => {
+      if (!record.did || !record.payDepDate || !record.payAmount) return null
+      const occurredAt = parseYmd(record.payDepDate).toISOString()
+      const direction = record.payDepKbn === '入金' ? 'credit' : 'debit'
+      const amount = {
+        kind: 'money' as const,
+        money: { currency: 'JPY', value: record.payAmount },
+      }
+      const kind =
+        record.detailKbn?.includes('振替') || record.detailKbn?.includes('入出金')
+          ? 'transfer'
+          : direction === 'credit'
+            ? 'deposit'
+            : 'withdrawal'
+      const description =
+        record.dispAbstract ?? record.detailKbn ?? record.payDepKbn ?? 'SBI detail'
+      const base = {
+        id: `sbi-yen-detail:${record.did}`,
+        accountId,
+        status: 'posted' as const,
+        amount,
+        occurredAt,
+        description,
+      }
+      if (kind === 'transfer') {
+        return {
+          ...base,
+          kind: 'transfer' as const,
+          direction: 'credit' as const,
+          counterparty: description,
+        } satisfies Transaction
+      }
+      if (kind === 'deposit') {
+        return {
+          ...base,
+          kind: 'deposit' as const,
+          direction: 'credit' as const,
+        } satisfies Transaction
+      }
+      return {
+        ...base,
+        kind: 'withdrawal' as const,
+        direction: 'debit' as const,
+      } satisfies Transaction
+    })
+    .filter((transaction): transaction is Transaction => transaction !== null)
+}
+
 const fetchCurrentAccountAssets = async (
   session: SbiSession,
   retryWithFreshAuth = true,
@@ -1352,7 +1581,7 @@ const createMainSiteAuth = async (session: SbiSession): Promise<MainSiteAuthCach
   const etGatePath = mainSite.etGatePath
   if (!etGatePath) throw new Error('SBI_MAIN_SITE_ET_GATE_PATH is required')
 
-  const jar = new Map<string, string>()
+  const jar: MainSiteCookie[] = []
   const siteLinkParam = await fetchMainSiteLinkParam(session)
   const etGateUrl = new URL(etGatePath, baseUrl)
   for (const [key, value] of Object.entries(mainSiteAssetLoginParams(siteLinkParam))) {
@@ -1363,7 +1592,7 @@ const createMainSiteAuth = async (session: SbiSession): Promise<MainSiteAuthCach
     headers: { accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
     redirect: 'manual',
   })
-  updateCookieJar(jar, etGateResponse)
+  updateCookieJar(jar, etGateResponse, etGateUrl)
   const etGateHtml = decodeShiftJis(Buffer.from(await etGateResponse.arrayBuffer()))
   if (!etGateResponse.ok) {
     throw new Error(`main site ETGate request failed with HTTP ${etGateResponse.status}`)
@@ -1374,27 +1603,27 @@ const createMainSiteAuth = async (session: SbiSession): Promise<MainSiteAuthCach
     method: 'POST',
     headers: {
       'content-type': 'application/x-www-form-urlencoded',
-      cookie: cookieHeader(jar),
+      cookie: cookieHeader(jar, form.action),
       referer: etGateUrl.toString(),
     },
     body: new URLSearchParams(form.fields),
     redirect: 'manual',
   })
-  updateCookieJar(jar, switchResponse)
+  updateCookieJar(jar, switchResponse, form.action)
   const ssoUrl = responseLocationUrl(switchResponse, form.action)
 
   const ssoResponse = await fetch(ssoUrl, {
-    headers: { cookie: cookieHeader(jar), referer: form.action.toString() },
+    headers: { cookie: cookieHeader(jar, ssoUrl), referer: form.action.toString() },
     redirect: 'manual',
   })
-  updateCookieJar(jar, ssoResponse)
+  updateCookieJar(jar, ssoResponse, ssoUrl)
   const assetsUrl = responseLocationUrl(ssoResponse, ssoUrl)
 
   const assetsResponse = await fetch(assetsUrl, {
-    headers: { cookie: cookieHeader(jar), referer: ssoUrl.toString() },
+    headers: { cookie: cookieHeader(jar, assetsUrl), referer: ssoUrl.toString() },
     redirect: 'manual',
   })
-  updateCookieJar(jar, assetsResponse)
+  updateCookieJar(jar, assetsResponse, assetsUrl)
   if (!assetsResponse.ok) {
     throw new Error(`main site assets page request failed with HTTP ${assetsResponse.status}`)
   }
@@ -1402,7 +1631,8 @@ const createMainSiteAuth = async (session: SbiSession): Promise<MainSiteAuthCach
   return {
     baseUrl,
     assetsUrl: assetsUrl.toString(),
-    cookieHeader: cookieHeader(jar),
+    cookieHeader: cookieHeader(jar, assetsUrl),
+    cookies: jar,
     authenticatedAt: new Date().toISOString(),
   }
 }
@@ -1469,14 +1699,41 @@ const decodeHtmlAttribute = (value: string) =>
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
 
-const updateCookieJar = (jar: Map<string, string>, response: Response) => {
+const updateCookieJar = (jar: MainSiteCookie[], response: Response, requestUrl: URL) => {
   for (const header of setCookieHeaders(response.headers)) {
-    const nameValue = header.split(';', 1)[0]
+    const parts = header.split(';').map((part) => part.trim())
+    const nameValue = parts[0]
     if (!nameValue) continue
     const separator = nameValue.indexOf('=')
     if (separator <= 0) continue
-    jar.set(nameValue.slice(0, separator), nameValue.slice(separator + 1))
+    const attributes = new Map<string, string>()
+    for (const part of parts.slice(1)) {
+      const attributeSeparator = part.indexOf('=')
+      const name = (attributeSeparator < 0 ? part : part.slice(0, attributeSeparator)).toLowerCase()
+      attributes.set(name, attributeSeparator < 0 ? '' : part.slice(attributeSeparator + 1))
+    }
+    const domainAttribute = attributes.get('domain')?.replace(/^\./, '').toLowerCase()
+    const cookie: MainSiteCookie = {
+      name: nameValue.slice(0, separator),
+      value: nameValue.slice(separator + 1),
+      domain: domainAttribute ?? requestUrl.hostname.toLowerCase(),
+      path: attributes.get('path') ?? defaultCookiePath(requestUrl.pathname),
+      hostOnly: !domainAttribute,
+      secure: attributes.has('secure'),
+    }
+    const existing = jar.findIndex(
+      (item) =>
+        item.name === cookie.name && item.domain === cookie.domain && item.path === cookie.path,
+    )
+    if (existing >= 0) jar.splice(existing, 1)
+    if (cookie.value && attributes.get('max-age') !== '0') jar.push(cookie)
   }
+}
+
+const defaultCookiePath = (pathname: string) => {
+  if (!pathname.startsWith('/') || pathname === '/') return '/'
+  const lastSlash = pathname.lastIndexOf('/')
+  return lastSlash <= 0 ? '/' : pathname.slice(0, lastSlash)
 }
 
 const setCookieHeaders = (headers: Headers) => {
@@ -1488,8 +1745,21 @@ const setCookieHeaders = (headers: Headers) => {
   return header.split(/,(?=\s*[^;,]+=)/g)
 }
 
-const cookieHeader = (jar: Map<string, string>) =>
-  [...jar.entries()].map(([name, value]) => `${name}=${value}`).join('; ')
+const cookieHeader = (jar: MainSiteCookie[], requestUrl: URL) =>
+  jar
+    .filter((cookie) => {
+      const hostname = requestUrl.hostname.toLowerCase()
+      const domainMatches = cookie.hostOnly
+        ? hostname === cookie.domain
+        : hostname === cookie.domain || hostname.endsWith(`.${cookie.domain}`)
+      const pathMatches =
+        requestUrl.pathname === cookie.path ||
+        requestUrl.pathname.startsWith(cookie.path.endsWith('/') ? cookie.path : `${cookie.path}/`)
+      return domainMatches && pathMatches && (!cookie.secure || requestUrl.protocol === 'https:')
+    })
+    .sort((left, right) => right.path.length - left.path.length)
+    .map(({ name, value }) => `${name}=${value}`)
+    .join('; ')
 
 const parseAccountAssetsValuations = (body: unknown): AccountAssetsValuations => {
   const object = record(body, 'main site assets valuation response')

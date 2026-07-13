@@ -41,7 +41,9 @@ ENV MNIE_KEYRING_SQLITE_PATH=/app/data/mnie-app.keyring.sqlite
 WORKDIR /app
 COPY --from=build /app/apps/mnie-app/dist ./apps/mnie-app/dist
 COPY --from=build /app/apps/mnie-ui/dist ./apps/mnie-ui/dist
+COPY --from=build /app/models/model.onnx ./models/model.onnx
 COPY --from=build /keyring-node-modules ./node_modules
 WORKDIR /app/apps/mnie-app/dist
+ENV CAPSOLVE_MODEL_PATH=/app/models/model.onnx
 EXPOSE 8787
 CMD ["bun", "index.js"]

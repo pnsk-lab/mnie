@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { arc, pie } from 'd3'
-import { AnimatePresence } from 'motion-v'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { arc, area, extent, pie, scaleLinear, scaleTime } from 'd3'
+import { AnimatePresence, motion } from 'motion-v'
 import { ArrowLeft, Ban, FileText, Plug } from 'lucide-vue-next'
 import Spinner from '../../components/ui/Spinner.vue'
 import UiButton from '../../components/ui/UiButton.vue'
@@ -35,6 +35,7 @@ const props = defineProps<{
     value: number
     ratio: number
   }>
+  assetHistory: Array<{ at: string; profileId: string; label: string; value: number }>
   positions: Position[]
   recentOrders: OrderRow[]
   cancelingOrderKey: string
@@ -60,6 +61,10 @@ type AssetSlice = {
 }
 
 const profileColors = ['#c29a62', '#9d8cac', '#9fac8d', '#b77f6b', '#aa8999']
+const historyProfileColor = (profileId: string, index: number) =>
+  profileId.startsWith('sbi')
+    ? '#817f9f'
+    : (profileColors[index % profileColors.length] ?? '#9aa0a9')
 const profileSlices = computed<AssetSlice[]>(() =>
   [
     {
@@ -165,6 +170,138 @@ const chartArcs = computed(() => {
 const sliceRatio = (value: number) =>
   props.totalAssetValue > 0 ? (value / props.totalAssetValue) * 100 : 0
 
+const historySvg = ref<SVGSVGElement | null>(null)
+const historyViewWidth = ref(380)
+const historyViewHeight = ref(190)
+const historyChartBottom = computed(() => historyViewHeight.value - 24)
+let historyResizeObserver: ResizeObserver | undefined
+onMounted(() => {
+  historyResizeObserver = new ResizeObserver(([entry]) => {
+    if (!entry || entry.contentRect.height <= 0) return
+    historyViewWidth.value = entry.contentRect.width
+    historyViewHeight.value = entry.contentRect.height
+  })
+  if (historySvg.value) historyResizeObserver.observe(historySvg.value)
+})
+watch(historySvg, (svg) => {
+  if (svg && historyResizeObserver) historyResizeObserver.observe(svg)
+})
+onBeforeUnmount(() => historyResizeObserver?.disconnect())
+
+const historyChart = computed(() => {
+  const events = props.assetHistory
+    .map((item) => ({ ...item, date: new Date(item.at) }))
+    .filter((item) => Number.isFinite(item.date.getTime()) && Number.isFinite(item.value))
+    .sort((a, b) => a.date.getTime() - b.date.getTime())
+  const providers = [...new Map(events.map((item) => [item.profileId, item.label])).entries()]
+  const latest = new Map<string, number>()
+  const points = events.map((event) => {
+    latest.set(event.profileId, event.value)
+    const breakdown = providers.map(([profileId, label], index) => ({
+      profileId,
+      label,
+      color: historyProfileColor(profileId, index),
+      value: latest.get(profileId) ?? 0,
+    }))
+    return {
+      date: event.date,
+      value: breakdown.reduce((sum, item) => sum + item.value, 0),
+      breakdown,
+    }
+  })
+  if (!points.length)
+    return {
+      layers: [],
+      first: 0,
+      last: 0,
+      min: 0,
+      max: 0,
+      points: [],
+      xTicks: [],
+      yTicks: [],
+    }
+  const dates = extent(points, (item) => item.date)
+  const values = extent(points, (item) => item.value)
+  const firstDate = dates[0] ?? points[0]!.date
+  const lastDate = dates[1] ?? firstDate
+  const min = 0
+  const max = values[1] ?? min
+  const padding = Math.max(max * 0.05, 1)
+  const x = scaleTime()
+    .domain([firstDate, lastDate])
+    .range([68, historyViewWidth.value - 12])
+  const y = scaleLinear()
+    .domain([min, max + padding])
+    .range([historyChartBottom.value, 12])
+  const layers = providers.map(([profileId, label], providerIndex) => {
+    const values = points.map((point) => {
+      const y0 = point.breakdown.slice(0, providerIndex).reduce((sum, item) => sum + item.value, 0)
+      const value = point.breakdown[providerIndex]?.value ?? 0
+      return { date: point.date, y0, y1: y0 + value }
+    })
+    return {
+      profileId,
+      label,
+      color: historyProfileColor(profileId, providerIndex),
+      path:
+        area<(typeof values)[number]>()
+          .x((item) => x(item.date))
+          .y0((item) => y(item.y0))
+          .y1((item) => y(item.y1))(values) ?? '',
+    }
+  })
+  return {
+    layers,
+    first: points[0]?.value ?? 0,
+    last: points.at(-1)?.value ?? 0,
+    min,
+    max,
+    points: points.map((item) => ({
+      ...item,
+      x: x(item.date),
+      y: y(item.value),
+    })),
+    yTicks: y.ticks(4).map((value) => ({ value, y: y(value) })),
+    xTicks: x.ticks(5).map((value) => ({ value, x: x(value) })),
+  }
+})
+const hoveredHistoryIndex = ref<number | null>(null)
+const hoveredHistoryPoint = computed(() =>
+  hoveredHistoryIndex.value == null
+    ? null
+    : (historyChart.value.points[hoveredHistoryIndex.value] ?? null),
+)
+const showHistoryPoint = (event: MouseEvent) => {
+  const bounds = (event.currentTarget as SVGSVGElement).getBoundingClientRect()
+  const x = ((event.clientX - bounds.left) / bounds.width) * historyViewWidth.value
+  let nearestIndex = 0
+  let nearestDistance = Number.POSITIVE_INFINITY
+  historyChart.value.points.forEach((point, index) => {
+    const distance = Math.abs(point.x - x)
+    if (distance >= nearestDistance) return
+    nearestDistance = distance
+    nearestIndex = index
+  })
+  hoveredHistoryIndex.value = nearestIndex
+}
+const historyDate = (date: Date) =>
+  new Intl.DateTimeFormat('ja-JP', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+const historyAxisDate = (date: Date) => {
+  const points = historyChart.value.points
+  const range = (points.at(-1)?.date.getTime() ?? 0) - (points[0]?.date.getTime() ?? 0)
+  return new Intl.DateTimeFormat(
+    'ja-JP',
+    range < 2 * 24 * 60 * 60_000
+      ? { hour: '2-digit', minute: '2-digit' }
+      : { month: 'numeric', day: 'numeric' },
+  ).format(date)
+}
+
 const usMarkets = new Set(['XNAS', 'XNYS', 'ARCX'])
 const isUsMarket = (market: string) => usMarkets.has(market)
 const canCancel = (order: OrderRow) =>
@@ -242,9 +379,8 @@ const confirmCancel = () => {
 <template>
   <section :class="ui.dashboardGrid">
     <article :class="ui.assetOverviewPanel">
-      <div :class="ui.assetBreakdownPanel">
-        <span :class="ui.assetBreakdownTitle">内訳</span>
-        <div class="relative mx-auto aspect-square w-full max-w-[19rem]">
+      <div :class="[ui.assetBreakdownPanel, 'h-full max-h-[24rem] sm:col-span-1']">
+        <div class="relative mx-auto aspect-square w-full max-w-[24rem]">
           <svg
             viewBox="0 0 300 300"
             class="h-full w-full overflow-visible"
@@ -308,59 +444,145 @@ const confirmCancel = () => {
           </div>
         </div>
       </div>
-      <div :class="ui.assetBreakdownPanel">
-        <span :class="ui.assetBreakdownTitle">内訳</span>
-        <div :class="ui.assetBreakdownRows">
-          <strong class="text-sm font-black text-[#e3e3e9]">SBI証券</strong>
-          <div :class="ui.assetBreakdownRow">
-            <span :class="ui.assetBreakdownLabel">
-              <i :class="[ui.assetBreakdownSwatch, ui.assetBreakdownSwatchStocks]"></i>
-              株式
-            </span>
-            <span :class="ui.assetBreakdownMeta">
-              <strong :class="ui.assetBreakdownAmount">
-                <template v-if="!showPortfolioSpinner">{{
-                  currency(holdingsMarketValue)
-                }}</template>
-                <Spinner v-else size="sm" />
-              </strong>
-              <small :class="ui.assetBreakdownRatio">
-                <template v-if="!showPortfolioSpinner">{{ stockAssetRatio.toFixed(1) }}%</template>
-                <Spinner v-else size="sm" />
-              </small>
-            </span>
-          </div>
-          <div :class="ui.assetBreakdownRow">
-            <span :class="ui.assetBreakdownLabel">
-              <i :class="[ui.assetBreakdownSwatch, ui.assetBreakdownSwatchCash]"></i>
-              余力
-            </span>
-            <span :class="ui.assetBreakdownMeta">
-              <strong :class="ui.assetBreakdownAmount">
-                <template v-if="!showPortfolioSpinner">{{ currency(buyingPower) }}</template>
-                <Spinner v-else size="sm" />
-              </strong>
-              <small :class="ui.assetBreakdownRatio">
-                <template v-if="!showPortfolioSpinner">{{ cashAssetRatio.toFixed(1) }}%</template>
-                <Spinner v-else size="sm" />
-              </small>
-            </span>
-          </div>
-          <div
-            v-for="item in otherAssetBreakdown"
-            :key="item.profileId"
-            class="mt-2 grid gap-2 border-t border-[#33383f] pt-3"
+      <div :class="[ui.assetBreakdownPanel, 'h-full max-h-[24rem] w-full sm:col-span-2']">
+        <div v-if="historyChart.points.length" class="relative h-full min-h-48 w-full">
+          <svg
+            ref="historySvg"
+            :viewBox="`0 0 ${historyViewWidth} ${historyViewHeight}`"
+            class="h-full max-h-[24rem] min-h-48 w-full overflow-visible"
+            role="img"
+            aria-label="過去30日間の総資産推移"
+            tabindex="0"
+            @mousemove="showHistoryPoint"
+            @mouseleave="hoveredHistoryIndex = null"
+            @focus="hoveredHistoryIndex = historyChart.points.length - 1"
+            @blur="hoveredHistoryIndex = null"
           >
-            <strong class="text-sm font-black text-[#e3e3e9]">{{ item.label }}</strong>
-            <div :class="ui.assetBreakdownRow">
-              <span :class="ui.assetBreakdownLabel">残高</span>
-              <span :class="ui.assetBreakdownMeta">
-                <strong :class="ui.assetBreakdownAmount">{{ currency(item.value) }}</strong>
-                <small :class="ui.assetBreakdownRatio">{{ item.ratio.toFixed(1) }}%</small>
+            <g v-for="tick in historyChart.yTicks" :key="tick.value">
+              <line
+                x1="68"
+                :y1="tick.y"
+                :x2="historyViewWidth - 12"
+                :y2="tick.y"
+                stroke="#33383f"
+                stroke-dasharray="3 4"
+              />
+              <text
+                x="60"
+                :y="tick.y"
+                fill="#8f949d"
+                class="text-sm"
+                font-weight="600"
+                text-anchor="end"
+                dominant-baseline="middle"
+              >
+                {{ currency(tick.value) }}
+              </text>
+            </g>
+            <line x1="68" y1="12" x2="68" :y2="historyChartBottom" stroke="#59616c" />
+            <line
+              x1="68"
+              :y1="historyChartBottom"
+              :x2="historyViewWidth - 12"
+              :y2="historyChartBottom"
+              stroke="#59616c"
+            />
+            <g v-for="tick in historyChart.xTicks" :key="tick.value.getTime()">
+              <line
+                :x1="tick.x"
+                y1="12"
+                :x2="tick.x"
+                :y2="historyChartBottom"
+                stroke="#33383f"
+                stroke-dasharray="3 4"
+              />
+              <line
+                :x1="tick.x"
+                :y1="historyChartBottom"
+                :x2="tick.x"
+                :y2="historyChartBottom + 4"
+                stroke="#59616c"
+              />
+              <text
+                :x="tick.x"
+                :y="historyViewHeight - 4"
+                fill="#8f949d"
+                class="text-sm"
+                font-weight="600"
+                text-anchor="middle"
+              >
+                {{ historyAxisDate(tick.value) }}
+              </text>
+            </g>
+            <path
+              v-for="layer in historyChart.layers"
+              :key="layer.profileId"
+              :d="layer.path"
+              :fill="layer.color"
+              fill-opacity="0.72"
+              :aria-label="layer.label"
+            />
+            <g v-if="hoveredHistoryPoint" class="pointer-events-none">
+              <line
+                :x1="hoveredHistoryPoint.x"
+                y1="12"
+                :x2="hoveredHistoryPoint.x"
+                :y2="historyChartBottom"
+                stroke="#59616c"
+                stroke-dasharray="4 4"
+              />
+              <circle
+                :cx="hoveredHistoryPoint.x"
+                :cy="hoveredHistoryPoint.y"
+                r="5"
+                fill="#a8c7fa"
+                stroke="#1b1f24"
+                stroke-width="3"
+              />
+            </g>
+          </svg>
+          <AnimatePresence>
+            <motion.div
+              v-if="hoveredHistoryPoint"
+              key="asset-history-tooltip"
+              class="pointer-events-none absolute rounded-xl border border-[#3b424b] bg-[#111418]/95 px-3 py-2 shadow-xl"
+              :style="{
+                left: `${Math.min(
+                  Math.max((hoveredHistoryPoint.x / historyViewWidth) * 100, 18),
+                  82,
+                )}%`,
+                top: '5.5rem',
+              }"
+              :initial="{ opacity: 0, x: '-50%', y: 6, scale: 0.96 }"
+              :animate="{ opacity: 1, x: '-50%', y: 0, scale: 1 }"
+              :exit="{ opacity: 0, x: '-50%', y: 4, scale: 0.97 }"
+              :transition="{ duration: 0.16, ease: 'easeOut' }"
+            >
+              <strong class="block whitespace-nowrap text-sm text-[#e3e3e9]">{{
+                currency(hoveredHistoryPoint.value)
+              }}</strong>
+              <small class="block whitespace-nowrap text-[#9aa0a9]">{{
+                historyDate(hoveredHistoryPoint.date)
+              }}</small>
+              <span
+                v-for="item in hoveredHistoryPoint.breakdown.filter((entry) => entry.value > 0)"
+                :key="item.profileId"
+                class="mt-1 flex min-w-36 items-center justify-between gap-4 text-xs"
+              >
+                <span class="inline-flex items-center gap-2 text-[#c3c7cf]">
+                  <i
+                    class="size-2 shrink-0 rounded-full"
+                    :style="{ backgroundColor: item.color }"
+                    aria-hidden="true"
+                  ></i>
+                  {{ item.label }}
+                </span>
+                <strong class="text-[#e3e3e9]">{{ currency(item.value) }}</strong>
               </span>
-            </div>
-          </div>
+            </motion.div>
+          </AnimatePresence>
         </div>
+        <div v-else :class="ui.emptyState"><span :class="ui.muted">履歴がありません</span></div>
       </div>
     </article>
 

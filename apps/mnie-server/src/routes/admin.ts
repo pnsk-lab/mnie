@@ -34,6 +34,7 @@ import { readSecret } from '../security/keyring'
 import { connectSbi } from '../rpc/sbi-session'
 import { ensureInitialAssetValuations, latestAssetValuations } from '../assets'
 import { listHistory } from '../history'
+import { captchaModelPath, createCaptchaSolver, type CaptchaSolver } from '@repo/capsolve-sp'
 
 export interface StoredSbiPasskeySecret {
   source?: SbiPasskeySource
@@ -88,6 +89,7 @@ interface PendingMobileSuicaLogin {
   login: Promise<MobileSuicaProfile>
   id: string
   keyringAccount: string
+  suggestedAnswer?: string
 }
 
 const availabilityFailure = (
@@ -133,6 +135,11 @@ const requireOwnerSession: MiddlewareHandler<AppBindings> = async (c, next) => {
 export const createAdminRoutes = (cronSystem: CronSystem) => {
   const app = new Hono<AppBindings>()
   const mobileSuicaLogins = new Map<string, PendingMobileSuicaLogin>()
+  let captchaSolver: Promise<CaptchaSolver> | undefined
+  const solveCaptcha = (image: Uint8Array) => {
+    captchaSolver ??= createCaptchaSolver(captchaModelPath())
+    return captchaSolver.then((solver) => solver.solve(image))
+  }
   app.use('*', requireOwnerSession)
 
   app.get('/api-keys', async (c) => c.json({ apiKeys: await listApiKeys(c.get('db')) }))
@@ -382,12 +389,16 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
     const profileUser = body.user.trim()
     const profilePassword = body.password
 
-    let publishCaptcha: ((value: { id: string; imageDataUrl: string }) => void) | undefined
+    let publishCaptcha:
+      | ((value: { id: string; imageDataUrl: string; suggestedAnswer: string }) => void)
+      | undefined
     let rejectCaptcha: ((reason?: unknown) => void) | undefined
-    const captcha = new Promise<{ id: string; imageDataUrl: string }>((resolve, reject) => {
-      publishCaptcha = resolve
-      rejectCaptcha = reject
-    })
+    const captcha = new Promise<{ id: string; imageDataUrl: string; suggestedAnswer: string }>(
+      (resolve, reject) => {
+        publishCaptcha = resolve
+        rejectCaptcha = reject
+      },
+    )
     let loginPromise: PendingMobileSuicaLogin['login'] | undefined
     loginPromise = loginMobileSuica({
       baseURL,
@@ -395,6 +406,7 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
       password: body.password,
       onCaptcha: async ({ image, contentType }) => {
         const id = randomId('mobilesuica')
+        const suggestedAnswer = await solveCaptcha(image)
         const answer = new Promise<string>((resolve) => {
           if (!loginPromise) throw new Error('Mobile Suica login was not initialized')
           mobileSuicaLogins.set(id, {
@@ -406,11 +418,13 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
             login: loginPromise,
             id: randomId('mobilesuica'),
             keyringAccount: `mobilesuica:${randomId('credential')}`,
+            suggestedAnswer,
           })
         })
         publishCaptcha?.({
           id,
           imageDataUrl: `data:${contentType};base64,${Buffer.from(image).toString('base64')}`,
+          suggestedAnswer,
         })
         return answer
       },
@@ -464,10 +478,14 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
     const secret = await readSecret<StoredMobileSuicaSecret>(profile.keyringAccount)
     if (!secret.user || !secret.password)
       return c.json({ error: 'Mobile Suica credentials are not stored' }, 409)
-    let publishCaptcha: ((value: { id: string; imageDataUrl: string }) => void) | undefined
-    const captcha = new Promise<{ id: string; imageDataUrl: string }>((resolve) => {
-      publishCaptcha = resolve
-    })
+    let publishCaptcha:
+      | ((value: { id: string; imageDataUrl: string; suggestedAnswer: string }) => void)
+      | undefined
+    const captcha = new Promise<{ id: string; imageDataUrl: string; suggestedAnswer: string }>(
+      (resolve) => {
+        publishCaptcha = resolve
+      },
+    )
     let loginPromise: PendingMobileSuicaLogin['login'] | undefined
     loginPromise = loginMobileSuica({
       baseURL,
@@ -475,6 +493,7 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
       password: secret.password,
       onCaptcha: async ({ image, contentType }) => {
         const id = randomId('mobilesuica-reauth')
+        const suggestedAnswer = await solveCaptcha(image)
         const answer = new Promise<string>((resolve) => {
           mobileSuicaLogins.set(id, {
             label: profile.label,
@@ -485,11 +504,13 @@ export const createAdminRoutes = (cronSystem: CronSystem) => {
             login: loginPromise as Promise<MobileSuicaProfile>,
             id: profile.id,
             keyringAccount: profile.keyringAccount,
+            suggestedAnswer,
           })
         })
         publishCaptcha?.({
           id,
           imageDataUrl: `data:${contentType};base64,${Buffer.from(image).toString('base64')}`,
+          suggestedAnswer,
         })
         return answer
       },

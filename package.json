@@ -11,12 +11,14 @@
   "type": "module",
   "module": "index.ts",
   "scripts": {
+    "postinstall": "bun scripts/download-capsolve-model.ts",
     "analyze:apk": "bun tools/analyze-sbi-apk.ts --jadx workspace/decoded/jadx --apktool workspace/decoded/apktool --out workspace/analysis",
     "build": "vp run app:build",
     "check": "vp run verify",
     "dev": "vp run app:dev",
     "db:push": "vp run server:db:push",
     "env:check": "vp run env:doctor",
+    "model:download": "bun scripts/download-capsolve-model.ts",
     "fmt": "vp check --fix",
     "sdk:build": "vp run sdk-build",
     "typecheck": "vp run typecheck:all"

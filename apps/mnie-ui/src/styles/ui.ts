@@ -32,7 +32,7 @@ export const ui = {
   metricPanel:
     'grid min-h-36 content-center gap-3 rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-5 shadow-lg shadow-black/15 sm:min-h-40 sm:p-7',
   assetOverviewPanel:
-    'grid h-auto min-h-48 grid-cols-1 content-start items-start gap-x-7 gap-y-5 overflow-hidden rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-5 shadow-lg shadow-black/15 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] sm:p-7 lg:col-span-2',
+    'grid h-auto min-h-48 grid-cols-1 content-start items-stretch gap-x-7 gap-y-5 overflow-hidden rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-5 shadow-lg shadow-black/15 sm:grid-cols-3 sm:p-7 lg:col-span-2',
   assetOverviewHead: 'grid gap-3',
   assetOverviewSubtext: 'text-sm font-semibold text-[#c3c7cf]',
   assetBreakdownPanel: 'grid gap-3',
