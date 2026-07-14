@@ -299,6 +299,7 @@ const commonCashPosition = (position: CashPosition, accountId: string): Investme
   availableQuantity:
     position.availableQuantity == null ? undefined : String(position.availableQuantity),
   positionType: 'cash',
+  lotType: position.quantity == null ? undefined : position.quantity >= 100 ? 'standard' : 'oddLot',
   accountType: position.accountType,
   averagePrice: money(position.averagePrice ?? position.purchasePrice),
   currentPrice: money(position.currentPrice),

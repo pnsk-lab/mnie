@@ -55,12 +55,32 @@ const commonAccountType = (value: 1 | 2 | 3 | 4 | undefined) =>
     : (Object.entries(accountTypeIds).find(([, id]) => id === value)?.[0] ?? String(value))
 
 const amountOrderRules: InvestmentOrderRules = {
-  sizing: [{ kind: 'amount', currency: 'JPY', minimum: '100', increment: '1' }],
+  sizing: [
+    { kind: 'amount', side: 'buy', currency: 'JPY', minimum: '1000', increment: '1' },
+    { kind: 'amount', side: 'sell', currency: 'JPY', minimum: '100', increment: '1' },
+  ],
   priceTypes: ['market'],
   timings: ['realtime'],
   accountTypes: Object.keys(accountTypeIds),
   supportsCorrection: false,
   supportsCancellation: false,
+}
+
+const minimumAmountFor = (side: InvestmentOrderRequest['side']) => (side === 'buy' ? 1000n : 100n)
+
+const validateAmountOrder = (request: Partial<InvestmentOrderRequest>) => {
+  if (request.sellAll && request.side === 'sell') return
+  if (!request.side || !request.amount) {
+    throw new PayPaySecError('PayPay Securities requires an amount order', 'INVALID_ARGUMENT')
+  }
+  const { currency, value } = request.amount
+  const minimum = minimumAmountFor(request.side)
+  if (currency !== 'JPY' || !/^\d+$/.test(value) || BigInt(value) < minimum) {
+    throw new PayPaySecError(
+      `${request.side} order amount must be an integer of at least ${minimum} JPY`,
+      'INVALID_ARGUMENT',
+    )
+  }
 }
 
 const accountFor = (client: PayPaySecClient): Account => ({
@@ -289,25 +309,14 @@ export const createProvider = (
             message: 'order account was not found',
           }
         }
-        if (request.quantity !== undefined || (!request.sellAll && !request.amount)) {
+        if (request.quantity !== undefined) {
           return {
             available: false,
             reason: 'PROVIDER_RESTRICTED',
             message: 'PayPay Securities requires an amount order',
           }
         }
-        if (
-          request.amount &&
-          (request.amount.currency !== 'JPY' ||
-            !/^\d+$/.test(request.amount.value) ||
-            BigInt(request.amount.value) < 100n)
-        ) {
-          return {
-            available: false,
-            reason: 'PROVIDER_RESTRICTED',
-            message: 'order amount must be an integer of at least 100 JPY',
-          }
-        }
+        validateAmountOrder(request)
         const selectedAccountType = accountType(request.accountType)
         const available =
           request.side === 'buy'
@@ -407,6 +416,7 @@ export const createProvider = (
               instrumentName: position.name,
               quantity: position.quantity ?? '0',
               positionType: 'cash',
+              lotType: 'notApplicable',
               marketValue: money(position.securitiesValue),
               unrealizedProfitLoss: money(position.grossProfit),
               averagePrice: unitPrice(acquisitionTotal(position), position.quantity),
@@ -532,6 +542,7 @@ export const createProvider = (
         if (!input.instrumentId) {
           throw new PayPaySecError('instrumentId is required', 'INVALID_ARGUMENT')
         }
+        validateAmountOrder(input)
         const amount = input.amount?.value ?? ''
         const position = input.side === 'sell' ? await positionFor(input.positionId) : undefined
         if (input.side === 'sell' && !position) {
