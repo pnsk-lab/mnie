@@ -28,6 +28,9 @@ export interface ServerConfig {
   smbcDirectLoginBaseUrl?: string
   mobileSuicaBaseUrl?: string
   payPayBankBaseUrl?: string
+  payPaySecBaseUrl?: string
+  payPaySecPasskeyBffBaseUrl?: string
+  payPaySecPasskeyOrigin?: string
 }
 
 const optionalUrl = (value: string | undefined) => {
@@ -70,5 +73,8 @@ export const loadConfig = (): ServerConfig => {
     smbcDirectLoginBaseUrl: optionalUrl(process.env.SMBC_DIRECT_LOGIN_BASE_URL),
     mobileSuicaBaseUrl: optionalUrl(process.env.MOBILE_SUICA_BASE_URL),
     payPayBankBaseUrl: optionalUrl(process.env.PAYPAY_BANK_BASE_URL),
+    payPaySecBaseUrl: optionalUrl(process.env.PAYPAY_SEC_BASE_URL),
+    payPaySecPasskeyBffBaseUrl: optionalUrl(process.env.PAYPAY_SEC_PASSKEY_BFF_BASE_URL),
+    payPaySecPasskeyOrigin: optionalUrl(process.env.PAYPAY_SEC_PASSKEY_ORIGIN),
   }
 }

@@ -18,6 +18,7 @@
     "@mnie/auth-bitwarden": "workspace:*",
     "@mnie/provider-mobile-suica": "workspace:*",
     "@mnie/provider-paypay-bank": "workspace:*",
+    "@mnie/provider-paypay-sec": "workspace:*",
     "@mnie/provider-sbi-sec": "workspace:*",
     "@mnie/provider-smbc-direct": "workspace:*",
     "@mnie/types": "workspace:*",
@@ -33,6 +34,7 @@
     "@repo/tsconfig": "workspace:*",
     "@types/bun": "latest",
     "drizzle-kit": "^0.31.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }

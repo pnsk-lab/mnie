@@ -60,9 +60,9 @@ export const ui = {
   holdingsBody: 'flex min-h-0 flex-1 flex-col overflow-visible lg:overflow-hidden',
   holdingsRows: 'grid min-h-0 flex-1 content-start overflow-y-auto',
   holdingsHead:
-    'hidden grid-cols-[1.6fr_0.7fr_0.6fr_0.9fr_0.9fr_auto] items-center gap-4 border-b border-[#33383f] py-3 text-xs font-extrabold text-[#8f949d] md:grid',
+    'hidden grid-cols-[1fr_1.6fr_0.7fr_0.6fr_0.9fr_0.9fr_auto] items-center gap-4 border-b border-[#33383f] py-3 text-xs font-extrabold text-[#8f949d] md:grid',
   holdingRow:
-    'grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-2xl bg-[#111418] px-3 py-3 text-left text-[#e3e3e9] transition hover:bg-[#242930] md:grid-cols-[1.6fr_0.7fr_0.6fr_0.9fr_0.9fr_auto] md:gap-4 md:bg-transparent',
+    'grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-2xl bg-[#111418] px-3 py-3 text-left text-[#e3e3e9] transition hover:bg-[#242930] md:grid-cols-[1fr_1.6fr_0.7fr_0.6fr_0.9fr_0.9fr_auto] md:gap-4 md:bg-transparent',
   typePill: 'w-fit rounded-full bg-[#263141] px-3 py-1 text-xs text-[#d3e3fd]',
   muted: 'text-[#8f949d]',
   portfolioHistory:

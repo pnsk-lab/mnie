@@ -14,6 +14,7 @@ import type {
   OrderKind,
   OrderPreview,
   TradeSide,
+  TradeOrderInputMode,
 } from '../../types/trading'
 import { currencyForMarket } from '../../utils/format'
 
@@ -38,6 +39,10 @@ defineProps<{
   secondaryPrice: number
   quantity: number
   amount: number
+  profileName: string
+  orderInputMode: TradeOrderInputMode
+  canConfirm: boolean
+  previewExpired: boolean
 }>()
 
 const emit = defineEmits<{
@@ -86,23 +91,27 @@ const accountTypeLabel = (type: CashOrderAccountType) =>
       :title="stockName"
     >
       <dl :class="ui.confirmList">
+        <div v-if="orderInputMode === 'amount'" :class="ui.confirmRow">
+          <dt>取引口座</dt>
+          <dd>{{ profileName }}</dd>
+        </div>
         <div :class="ui.confirmRow">
           <dt>売買</dt>
           <dd>{{ side === 'buy' ? '購入' : '売却' }}</dd>
         </div>
-        <div :class="ui.confirmRow">
+        <div v-if="orderInputMode === 'quantity' || estimate.quantity > 0" :class="ui.confirmRow">
           <dt>数量</dt>
-          <dd>{{ quantity }}株</dd>
+          <dd>{{ orderInputMode === 'amount' ? estimate.quantity : quantity }}株</dd>
         </div>
         <div :class="ui.confirmRow">
           <dt>預り区分</dt>
           <dd>{{ accountTypeLabel(accountType) }}</dd>
         </div>
-        <div :class="ui.confirmRow">
+        <div v-if="orderInputMode === 'quantity'" :class="ui.confirmRow">
           <dt>注文市場</dt>
           <dd>{{ market === 'auto' ? '自動' : market }}</dd>
         </div>
-        <template>
+        <template v-if="orderInputMode === 'quantity'">
           <div :class="ui.confirmRow">
             <dt>執行条件</dt>
             <dd>{{ priceConditionLabel(priceCondition) }}</dd>
@@ -137,18 +146,50 @@ const accountTypeLabel = (type: CashOrderAccountType) =>
         </template>
         <div :class="ui.confirmRow">
           <dt>概算</dt>
-          <dd>{{ currencyForMarket(amount, stockMarket) }}</dd>
+          <dd>
+            {{
+              orderInputMode === 'amount' && estimate.estimatedAmount
+                ? `${Number(estimate.estimatedAmount.value).toLocaleString('ja-JP')}円`
+                : currencyForMarket(amount, stockMarket)
+            }}
+          </dd>
         </div>
+        <template v-if="orderInputMode === 'amount'">
+          <div v-if="estimate.price?.value" :class="ui.confirmRow">
+            <dt>価格</dt>
+            <dd>{{ Number(estimate.price.value).toLocaleString('ja-JP') }}円</dd>
+          </div>
+          <div :class="ui.confirmRow">
+            <dt>為替</dt>
+            <dd>{{ estimate.exchangeRate ?? 'データなし' }}</dd>
+          </div>
+          <div :class="ui.confirmRow">
+            <dt>失効</dt>
+            <dd>
+              {{
+                estimate.expiresAt
+                  ? new Date(estimate.expiresAt).toLocaleString('ja-JP')
+                  : 'データなし'
+              }}
+            </dd>
+          </div>
+        </template>
       </dl>
       <p :class="ui.dialogNote">
         {{ estimate.message ?? estimate.warnings.join(' ') }}
+      </p>
+      <p
+        v-if="orderInputMode === 'amount' && previewExpired"
+        class="mt-3 text-sm font-bold text-amber-300"
+      >
+        有効期限が切れました。再度プレビューしてください。
       </p>
       <div :class="ui.actions">
         <UiButton variant="ghost" @click="emit('closeEstimate')">
           <ArrowLeft class="h-4 w-4" aria-hidden="true" />
           戻る
         </UiButton>
-        <UiButton @click="emit('proceed')">
+        <UiButton :disabled="orderInputMode === 'amount' && !canConfirm" @click="emit('proceed')">
           <ShieldCheck class="h-4 w-4" aria-hidden="true" />
           注文確認へ
         </UiButton>
@@ -159,7 +200,11 @@ const accountTypeLabel = (type: CashOrderAccountType) =>
   <AnimatePresence>
     <UiModal v-if="showOrder" key="order-dialog" eyebrow="注文確認" :title="stockName">
       <dl :class="ui.confirmList">
-        <div :class="ui.confirmRow">
+        <div v-if="orderInputMode === 'amount'" :class="ui.confirmRow">
+          <dt>取引口座</dt>
+          <dd>{{ profileName }}</dd>
+        </div>
+        <div v-if="orderInputMode === 'quantity'" :class="ui.confirmRow">
           <dt>区分</dt>
           <dd>通常単元</dd>
         </div>
@@ -167,19 +212,22 @@ const accountTypeLabel = (type: CashOrderAccountType) =>
           <dt>売買</dt>
           <dd>{{ side === 'buy' ? '購入' : '売却' }}</dd>
         </div>
-        <div :class="ui.confirmRow">
+        <div
+          v-if="orderInputMode === 'quantity' || Number(estimate?.quantity ?? 0) > 0"
+          :class="ui.confirmRow"
+        >
           <dt>数量</dt>
-          <dd>{{ quantity }}株</dd>
+          <dd>{{ orderInputMode === 'amount' ? estimate?.quantity : quantity }}株</dd>
         </div>
         <div :class="ui.confirmRow">
           <dt>預り区分</dt>
           <dd>{{ accountTypeLabel(accountType) }}</dd>
         </div>
-        <div :class="ui.confirmRow">
+        <div v-if="orderInputMode === 'quantity'" :class="ui.confirmRow">
           <dt>注文市場</dt>
           <dd>{{ market === 'auto' ? '自動' : market }}</dd>
         </div>
-        <template>
+        <template v-if="orderInputMode === 'quantity'">
           <div :class="ui.confirmRow">
             <dt>執行条件</dt>
             <dd>{{ priceConditionLabel(priceCondition) }}</dd>
@@ -214,7 +262,13 @@ const accountTypeLabel = (type: CashOrderAccountType) =>
         </template>
         <div :class="ui.confirmRow">
           <dt>概算</dt>
-          <dd>{{ currencyForMarket(amount, stockMarket) }}</dd>
+          <dd>
+            {{
+              orderInputMode === 'amount' && estimate?.estimatedAmount
+                ? `${Number(estimate.estimatedAmount.value).toLocaleString('ja-JP')}円`
+                : currencyForMarket(amount, stockMarket)
+            }}
+          </dd>
         </div>
       </dl>
       <div :class="ui.actions">
@@ -222,7 +276,11 @@ const accountTypeLabel = (type: CashOrderAccountType) =>
           <ArrowLeft class="h-4 w-4" aria-hidden="true" />
           戻る
         </UiButton>
-        <UiButton variant="danger" @click="emit('place')">
+        <UiButton
+          variant="danger"
+          :disabled="orderInputMode === 'amount' && !canConfirm"
+          @click="emit('place')"
+        >
           <Send class="h-4 w-4" aria-hidden="true" />
           発注
         </UiButton>

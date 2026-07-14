@@ -29,6 +29,15 @@ const props = defineProps<{
   marketIndexes: MarketIndex[]
   stockAssetRatio: number
   cashAssetRatio: number
+  brokerageAssetBreakdown: Array<{
+    id: string
+    providerId: string
+    label: string
+    value: number
+    holdingsValue: number
+    cashValue: number
+    color: string
+  }>
   otherAssetBreakdown: Array<{
     profileId: string
     label: string
@@ -40,6 +49,7 @@ const props = defineProps<{
   assetHistory: Array<{
     at: string
     profileId: string
+    groupId: string
     label: string
     value: number
     color: string
@@ -52,12 +62,12 @@ const props = defineProps<{
   connected: boolean
   orderHistoryLoaded: boolean
   orderHistoryNotice: string
-  loadPositionDetail: (position: Position) => Promise<Position>
+  loadPositionDetail?: (position: Position) => Promise<Position>
 }>()
 
 const emit = defineEmits<{
   connect: []
-  openPosition: [code: string]
+  openPosition: [position: Position]
   cancelOrder: [order: OrderRow]
 }>()
 
@@ -67,6 +77,9 @@ type AssetSlice = {
   value: number
   color: string
   profileId: string
+  kind: 'brokerage' | 'balance'
+  holdingsValue?: number
+  cashValue?: number
 }
 
 const profileColors = ['#c29a62', '#9d8cac', '#9fac8d', '#b77f6b', '#aa8999']
@@ -74,13 +87,16 @@ const historyProfileColor = (color: string | undefined, index: number) =>
   color || (profileColors[index % profileColors.length] ?? '#9aa0a9')
 const profileSlices = computed<AssetSlice[]>(() =>
   [
-    {
-      id: 'sbi',
-      profileId: 'sbi',
-      label: 'SBI証券',
-      value: props.holdingsMarketValue + props.buyingPower,
-      color: defaultProviderColors.sbisec,
-    },
+    ...props.brokerageAssetBreakdown.map((item) => ({
+      id: item.id,
+      profileId: item.id,
+      label: item.label,
+      value: item.value,
+      color: item.color,
+      kind: 'brokerage' as const,
+      holdingsValue: item.holdingsValue,
+      cashValue: item.cashValue,
+    })),
     ...props.otherAssetBreakdown.map((item, index) => ({
       id: item.profileId,
       profileId: item.profileId,
@@ -91,37 +107,39 @@ const profileSlices = computed<AssetSlice[]>(() =>
         defaultProviderColors[item.provider as keyof typeof defaultProviderColors] ||
         profileColors[index % profileColors.length] ||
         '#9aa0a9',
+      kind: 'balance' as const,
     })),
   ].filter((item) => item.value > 0),
 )
 
 const detailSlices = computed<AssetSlice[]>(() => {
-  const sbi = profileSlices.value.find((item) => item.id === 'sbi')
-  const details: AssetSlice[] = []
-  if (props.holdingsMarketValue > 0 && sbi) {
-    details.push({
-      id: 'sbi-stocks',
-      profileId: 'sbi',
-      label: '株式',
-      value: props.holdingsMarketValue,
-      color: '#91a9c7',
-    })
-  }
-  if (props.buyingPower > 0 && sbi) {
-    details.push({
-      id: 'sbi-cash',
-      profileId: 'sbi',
-      label: '余力',
-      value: props.buyingPower,
-      color: '#c58468',
-    })
-  }
-  details.push(
-    ...profileSlices.value
-      .filter((item) => item.id !== 'sbi')
-      .map((item) => ({ ...item, id: `${item.id}-balance`, label: '残高' })),
-  )
-  return details
+  return profileSlices.value.flatMap((item): AssetSlice[] => {
+    if (item.kind === 'balance') {
+      return [{ ...item, id: `${item.id}-balance`, label: '残高' }]
+    }
+    const details: AssetSlice[] = []
+    if ((item.holdingsValue ?? 0) > 0) {
+      details.push({
+        id: `${item.profileId}-stocks`,
+        profileId: item.profileId,
+        label: '株式',
+        value: item.holdingsValue ?? 0,
+        color: '#91a9c7',
+        kind: 'brokerage',
+      })
+    }
+    if ((item.cashValue ?? 0) > 0) {
+      details.push({
+        id: `${item.profileId}-cash`,
+        profileId: item.profileId,
+        label: '余力',
+        value: item.cashValue ?? 0,
+        color: '#c58468',
+        kind: 'brokerage',
+      })
+    }
+    return details
+  })
 })
 
 const sectorPath = (
@@ -212,17 +230,24 @@ const historyChart = computed(() => {
     .map((item) => ({ ...item, date: new Date(item.at) }))
     .filter((item) => Number.isFinite(item.date.getTime()) && Number.isFinite(item.value))
     .sort((a, b) => a.date.getTime() - b.date.getTime())
+  const sources = new Map(
+    events.map((item) => [item.profileId, [item.groupId, item.label, item.color] as const]),
+  )
   const providers = [
-    ...new Map(events.map((item) => [item.profileId, [item.label, item.color] as const])).entries(),
+    ...new Map(events.map((item) => [item.groupId, [item.label, item.color] as const])).entries(),
   ]
   const latest = new Map<string, number>()
   const points = events.map((event) => {
     latest.set(event.profileId, event.value)
-    const breakdown = providers.map(([profileId, [label, color]], index) => ({
-      profileId,
+    const breakdown = providers.map(([groupId, [label, color]], index) => ({
+      profileId: groupId,
       label,
       color: historyProfileColor(color, index),
-      value: latest.get(profileId) ?? 0,
+      value: [...sources.entries()].reduce(
+        (sum, [profileId, [sourceGroupId]]) =>
+          sum + (sourceGroupId === groupId ? (latest.get(profileId) ?? 0) : 0),
+        0,
+      ),
     }))
     return {
       date: event.date,
@@ -501,16 +526,21 @@ const indexTone = (index: MarketIndex) => {
   return ui.muted
 }
 const positionKey = (position: Position) =>
-  [position.market, position.code, position.accountType].filter(Boolean).join(':')
-const canLoadPositionDetail = (position: Position) => isUsMarket(position.market)
+  [position.profileId, position.id, position.market, position.code, position.accountType]
+    .filter(Boolean)
+    .join(':')
+const canLoadPositionDetail = (position: Position) =>
+  Boolean(props.loadPositionDetail) && isUsMarket(position.market)
 
 const showPositionDetail = async (position: Position) => {
-  if (!canLoadPositionDetail(position) || positionDetailLoadingKey.value) return
+  const loadPositionDetail = props.loadPositionDetail
+  if (!loadPositionDetail || !canLoadPositionDetail(position) || positionDetailLoadingKey.value)
+    return
   const key = positionKey(position)
   positionDetailLoadingKey.value = key
   positionDetailError.value = ''
   try {
-    positionDetail.value = await props.loadPositionDetail(position)
+    positionDetail.value = await loadPositionDetail(position)
   } catch (cause) {
     positionDetailError.value =
       cause instanceof Error ? cause.message : '保有詳細の取得に失敗しました'
@@ -775,6 +805,7 @@ const confirmCancel = () => {
       </div>
       <div :class="ui.holdingsBody">
         <div :class="ui.holdingsHead">
+          <span>プロファイル</span>
           <span>銘柄</span>
           <span>タイプ</span>
           <span>数量</span>
@@ -784,10 +815,13 @@ const confirmCancel = () => {
         </div>
         <div v-if="positions.length" :class="ui.holdingsRows">
           <div v-for="position in positions" :key="positionKey(position)" :class="ui.holdingRow">
+            <span class="col-span-2 truncate text-sm font-semibold text-[#c3c7cf] md:col-span-1">
+              {{ position.profileLabel ?? '-' }}
+            </span>
             <button
               class="grid gap-1 text-left text-[#e3e3e9]"
               type="button"
-              @click="emit('openPosition', position.code)"
+              @click="emit('openPosition', position)"
             >
               <strong>{{ position.name }}</strong>
               <small>{{ position.code }}</small>
@@ -825,7 +859,7 @@ const confirmCancel = () => {
         <div v-else-if="dataLoading" :class="[ui.muted, ui.emptyState]">
           <Spinner />
         </div>
-        <p v-else :class="[ui.muted, ui.emptyState]">SBIに接続すると保有銘柄を表示します</p>
+        <p v-else :class="[ui.muted, ui.emptyState]">保有銘柄はありません</p>
         <p v-if="positionDetailError" :class="ui.dialogNote">{{ positionDetailError }}</p>
       </div>
     </article>
@@ -834,13 +868,20 @@ const confirmCancel = () => {
       <h2>取引履歴</h2>
       <div :class="ui.historyList">
         <div v-if="recentOrders.length" :class="ui.historyRows">
-          <div v-for="order in recentOrders" :key="order.id" :class="ui.miniOrder">
+          <div
+            v-for="order in recentOrders"
+            :key="`${order.profileId ?? ''}:${order.id}`"
+            :class="ui.miniOrder"
+          >
             <span class="grid gap-1">
               <strong>{{ order.stock }}</strong>
               <small
-                >{{ order.side === 'buy' ? '買付' : '売却' }}(単元) ・
+                >{{ order.side === 'buy' ? '買付' : '売却' }} ・
                 {{ orderQuantityText(order) }}</small
               >
+              <small v-if="order.profileLabel" class="text-[#a8c7fa]">
+                {{ order.providerName }} / {{ order.profileLabel }}
+              </small>
               <small :class="[ui.statusBadge, order.status === '注文中' && ui.pendingBadge]">
                 {{ order.status }}
               </small>
@@ -870,7 +911,7 @@ const confirmCancel = () => {
           {{
             orderHistoryLoaded
               ? orderHistoryNotice
-                ? `SBI SDK は取引履歴なしを返しました (${orderHistoryNotice})`
+                ? `一部の口座を取得できませんでした (${orderHistoryNotice})`
                 : '該当する取引履歴はありません'
               : '取引履歴はまだ取得されていません'
           }}
@@ -896,7 +937,7 @@ const confirmCancel = () => {
       <div v-else-if="dataLoading" :class="[ui.muted, ui.emptyState]">
         <Spinner />
       </div>
-      <p v-else :class="[ui.muted, ui.emptyState]">SBIに接続すると指数を表示します</p>
+      <p v-else :class="[ui.muted, ui.emptyState]">指数データはありません</p>
     </article>
   </section>
 

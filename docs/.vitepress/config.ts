@@ -20,10 +20,7 @@ export default defineConfig({
         },
         {
           text: 'UI',
-          items: [
-            { text: 'About', link: '/docs/ui/' },
-            { text: 'MCP', link: '/docs/ui/mcp' },
-          ],
+          items: [{ text: 'About', link: '/docs/ui/' }],
         },
         {
           text: 'SDK',
@@ -35,6 +32,10 @@ export default defineConfig({
         {
           text: 'CLI',
           items: [{ text: 'About', link: '/docs/cli/' }],
+        },
+        {
+          text: 'Architecture',
+          items: [{ text: 'Provider runtime', link: '/docs/architecture/provider-runtime' }],
         },
         {
           text: 'Providers',
@@ -50,6 +51,10 @@ export default defineConfig({
             {
               text: 'PayPay Bank',
               link: '/docs/providers/paypay-bank',
+            },
+            {
+              text: 'PayPay Securities',
+              link: '/docs/providers/paypay-sec',
             },
             {
               text: 'Mobile Suica',

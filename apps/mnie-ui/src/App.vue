@@ -41,13 +41,20 @@ const tradeId = computed(() =>
     ? stockIdFromTradeRouteId(decodedRouteParam(route.params.id))
     : '',
 )
-const navigateTrade = (id = selectedStock.value.symbol || selectedStockCode.value) => {
-  if (!id) return
-  void router.push(tradePath(tradeRouteIdFromStockId(id)))
+const navigateTrade = (id = selectedStock.value.routeId || selectedStockCode.value) => {
+  void router.push(id ? tradePath(tradeRouteIdFromStockId(id)) : '/trade')
 }
 const navigate = (name: RouteName) => {
   if (name === 'settings') return router.push('/settings/api-keys')
-  if (name === 'trade') return navigateTrade()
+  if (name === 'trade') {
+    const profile =
+      brokerageProfiles.value.find((item) => item.id === selectedProfileId.value) ??
+      brokerageProfiles.value[0]
+    if (profile) selectedProfileId.value = profile.id
+    return router.push('/trade').then(() => {
+      if (profile) connect()
+    })
+  }
   return router.push({ name })
 }
 
@@ -57,6 +64,7 @@ const {
   sbiPasskeys,
   authManagers,
   profiles,
+  providerDefinitions,
   profileAvailability,
   profileAvailabilityCheckedAt,
   profileAvailabilityLoading,
@@ -83,6 +91,9 @@ const {
   payPayBankBranchNo,
   payPayBankAccountNo,
   payPayBankPassword,
+  payPaySecLabel,
+  payPaySecCredentialJson,
+  payPaySecTradePassword,
   refresh,
   forceProfileAvailability,
   addApiKey,
@@ -95,9 +106,20 @@ const {
   fillProviderCredentials,
   addSmbcDirectProfile,
   addPayPayBankProfile,
+  addPayPaySecProfile,
   removeSbiPasskey,
   updateProfile,
 } = useAuthAdmin()
+
+// The sidebar, settings flow, and trading session must share one profile selection.
+// Keeping a second ref here leaves the trading session disconnected after linking a provider.
+const tradeProfileId = selectedProfileId
+const selectedProfile = computed(() =>
+  profiles.value.find((profile) => profile.id === tradeProfileId.value),
+)
+const brokerageProfiles = computed(() =>
+  profiles.value.filter((profile) => profile.category === 'brokerage'),
+)
 
 const {
   selectedStockCode,
@@ -115,6 +137,9 @@ const {
   cashOrderSecondaryPriceCondition,
   cashOrderSecondaryPriceInput,
   quantityInput,
+  amountInput,
+  amountSellMode,
+  selectedHoldingId,
   priceInput,
   chartMode,
   chartRange,
@@ -125,6 +150,16 @@ const {
   showEstimateDialog,
   showOrderDialog,
   lastCashEstimate,
+  orderNotice,
+  orderError,
+  orderBusy,
+  orderInputMode,
+  orderAmountMinimum,
+  orderAmountIncrement,
+  chartAvailable,
+  quoteLoading,
+  searchQuotesAvailable,
+  previewExpired,
   connected,
   dataLoading,
   searchLoading,
@@ -136,11 +171,14 @@ const {
   orderHistoryLoaded,
   orderHistoryNotice,
   positions,
+  sellPositions,
+  portfolioPositions,
   chartPricePoints,
   chartNotice,
   pricePolling,
   selectedStock,
   orderQuantity,
+  orderAmount,
   orderPrice,
   cashOrderPrimaryRequiresPrice,
   cashOrderTriggerPrice,
@@ -152,43 +190,64 @@ const {
   cashOrderPriceStep,
   estimatedAmount,
   showPortfolioSpinner,
-  canRequestCashEstimate,
+  canRequestOrderEstimate,
   canPlaceCashOrder,
   countries,
   markets,
   viewedStocks,
   filteredStocks,
   selectedPosition,
+  selectedStockProviderPositions,
   recentOrders,
+  portfolioRecentOrders,
   totalAssetValue,
   portfolioBuyingPower,
   portfolioHoldingsMarketValue,
+  portfolioBrokerageAssetBreakdown,
+  portfolioTotalProfitLoss,
+  portfolioTotalProfitLossRate,
   stockAssetRatio,
   cashAssetRatio,
   otherAssetBreakdown,
+  portfolioOtherAssetBreakdown,
+  portfolioOverviewLoading,
+  portfolioOverviewNotice,
   assetHistory,
   assetHistoryLoading,
   hasQuote,
-  selectStock,
+  selectTradeStock,
   selectStockByCode,
   connect,
   loadTradingData,
+  loadPortfolioOverview,
+  loadStoredAssetValuations,
   estimateCashOrder,
   askPlaceOrder,
   placeCashOrder,
   cancelOrder,
   loadOrderDetail,
   loadTradeRecords,
-  loadPositionDetail,
   estimateOrderCorrection,
   placeOrderCorrection,
   downloadCsv,
-  openTradeForStock,
-  openTradeForPosition,
   smbcQrUrl,
   smbcBalance,
   finishSmbc2fa,
-} = useTradingSession(selectedProfileId, profiles)
+} = useTradingSession(tradeProfileId, profiles, providerDefinitions)
+
+const openPortfolioPosition = (position: (typeof portfolioPositions.value)[number]) => {
+  if (!position.profileId) return
+  tradeProfileId.value = position.profileId
+  connect()
+  navigateTrade(position.code)
+}
+
+const selectBrokerageProfile = (id: string) => {
+  if (!id || tradeProfileId.value === id) return
+  tradeProfileId.value = id
+  connect()
+  if (tradeId.value) selectStockByCode(tradeId.value)
+}
 
 const finishSmbc2faAndRefreshAvailability = async () => {
   await finishSmbc2fa()
@@ -197,16 +256,27 @@ const finishSmbc2faAndRefreshAvailability = async () => {
 
 const { oauthApproval, oauthSettings, loadOAuthApproval, approveOAuth } = useOAuthApproval()
 
-const refreshAndMaybeConnect = () =>
-  refresh({
-    autoConnect: true,
-    connect: () => {
-      if (!connected.value) connect()
-    },
-  })
+const refreshAndMaybeConnect = async () => {
+  await refresh()
+  if (!status.value.authenticated) return
+  await loadStoredAssetValuations().catch(() => {})
+  await loadPortfolioOverview().catch(() => {})
+}
+
+const refreshPortfolio = async () => {
+  await loadStoredAssetValuations().catch(() => {})
+  await loadPortfolioOverview().catch(() => {})
+}
 
 const addSbiPasskeyAndConnect = async () => {
   await addSbiPasskey()
+  tradeProfileId.value = selectedProfileId.value
+  connect()
+}
+
+const addPayPaySecProfileAndConnect = async () => {
+  await addPayPaySecProfile()
+  tradeProfileId.value = selectedProfileId.value
   connect()
 }
 
@@ -216,18 +286,27 @@ const revokeAndRefresh = async (id: string) => {
 }
 
 watch(
-  tradeId,
-  (id) => {
-    if (activeTab.value !== 'trade' || !id) return
-    selectStockByCode(id)
+  [tradeId, activeTab, brokerageProfiles],
+  ([id, tab, availableProfiles]) => {
+    if (tab !== 'trade') return
+
+    // On a direct visit the route is resolved before refresh() has populated the
+    // profiles. Connect as soon as a brokerage profile becomes available, then
+    // restore the route selection because connect() resets profile-scoped state.
+    const profile =
+      availableProfiles.find((item) => item.id === tradeProfileId.value) ?? availableProfiles[0]
+    if (!profile) return
+    tradeProfileId.value = profile.id
+    connect()
+    if (id) selectStockByCode(id)
   },
   { immediate: true },
 )
 
 watch(
-  [activeTab, () => selectedStock.value.symbol, selectedStockId, selectedStockCode],
+  [activeTab, () => selectedStock.value.routeId, selectedStockId, selectedStockCode],
   ([tab]) => {
-    const id = selectedStock.value.symbol || selectedStockId.value || selectedStockCode.value
+    const id = selectedStock.value.routeId || selectedStockId.value || selectedStockCode.value
     if (tab !== 'trade' || !id || tradeId.value === id) return
     void router.replace(tradePath(tradeRouteIdFromStockId(id)))
   },
@@ -291,32 +370,35 @@ onUnmounted(() => {
           :total-asset-value="totalAssetValue"
           :buying-power="portfolioBuyingPower"
           :holdings-market-value="portfolioHoldingsMarketValue"
-          :total-profit-loss="totalProfitLoss"
-          :total-profit-loss-rate="totalProfitLossRate"
+          :brokerage-asset-breakdown="portfolioBrokerageAssetBreakdown"
+          :total-profit-loss="portfolioTotalProfitLoss"
+          :total-profit-loss-rate="portfolioTotalProfitLossRate"
           :market-indexes="marketIndexes"
           :stock-asset-ratio="stockAssetRatio"
           :cash-asset-ratio="cashAssetRatio"
-          :other-asset-breakdown="otherAssetBreakdown"
+          :other-asset-breakdown="portfolioOtherAssetBreakdown"
           :asset-history="assetHistory"
           :asset-history-loading="assetHistoryLoading"
-          :positions="positions"
-          :recent-orders="recentOrders"
+          :positions="portfolioPositions"
+          :recent-orders="portfolioRecentOrders"
           :canceling-order-key="cancelingOrderKey"
-          :data-loading="dataLoading"
-          :connected="connected"
-          :order-history-loaded="orderHistoryLoaded"
-          :order-history-notice="orderHistoryNotice"
-          :load-position-detail="loadPositionDetail"
-          @connect="connect"
-          @open-position="
-            (code) =>
-              openTradeForPosition(code, () => void navigateTrade(selectedStock.symbol || code))
-          "
-          @cancel-order="cancelOrder"
+          :data-loading="portfolioOverviewLoading"
+          :connected="true"
+          :order-history-loaded="!portfolioOverviewLoading"
+          :order-history-notice="portfolioOverviewNotice"
+          @connect="refreshPortfolio"
+          @open-position="openPortfolioPosition"
         />
 
+        <div
+          v-if="activeTab === 'trade' && !selectedProfile"
+          class="m-5 grid min-h-64 place-items-center rounded-2xl border border-[#30343a] bg-[#111418] p-8 text-[#9aa0a9]"
+        >
+          取引口座を選択してください
+        </div>
+
         <TradeView
-          v-if="activeTab === 'trade'"
+          v-else-if="activeTab === 'trade' && selectedProfile"
           v-model:trade-side="tradeSide"
           v-model:order-kind="orderKind"
           v-model:cash-order-account-type="cashOrderAccountType"
@@ -330,31 +412,48 @@ onUnmounted(() => {
           v-model:cash-order-secondary-price-condition="cashOrderSecondaryPriceCondition"
           v-model:cash-order-secondary-price-input="cashOrderSecondaryPriceInput"
           v-model:quantity-input="quantityInput"
+          v-model:amount-input="amountInput"
+          v-model:amount-sell-mode="amountSellMode"
+          v-model:selected-holding-id="selectedHoldingId"
           v-model:price-input="priceInput"
           v-model:chart-mode="chartMode"
           v-model:chart-range="chartRange"
           :viewed-stocks="viewedStocks"
           :selected-stock="selectedStock"
+          :provider-positions="selectedStockProviderPositions"
           :selected-position="selectedPosition"
+          :positions="sellPositions"
+          :brokerage-profiles="brokerageProfiles"
+          :selected-profile-id="tradeProfileId"
+          :profile-name="`${selectedProfile.providerName} / ${selectedProfile.label}`"
+          :order-input-mode="orderInputMode"
+          :chart-available="chartAvailable"
+          :quote-loading="quoteLoading"
+          :order-busy="orderBusy"
+          :order-notice="orderNotice"
+          :order-error="orderError"
           :connected="connected"
           :order-quantity="orderQuantity"
+          :order-amount="orderAmount"
+          :order-amount-minimum="orderAmountMinimum"
+          :order-amount-increment="orderAmountIncrement"
           :estimated-amount="estimatedAmount"
           :cash-order-account-type-options="cashOrderAccountTypeOptions"
           :cash-order-market-options="cashOrderMarketOptions"
           :cash-order-term-options="cashOrderTermOptions"
           :cash-order-date-options="cashOrderDateOptions"
           :cash-order-price-step="cashOrderPriceStep"
-          :can-request-cash-estimate="canRequestCashEstimate"
+          :can-request-cash-estimate="canRequestOrderEstimate"
           :can-place-cash-order="canPlaceCashOrder"
           :realtime-price-points="chartPricePoints"
           :chart-notice="chartNotice"
           :price-polling="pricePolling"
           :has-quote="hasQuote"
           @open-search="showSearch = true"
+          @select-profile="selectBrokerageProfile"
           @select-stock="
             (stock) => {
-              selectStock(stock)
-              navigateTrade(stock.symbol || stock.code)
+              void selectTradeStock(stock).then(() => navigateTrade(stock.routeId || stock.code))
             }
           "
           @download-csv="downloadCsv"
@@ -400,10 +499,14 @@ onUnmounted(() => {
           v-model:pay-pay-bank-branch-no="payPayBankBranchNo"
           v-model:pay-pay-bank-account-no="payPayBankAccountNo"
           v-model:pay-pay-bank-password="payPayBankPassword"
+          v-model:pay-pay-sec-label="payPaySecLabel"
+          v-model:pay-pay-sec-credential-json="payPaySecCredentialJson"
+          v-model:pay-pay-sec-trade-password="payPaySecTradePassword"
           :api-keys="apiKeys"
           :sbi-passkeys="sbiPasskeys"
           :auth-managers="authManagers"
           :profiles="profiles"
+          :provider-definitions="providerDefinitions"
           :profile-availability="profileAvailability"
           :profile-availability-checked-at="profileAvailabilityCheckedAt"
           :profile-availability-loading="profileAvailabilityLoading"
@@ -420,6 +523,7 @@ onUnmounted(() => {
           @fill-provider-credentials="fillProviderCredentials"
           @add-smbc-direct-profile="addSmbcDirectProfile"
           @add-pay-pay-bank-profile="addPayPayBankProfile"
+          @add-pay-pay-sec-profile="addPayPaySecProfileAndConnect"
           @finish-smbc-2fa="finishSmbc2faAndRefreshAvailability"
           @force-profile-availability="forceProfileAvailability"
           @connect="connect"
@@ -441,14 +545,20 @@ onUnmounted(() => {
         :countries="countries"
         :markets="markets"
         :loading="searchLoading"
+        :price-data-available="searchQuotesAvailable"
         @close="showSearch = false"
         @select="
-          (stock) => openTradeForStock(stock, () => void navigateTrade(stock.symbol || stock.code))
+          (stock) =>
+            void selectTradeStock(stock).then(() => {
+              showSearch = false
+              navigateTrade(stock.routeId || stock.code)
+            })
         "
       />
     </AnimatePresence>
 
     <OrderDialogs
+      v-if="selectedProfile"
       :estimate="lastCashEstimate"
       :show-estimate="showEstimateDialog"
       :show-order="showOrderDialog"
@@ -468,7 +578,13 @@ onUnmounted(() => {
       :secondary-price-condition="cashOrderSecondaryPriceCondition"
       :secondary-price="cashOrderSecondaryPrice"
       :quantity="orderQuantity"
-      :amount="estimatedAmount"
+      :amount="orderInputMode === 'amount' ? orderAmount : estimatedAmount"
+      :order-input-mode="orderInputMode"
+      :can-confirm="canPlaceCashOrder"
+      :preview-expired="previewExpired"
+      :profile-name="
+        selectedProfile ? `${selectedProfile.providerName} / ${selectedProfile.label}` : ''
+      "
       @close-estimate="showEstimateDialog = false"
       @proceed="askPlaceOrder"
       @close-order="showOrderDialog = false"

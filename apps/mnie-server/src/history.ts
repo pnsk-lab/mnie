@@ -1,44 +1,13 @@
 import { and, asc, eq, gte, inArray, lte } from 'drizzle-orm'
-import {
-  createProvider as createMobileSuicaProvider,
-  exportSession as exportMobileSuicaSession,
-  importSession as importMobileSuicaSession,
-} from '@mnie/provider-mobile-suica'
-import {
-  createProvider as createSmbcProvider,
-  exportSession as exportSmbcSession,
-  importSession as importSmbcSession,
-  type SmbcDirectSession,
-} from '@mnie/provider-smbc-direct'
-import {
-  createProvider as createPayPayBankProvider,
-  exportSession as exportPayPayBankSession,
-  importSession as importPayPayBankSession,
-  login as loginPayPayBank,
-  type PayPayBankSession,
-} from '@mnie/provider-paypay-bank'
-import type {
-  FinancialProvider,
-  HistoryItem,
-  HistoryListRequest,
-  OperationMap,
-  Transaction,
-} from '@mnie/types'
-import type { ServerConfig } from './config'
+import type { HistoryItem, HistoryListRequest, Transaction } from '@mnie/types'
 import type { Db } from './db'
 import { accountProfiles, assetValuations, historySyncs, historyTransactions } from './db/schema'
-import type {
-  StoredMobileSuicaSecret,
-  StoredPayPayBankSecret,
-  StoredSmbcDirectSecret,
-} from './routes/admin'
-import { connectSbi } from './rpc/sbi-session'
-import { readSecret, saveSecret } from './security/keyring'
-import { withProfileLock } from './profile-lock'
+import type { ProviderRegistry } from './providers/registry'
 
 const refreshIntervalMs = 5 * 60 * 60_000
 const defaultRangeMs = 30 * 24 * 60 * 60_000
 const initialHistoryFrom = new Date(0)
+const smbcDirectInitialHistoryFrom = new Date('2019-01-01T00:00:00+09:00')
 type Profile = typeof accountProfiles.$inferSelect
 
 const requestedRange = (request: HistoryListRequest) => {
@@ -51,90 +20,9 @@ const requestedRange = (request: HistoryListRequest) => {
   return { from, to }
 }
 
-const yyyymmdd = (date: Date) =>
-  `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`
-
-const yyyyMmDd = (date: Date) =>
-  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-
-const isTooManyTransactionsError = (cause: unknown) =>
-  cause instanceof Error && cause.message.includes('02194-E')
-
-const splitDateRange = (from: Date, to: Date): [Date, Date, Date, Date] | undefined => {
-  const start = new Date(from)
-  start.setHours(0, 0, 0, 0)
-  const end = new Date(to)
-  end.setHours(0, 0, 0, 0)
-  if (start >= end) return undefined
-
-  const middle = new Date(start.getTime() + Math.floor((end.getTime() - start.getTime()) / 2))
-  middle.setHours(0, 0, 0, 0)
-  const next = new Date(middle)
-  next.setDate(next.getDate() + 1)
-  return [from, middle, next, to]
-}
-
-const providerFor = async (
-  db: Db,
-  config: ServerConfig,
-  profile: Profile,
-  forceLogin = false,
-): Promise<{ provider: FinancialProvider<OperationMap>; persist(): Promise<void> }> => {
-  if (profile.provider === 'sbisec') {
-    return { provider: await connectSbi(db, config, profile.id), persist: async () => {} }
-  }
-  if (profile.provider === 'smbc-direct') {
-    const secret = await readSecret<StoredSmbcDirectSecret>(profile.keyringAccount)
-    if (!secret.session) throw new Error('SMBC Direct session is not available')
-    const imported = await importSmbcSession(secret.session as SmbcDirectSession)
-    return {
-      provider: createSmbcProvider(imported) as FinancialProvider<OperationMap>,
-      persist: async () =>
-        saveSecret(profile.keyringAccount, {
-          ...secret,
-          session: exportSmbcSession(imported),
-        } satisfies StoredSmbcDirectSecret),
-    }
-  }
-  if (profile.provider === 'paypay-bank') {
-    const secret = await readSecret<StoredPayPayBankSecret>(profile.keyringAccount)
-    const imported =
-      !forceLogin && secret.session
-        ? await importPayPayBankSession(secret.session as PayPayBankSession)
-        : await loginPayPayBank({
-            branchNo: secret.branchNo,
-            accountNo: secret.accountNo,
-            password: secret.password,
-            baseURL: config.payPayBankBaseUrl,
-          })
-    return {
-      provider: createPayPayBankProvider(imported) as FinancialProvider<OperationMap>,
-      persist: async () =>
-        saveSecret(profile.keyringAccount, {
-          ...secret,
-          session: exportPayPayBankSession(imported),
-        } satisfies StoredPayPayBankSecret),
-    }
-  }
-  if (profile.provider === 'mobilesuica') {
-    const secret = await readSecret<StoredMobileSuicaSecret>(profile.keyringAccount)
-    if (!secret.session) throw new Error('Mobile Suica session is not available')
-    const imported = await importMobileSuicaSession(secret.session)
-    return {
-      provider: createMobileSuicaProvider(imported) as FinancialProvider<OperationMap>,
-      persist: async () =>
-        saveSecret(profile.keyringAccount, {
-          ...secret,
-          session: exportMobileSuicaSession(imported),
-        } satisfies StoredMobileSuicaSecret),
-    }
-  }
-  throw new Error(`${profile.provider} does not provide transaction history`)
-}
-
 const syncTransactions = async (
   db: Db,
-  config: ServerConfig,
+  providers: ProviderRegistry,
   profile: Profile,
   from: Date,
   to: Date,
@@ -145,76 +33,75 @@ const syncTransactions = async (
   const fresh = sync && Date.now() - sync.fetchedAt.getTime() < refreshIntervalMs
   if (fresh && sync.coveredFrom <= from && (allowCachedCurrentRange || sync.coveredTo >= to)) return
 
-  const { provider, persist } = await providerFor(db, config, profile, forceLogin)
-  const fetchPage = async (rangeFrom: Date, rangeTo: Date): Promise<HistoryItem[]> => {
-    const input =
-      profile.provider === 'smbc-direct'
-        ? { from: yyyymmdd(rangeFrom), to: yyyymmdd(rangeTo), kinds: ['transaction'] as const }
-        : profile.provider === 'paypay-bank'
-          ? { from: yyyyMmDd(rangeFrom), to: yyyyMmDd(rangeTo), kinds: ['transaction'] as const }
-          : { kinds: ['transaction'] as const }
-
-    try {
-      const page = (await provider.invoke('history.list', input)) as { items: HistoryItem[] }
-      return page.items
-    } catch (cause) {
-      const split =
-        profile.provider === 'smbc-direct' && isTooManyTransactionsError(cause)
-          ? splitDateRange(rangeFrom, rangeTo)
-          : undefined
-      if (!split) throw cause
-      const [leftFrom, leftTo, rightFrom, rightTo] = split
-      const left = await fetchPage(leftFrom, leftTo)
-      const right = await fetchPage(rightFrom, rightTo)
-      return [...left, ...right]
-    }
-  }
-  try {
-    const items = await fetchPage(from, to)
-    const fetchedAt = new Date()
-    for (const item of items) {
-      if (item.kind !== 'transaction') continue
-      const occurredAt = new Date(item.occurredAt)
-      if (!Number.isFinite(occurredAt.getTime())) {
-        throw new Error(`provider returned invalid transaction date: ${item.occurredAt}`)
+  await providers.use(
+    profile,
+    async ({ provider }) => {
+      if (!provider.operations().includes('history.list')) {
+        throw new Error(`${profile.provider} does not provide transaction history`)
       }
-      await db
-        .insert(historyTransactions)
-        .values({
-          profileId: profile.id,
-          transactionId: item.transaction.id,
-          occurredAt,
-          transaction: item.transaction,
-          fetchedAt,
-        })
-        .onConflictDoUpdate({
-          target: [historyTransactions.profileId, historyTransactions.transactionId],
-          set: {
+      const fetchPage = async (rangeFrom: Date, rangeTo: Date): Promise<HistoryItem[]> => {
+        const range = providers.normalizeHistoryRange(profile, rangeFrom, rangeTo)
+        if (!range) return []
+        const [effectiveFrom, effectiveTo] = range
+        const input = providers.historyListInput(profile, effectiveFrom, effectiveTo)
+
+        try {
+          const page = (await provider.invoke('history.list', input)) as { items: HistoryItem[] }
+          return page.items
+        } catch (cause) {
+          const split = providers.splitHistoryRange(profile, cause, effectiveFrom, effectiveTo)
+          if (!split) throw cause
+          const [leftFrom, leftTo, rightFrom, rightTo] = split
+          const left = await fetchPage(leftFrom, leftTo)
+          const right = await fetchPage(rightFrom, rightTo)
+          return [...left, ...right]
+        }
+      }
+      const items = await fetchPage(from, to)
+      const fetchedAt = new Date()
+      for (const item of items) {
+        if (item.kind !== 'transaction') continue
+        const occurredAt = new Date(item.occurredAt)
+        if (!Number.isFinite(occurredAt.getTime())) {
+          throw new Error(`provider returned invalid transaction date: ${item.occurredAt}`)
+        }
+        await db
+          .insert(historyTransactions)
+          .values({
+            profileId: profile.id,
+            transactionId: item.transaction.id,
             occurredAt,
             transaction: item.transaction,
             fetchedAt,
+          })
+          .onConflictDoUpdate({
+            target: [historyTransactions.profileId, historyTransactions.transactionId],
+            set: {
+              occurredAt,
+              transaction: item.transaction,
+              fetchedAt,
+            },
+          })
+      }
+      await db
+        .insert(historySyncs)
+        .values({ profileId: profile.id, coveredFrom: from, coveredTo: to, fetchedAt })
+        .onConflictDoUpdate({
+          target: historySyncs.profileId,
+          set: {
+            coveredFrom: sync && sync.coveredFrom < from ? sync.coveredFrom : from,
+            coveredTo: sync && sync.coveredTo > to ? sync.coveredTo : to,
+            fetchedAt,
           },
         })
-    }
-    await db
-      .insert(historySyncs)
-      .values({ profileId: profile.id, coveredFrom: from, coveredTo: to, fetchedAt })
-      .onConflictDoUpdate({
-        target: historySyncs.profileId,
-        set: {
-          coveredFrom: sync && sync.coveredFrom < from ? sync.coveredFrom : from,
-          coveredTo: sync && sync.coveredTo > to ? sync.coveredTo : to,
-          fetchedAt,
-        },
-      })
-  } finally {
-    await persist()
-  }
+    },
+    { forceLogin },
+  )
 }
 
 export const listHistory = async (
   db: Db,
-  config: ServerConfig,
+  providers: ProviderRegistry,
   request: HistoryListRequest & { profileIds?: string[]; forceRefresh?: boolean },
 ) => {
   const { from, to } = requestedRange(request)
@@ -228,16 +115,14 @@ export const listHistory = async (
     const allowCachedCurrentRange = request.to == null
     for (const profile of profiles) {
       try {
-        await withProfileLock(profile.id, () =>
-          syncTransactions(
-            db,
-            config,
-            profile,
-            from,
-            to,
-            allowCachedCurrentRange,
-            request.forceRefresh === true,
-          ),
+        await syncTransactions(
+          db,
+          providers,
+          profile,
+          from,
+          to,
+          allowCachedCurrentRange,
+          request.forceRefresh === true,
         )
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause)
@@ -316,7 +201,7 @@ export const listHistory = async (
 
 export const forceSyncHistory = async (
   db: Db,
-  config: ServerConfig,
+  providers: ProviderRegistry,
   request: { profileId: string; from: string; to: string },
 ) => {
   const [profile] = await db
@@ -327,7 +212,7 @@ export const forceSyncHistory = async (
 
   requestedRange(request)
   await db.delete(historySyncs).where(eq(historySyncs.profileId, request.profileId))
-  const result = await listHistory(db, config, {
+  const result = await listHistory(db, providers, {
     profileIds: [request.profileId],
     kinds: ['transaction'],
     from: request.from,
@@ -345,11 +230,19 @@ export const forceSyncHistory = async (
   }
 }
 
-export const syncInitialHistory = async (db: Db, config: ServerConfig, profileId: string) => {
-  const history = await listHistory(db, config, {
+export const syncInitialHistory = async (
+  db: Db,
+  providers: ProviderRegistry,
+  profileId: string,
+) => {
+  const profile = await providers.profile(profileId)
+  const history = await listHistory(db, providers, {
     profileIds: [profileId],
     kinds: ['transaction'],
-    from: initialHistoryFrom.toISOString(),
+    from:
+      profile.provider === 'smbc-direct'
+        ? smbcDirectInitialHistoryFrom.toISOString()
+        : initialHistoryFrom.toISOString(),
     to: new Date().toISOString(),
   })
   const errors = history.errors.filter((error) => error.profileId === profileId)

@@ -1,4 +1,12 @@
 export type TradeSide = 'buy' | 'sell'
+export type TradeOrderInputMode = 'quantity' | 'amount'
+export type AmountSellMode = 'amount' | 'all'
+
+export interface TradeViewModel {
+  orderInputMode: TradeOrderInputMode
+  chartAvailable: boolean
+  quoteLoading: boolean
+}
 export type OrderKind = 'standard' | 's'
 export type CashOrderAccountType = 'specific' | 'general' | 'growthInvestment' | 'nisa'
 export type CashOrderMarket =
@@ -48,6 +56,9 @@ export interface OrderPreview {
   warnings: string[]
   confirmationId?: string
   message?: string
+  estimatedAmount?: { currency: string; value: string }
+  exchangeRate?: string
+  expiresAt?: string
 }
 
 export interface JsonRpcResponse {
@@ -57,6 +68,7 @@ export interface JsonRpcResponse {
   result?: unknown
   error?: {
     message?: string
+    data?: { providerCode?: string }
   }
 }
 
@@ -92,6 +104,7 @@ export interface Stock {
   code: string
   name: string
   symbol: string
+  routeId?: string
   searchText?: string
   country: string
   market: string
@@ -127,6 +140,7 @@ export interface OrderRow {
   unexecutedQuantity?: number | null
   executedQuantity?: number | null
   price: number | null
+  amount?: number | null
   status: '注文中' | '約定済' | '取消済'
   orderNumber?: string
   orderSubNo?: string
@@ -134,6 +148,10 @@ export interface OrderRow {
   accountType?: string
   cancelable?: boolean
   correctable?: boolean
+  profileId?: string
+  profileLabel?: string
+  providerId?: string
+  providerName?: string
 }
 
 export type OrderDetail = OrderRow & {
@@ -159,6 +177,7 @@ export interface TradeRecordRow {
 }
 
 export interface Position {
+  id: string
   code: string
   name: string
   market: string
@@ -170,4 +189,16 @@ export interface Position {
   profitLossRate: number
   type?: string
   accountType?: CashOrderAccountType | string
+  profileId?: string
+  profileLabel?: string
+  providerId?: string
+  providerName?: string
+}
+
+export interface ProviderPosition extends Position {
+  profileId: string
+  profileLabel: string
+  providerId: string
+  providerName: string
+  color: string
 }

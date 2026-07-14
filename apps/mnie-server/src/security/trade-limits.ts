@@ -2,11 +2,17 @@ import { and, eq } from 'drizzle-orm'
 import type { Db } from '../db'
 import { apiKeyTradeUsage, apiKeys } from '../db/schema'
 
-type WindowName = '1h' | '3h' | '1d'
+type WindowName = '1h' | '6h' | '1d'
 
 interface TradeLimitInput {
   apiKeyId: string
   params: unknown
+}
+
+export const isTransactionOperation = (operation: string, input?: unknown) => {
+  const params = record(input)
+  if (params?.allowTransaction === true || params?.allowTrading === true) return true
+  return /\.(create|send|place|cancel|change|replace|placeCorrection|placeCancel)$/.test(operation)
 }
 
 const windowBucket = (date: Date, window: WindowName) => {
@@ -16,7 +22,7 @@ const windowBucket = (date: Date, window: WindowName) => {
   if (window === '1d') return `${year}-${month}-${day}`
 
   const hour = date.getUTCHours()
-  const bucketHour = window === '3h' ? Math.floor(hour / 3) * 3 : hour
+  const bucketHour = window === '6h' ? Math.floor(hour / 6) * 6 : hour
   return `${year}-${month}-${day}T${String(bucketHour).padStart(2, '0')}`
 }
 
@@ -28,6 +34,19 @@ const numberFromParams = (params: unknown, key: string) => {
   return Number.isFinite(number) ? number : undefined
 }
 
+const record = (value: unknown) =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined
+
+const money = (value: unknown) => {
+  const input = record(value)
+  if (!input) return undefined
+  const amount = Number(input.value)
+  const currency = typeof input.currency === 'string' ? input.currency : undefined
+  return currency && Number.isFinite(amount) ? { currency, value: amount } : undefined
+}
+
 const assertPriceLimits = (
   params: unknown,
   settings: {
@@ -35,16 +54,39 @@ const assertPriceLimits = (
     maxOrderAmountJpy: number | null
   },
 ) => {
-  const price = numberFromParams(params, 'price')
+  const input = record(params)
+  const directAmount = money(input?.amount)
+  const execution = record(input?.execution)
+  const structuredPrice = money(execution?.limitPrice)
+  const legacyPrice = numberFromParams(params, 'price')
+  const price = structuredPrice?.value ?? legacyPrice
   const quantity = numberFromParams(params, 'quantity')
+
+  if (directAmount && directAmount.value <= 0) throw new Error('order amount must be positive')
+  if (price != null && price <= 0) throw new Error('order price must be positive')
+  if (quantity != null && quantity <= 0) throw new Error('order quantity must be positive')
+
+  if (
+    (settings.maxOrderPriceJpy != null || settings.maxOrderAmountJpy != null) &&
+    ((directAmount && directAmount.currency !== 'JPY') ||
+      (structuredPrice && structuredPrice.currency !== 'JPY'))
+  ) {
+    throw new Error('JPY trade limits require an explicit currency conversion for this order')
+  }
 
   if (settings.maxOrderPriceJpy != null && price != null && price > settings.maxOrderPriceJpy) {
     throw new Error(`order price exceeds API key limit (${settings.maxOrderPriceJpy} JPY)`)
   }
 
   if (settings.maxOrderAmountJpy == null) return
+  if (directAmount) {
+    if (directAmount.value > settings.maxOrderAmountJpy) {
+      throw new Error(`order amount exceeds API key limit (${settings.maxOrderAmountJpy} JPY)`)
+    }
+    return
+  }
   if (price == null || quantity == null) {
-    throw new Error('order amount limit requires price and quantity in trading params')
+    throw new Error('order amount limit requires an amount or a price and quantity')
   }
 
   const amount = price * quantity
@@ -103,7 +145,7 @@ export const assertAndConsumeApiKeyTradeLimits = async ({
 
   const now = new Date()
   await checkAndConsumeWindow(db, apiKeyId, '1h', key.maxTradesPerHour, now)
-  await checkAndConsumeWindow(db, apiKeyId, '3h', key.maxTradesPer6Hours, now)
+  await checkAndConsumeWindow(db, apiKeyId, '6h', key.maxTradesPer6Hours, now)
   await checkAndConsumeWindow(db, apiKeyId, '1d', key.maxTradesPerDay, now)
 }
 

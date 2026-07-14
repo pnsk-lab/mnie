@@ -26,7 +26,7 @@ const apiKeyAuth = async (db: Db, token: string) => {
         type: 'apiKey',
         authenticated: true,
         apiKeyId: apiKey.id,
-        scopes: apiKey.scopes?.length ? apiKey.scopes : ['read', 'write', 'trade', 'mcp'],
+        scopes: apiKey.scopes?.length ? apiKey.scopes : ['read', 'trade'],
       } satisfies AuthContext)
     : ({ type: 'none', authenticated: false } satisfies AuthContext)
 }

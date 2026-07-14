@@ -256,7 +256,7 @@ const confirmCorrection = async () => {
         {{
           orderHistoryLoaded
             ? orderHistoryNotice
-              ? `SBI SDK は取引履歴なしを返しました (${orderHistoryNotice})`
+              ? `プロバイダは取引履歴なしを返しました (${orderHistoryNotice})`
               : '該当する注文履歴はありません'
             : '注文履歴はまだ取得されていません'
         }}

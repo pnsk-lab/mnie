@@ -4,7 +4,9 @@ import type {
   FinancialProvider,
   FinancialWorkspace,
   OperationMap,
+  OperationAvailability,
   ProfileDescriptor,
+  ProviderAvailability,
   ProviderDescriptor,
   WorkspaceOperations,
 } from '@mnie/types'
@@ -29,15 +31,27 @@ export interface MnieRpcError extends Error {
 }
 
 export interface MnieProviderConnection {
-  connected: boolean
-  provider: string
-  profileId?: string
-  requires2fa?: boolean
-  qrurl?: string
-  url?: string
+  status: 'connected' | 'interaction-required'
+  providerId: string
+  profileId: string
+  interaction?: {
+    id: string
+    kind: 'qr' | 'captcha'
+    url?: string
+    qrUrl?: string
+    imageDataUrl?: string
+  }
 }
 
-export interface MnieWorkspace extends FinancialWorkspace<WorkspaceOperations, OperationMap> {}
+export interface MnieWorkspace extends FinancialWorkspace<WorkspaceOperations, OperationMap> {
+  /** Starts or resumes authentication and keeps the resulting provider open on this connection. */
+  connectProfile(profileId: string): Promise<MnieProviderConnection>
+  /** Completes an interactive authentication challenge such as SMBC Direct QR approval. */
+  completeProfileConnection(
+    profileId: string,
+    interactionId: string,
+  ): Promise<MnieProviderConnection>
+}
 
 interface JsonRpcResponse {
   jsonrpc?: '2.0'
@@ -188,8 +202,20 @@ const profileProxy = (
         return (operation: string, input: unknown) =>
           rpc.call('profile.invoke', { profileId, operation, input })
       if (property === 'checkAvailability')
-        return () =>
-          rpc.call('profile.availability', { profileId }) as Promise<AvailabilityCheckResult>
+        return async () =>
+          ((await rpc.call('profile.availability', { profileId })) as ProviderAvailability)
+            .connection as AvailabilityCheckResult
+      if (property === 'checkOperationAvailability')
+        return async (request: { operation: string; input?: unknown }) => {
+          const availability = (await rpc.call('profile.availability', {
+            profileId,
+            operation: request.operation,
+            input: request.input,
+          })) as ProviderAvailability
+          const operation = availability.operations[request.operation]
+          if (!operation) throw new Error('operation availability was not returned')
+          return operation as OperationAvailability
+        }
       if (property === 'exportSession')
         return () => {
           throw new Error('remote sessions cannot be exported')
@@ -203,12 +229,19 @@ const profileProxy = (
 export const connectMnie = async (options: ConnectMnieOptions): Promise<MnieWorkspace> => {
   const rpc = new JsonRpcConnection(options)
   const workspace: MnieWorkspace = {
-    operations: async () => ['profiles.list', 'portfolio.valuation.get', 'history.list'] as const,
+    operations: () => rpc.call('workspace.operations') as Promise<(keyof WorkspaceOperations)[]>,
     profiles: () =>
       rpc.call('workspace.invoke', { operation: 'profiles.list', input: {} }) as Promise<
         ProfileDescriptor[]
       >,
     profile: (profileId) => profileProxy(rpc, profileId),
+    connectProfile: (profileId) =>
+      rpc.call('profile.connect', { profileId }) as Promise<MnieProviderConnection>,
+    completeProfileConnection: (profileId, interactionId) =>
+      rpc.call('profile.connection.complete', {
+        profileId,
+        interactionId,
+      }) as Promise<MnieProviderConnection>,
     invoke: (operation, input) => rpc.call('workspace.invoke', { operation, input }) as never,
     close: () => rpc.close(),
   }

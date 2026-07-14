@@ -28,6 +28,7 @@ import type {
   AuthManagerConfig,
   CronJob,
   ProfileAvailability,
+  ProviderDefinition,
   SbiPasskey,
 } from '../../api'
 import ApiKeyPolicyEditor from '../../components/ApiKeyPolicyEditor.vue'
@@ -42,6 +43,7 @@ const props = defineProps<{
   sbiPasskeys: SbiPasskey[]
   authManagers: AuthManagerConfig[]
   profiles: AccountProfile[]
+  providerDefinitions: ProviderDefinition[]
   profileAvailability: Record<string, ProfileAvailability>
   profileAvailabilityCheckedAt: Record<string, number>
   profileAvailabilityLoading: Record<string, boolean>
@@ -74,9 +76,19 @@ const payPayBankLabel = defineModel<string>('payPayBankLabel', { required: true 
 const payPayBankBranchNo = defineModel<string>('payPayBankBranchNo', { required: true })
 const payPayBankAccountNo = defineModel<string>('payPayBankAccountNo', { required: true })
 const payPayBankPassword = defineModel<string>('payPayBankPassword', { required: true })
+const payPaySecLabel = defineModel<string>('payPaySecLabel', { required: true })
+const payPaySecCredentialJson = defineModel<string>('payPaySecCredentialJson', { required: true })
+const payPaySecTradePassword = defineModel<string>('payPaySecTradePassword', { required: true })
 const editedLabel = ref('')
 const editedColor = ref('')
+const editedTradePassword = ref('')
 const showPasskeyJsonDialog = ref(false)
+const passkeyJsonProvider = ref<'sbisec' | 'paypay-sec'>('sbisec')
+
+const openPasskeyJsonDialog = (provider: 'sbisec' | 'paypay-sec') => {
+  passkeyJsonProvider.value = provider
+  showPasskeyJsonDialog.value = true
+}
 
 const emit = defineEmits<{
   addApiKey: []
@@ -86,14 +98,15 @@ const emit = defineEmits<{
   addSbiPasskey: []
   addAuthManager: []
   removeAuthManager: [id: string]
-  fillProviderCredentials: []
+  fillProviderCredentials: [provider?: AccountProfile['provider']]
   addSmbcDirectProfile: []
   addPayPayBankProfile: []
+  addPayPaySecProfile: []
   finishSmbc2fa: []
   forceProfileAvailability: [profileId: string]
   connect: []
   removeSbiPasskey: [id: string]
-  updateProfile: [id: string, label: string, color: string]
+  updateProfile: [id: string, label: string, color: string, tradePassword?: string]
 }>()
 
 type SettingsSection = 'api-keys' | 'providers' | 'auth-managers'
@@ -103,13 +116,11 @@ const router = useRouter()
 const editingApiKey = ref<ApiKey | null>(null)
 const profileToDelete = ref<AccountProfile | null>(null)
 const unavailableProfile = ref<AccountProfile | null>(null)
-const providerIds = ['sbisec', 'smbc-direct', 'mobilesuica', 'paypay-bank'] as const
 const selectedProvider = computed<AccountProfile['provider']>(() => {
   const provider = route.params.provider
-  return typeof provider === 'string' &&
-    providerIds.includes(provider as AccountProfile['provider'])
-    ? (provider as AccountProfile['provider'])
-    : 'sbisec'
+  return typeof provider === 'string' && props.providerDefinitions.some(({ id }) => id === provider)
+    ? provider
+    : (props.providerDefinitions[0]?.id ?? '')
 })
 
 const activeSection = computed<SettingsSection>(() => {
@@ -143,44 +154,32 @@ watch(
   (profile) => {
     editedLabel.value = profile?.label ?? ''
     editedColor.value = profile ? profileColor(profile) : ''
+    editedTradePassword.value = ''
   },
   { immediate: true },
 )
 
-const providerCards = computed(() => [
-  {
-    id: 'paypay-bank' as const,
-    label: 'PayPay銀行',
-    description: '銀行口座・残高',
-    icon: WalletCards,
-    connectionCount: props.profiles.filter((profile) => profile.provider === 'paypay-bank').length,
-    connected: props.profiles.some((profile) => profile.provider === 'paypay-bank'),
-  },
-  {
-    id: 'sbisec' as const,
-    label: 'SBI証券',
-    description: '証券口座・取引',
-    icon: Landmark,
-    connectionCount: props.sbiPasskeys.length,
-    connected: props.sbiPasskeys.length > 0,
-  },
-  {
-    id: 'smbc-direct' as const,
-    label: 'SMBC Direct',
-    description: '銀行口座・残高',
-    icon: Building2,
-    connectionCount: props.profiles.filter((profile) => profile.provider === 'smbc-direct').length,
-    connected: props.profiles.some((profile) => profile.provider === 'smbc-direct'),
-  },
-  {
-    id: 'mobilesuica' as const,
-    label: 'モバイルSuica',
-    description: '利用履歴',
-    icon: TrainFront,
-    connectionCount: props.profiles.filter((profile) => profile.provider === 'mobilesuica').length,
-    connected: props.profiles.some((profile) => profile.provider === 'mobilesuica'),
-  },
-])
+const providerPresentation = (provider: ProviderDefinition) => {
+  if (provider.kind === 'brokerage') return { icon: Landmark, description: '証券口座・取引' }
+  if (provider.kind === 'bank') return { icon: Building2, description: '銀行口座・残高' }
+  if (provider.kind === 'transit-card') return { icon: TrainFront, description: '利用履歴' }
+  return { icon: WalletCards, description: provider.kind }
+}
+
+const providerCards = computed(() =>
+  props.providerDefinitions.map((provider) => {
+    const connectionCount = props.profiles.filter(
+      (profile) => profile.provider === provider.id,
+    ).length
+    return {
+      id: provider.id,
+      label: provider.name,
+      ...providerPresentation(provider),
+      connectionCount,
+      connected: connectionCount > 0,
+    }
+  }),
+)
 
 const settingsGroups = [
   {
@@ -525,6 +524,15 @@ const saveEditingApiKey = () => {
                     />
                   </label>
                 </div>
+                <label v-if="selectedProvider === 'paypay-sec'" :class="ui.label">
+                  取引パスワード（変更する場合のみ）
+                  <input
+                    v-model="editedTradePassword"
+                    :class="ui.input"
+                    type="password"
+                    autocomplete="new-password"
+                  />
+                </label>
                 <div v-if="selectedProvider === 'smbc-direct'" class="flex justify-end">
                   <button
                     :class="ui.primaryButton"
@@ -558,7 +566,15 @@ const saveEditingApiKey = () => {
                   <button
                     :class="ui.primaryButton"
                     type="button"
-                    @click="emit('updateProfile', editedProfile.id, editedLabel, editedColor)"
+                    @click="
+                      emit(
+                        'updateProfile',
+                        editedProfile.id,
+                        editedLabel,
+                        editedColor,
+                        editedTradePassword || undefined,
+                      )
+                    "
                   >
                     <Save class="h-4 w-4" aria-hidden="true" /> 保存
                   </button>
@@ -605,7 +621,7 @@ const saveEditingApiKey = () => {
                     type="button"
                     title="パスキー JSON をインポート"
                     aria-label="パスキー JSON をインポート"
-                    @click="showPasskeyJsonDialog = true"
+                    @click="openPasskeyJsonDialog('sbisec')"
                   >
                     <Import class="h-4 w-4" aria-hidden="true" />
                   </button>
@@ -634,6 +650,50 @@ const saveEditingApiKey = () => {
               </div>
               <div class="flex justify-end">
                 <button :class="ui.primaryButton" type="button" @click="emit('addSbiPasskey')">
+                  <Save class="h-4 w-4" aria-hidden="true" /> 保存
+                </button>
+              </div>
+            </template>
+
+            <template v-else-if="selectedProvider === 'paypay-sec'">
+              <label :class="ui.label"
+                >名前<input v-model="payPaySecLabel" :class="ui.input" placeholder="例: PayPay証券"
+              /></label>
+              <div class="grid gap-2">
+                <div class="flex items-center justify-between gap-3">
+                  <span class="text-sm font-bold text-[#d3e3fd]">パスキー JSON</span>
+                  <button
+                    :class="ui.ghostButton"
+                    class="!h-9 !w-9 !p-0"
+                    type="button"
+                    title="パスキー JSON をインポート"
+                    aria-label="パスキー JSON をインポート"
+                    @click="openPasskeyJsonDialog('paypay-sec')"
+                  >
+                    <Import class="h-4 w-4" aria-hidden="true" />
+                  </button>
+                </div>
+                <textarea
+                  v-model="payPaySecCredentialJson"
+                  :class="[ui.input, 'min-h-44 py-3 font-mono text-xs']"
+                  spellcheck="false"
+                  placeholder="{ ... }"
+                ></textarea>
+              </div>
+              <label :class="ui.label"
+                >取引パスワード<input
+                  v-model="payPaySecTradePassword"
+                  :class="ui.input"
+                  type="password"
+                  autocomplete="new-password"
+                  required
+              /></label>
+              <div class="flex justify-end">
+                <button
+                  :class="ui.primaryButton"
+                  type="button"
+                  @click="emit('addPayPaySecProfile')"
+                >
                   <Save class="h-4 w-4" aria-hidden="true" /> 保存
                 </button>
               </div>
@@ -737,6 +797,9 @@ const saveEditingApiKey = () => {
                 </button>
               </div>
             </template>
+            <p v-else class="text-sm text-red-300" role="alert">
+              このプロバイダーの認証フォームはまだ実装されていません。登録層に認証処理を追加してください。
+            </p>
           </article>
         </template>
 
@@ -868,7 +931,7 @@ const saveEditingApiKey = () => {
         v-model:selected-auth-manager-id="selectedAuthManagerId"
         v-model:auth-manager-master-password="authManagerMasterPassword"
         @close="showPasskeyJsonDialog = false"
-        @fill="emit('fillProviderCredentials')"
+        @fill="emit('fillProviderCredentials', passkeyJsonProvider)"
       />
       <UiModal
         v-if="unavailableProfile"
