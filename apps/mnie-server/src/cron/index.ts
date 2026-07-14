@@ -3,6 +3,7 @@ import type { Db } from '../db'
 import { fetchAssetValuation, saveAssetValuation } from '../assets'
 import { checkProfileAvailability, listProfiles, type CachedAvailability } from '../availability'
 import type { ProviderRegistry } from '../providers/registry'
+import { runQueuedReconciliation } from '../reconciliation'
 
 export interface CronJobStatus {
   id: string
@@ -69,6 +70,12 @@ export const createCronSystem = (
     schedule: '* * * * *',
     running: false,
   }
+  const reconciliationStatus: CronJobStatus = {
+    id: 'reconciliation',
+    label: '取引照合',
+    schedule: '* * * * *',
+    running: false,
+  }
   const lastSessionRuns = new Map<string, number>()
   const lastAssetRuns = new Map<string, number>()
   const activeRuns = new Set<Promise<void>>()
@@ -129,6 +136,12 @@ export const createCronSystem = (
     if (errors.length) throw new Error(errors.join('; '))
   }
 
+  const reconcile = async () => {
+    while (await runQueuedReconciliation(db)) {
+      // Drain queued ranges before the next cron interval.
+    }
+  }
+
   const run = (status: CronJobStatus, operation: () => Promise<void>) => {
     if (closed) return
     const active = runExclusive(status, operation)
@@ -142,15 +155,22 @@ export const createCronSystem = (
           Bun.cron(availabilityStatus.schedule, () => run(availabilityStatus, refreshAvailability)),
           Bun.cron(sessionStatus.schedule, () => run(sessionStatus, maintainSessions)),
           Bun.cron(assetStatus.schedule, () => run(assetStatus, updateAssets)),
+          Bun.cron(reconciliationStatus.schedule, () => run(reconciliationStatus, reconcile)),
         ]
   if (options.start !== false) {
     run(availabilityStatus, refreshAvailability)
     run(sessionStatus, maintainSessions)
     run(assetStatus, updateAssets)
+    run(reconciliationStatus, reconcile)
   }
 
   return {
-    jobs: () => [{ ...sessionStatus }, { ...availabilityStatus }, { ...assetStatus }],
+    jobs: () => [
+      { ...sessionStatus },
+      { ...availabilityStatus },
+      { ...assetStatus },
+      { ...reconciliationStatus },
+    ],
     availability: (profileId) =>
       Object.fromEntries([...availabilityCache].filter(([id]) => !profileId || id === profileId)),
     setAvailability: (profileId, value) => availabilityCache.set(profileId, value),

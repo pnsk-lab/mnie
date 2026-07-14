@@ -16,7 +16,7 @@ import { randomToken, sha256 } from './crypto'
 const CODE_TTL_MS = 10 * 60 * 1000
 const ACCESS_TOKEN_TTL_SECONDS = 60 * 60
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000
-const DEFAULT_SCOPES = ['read', 'trade'] as const
+const DEFAULT_SCOPES = ['read', 'trade', 'reconcile'] as const
 
 export const createOAuthAuthorizationCode = async (
   db: Db,

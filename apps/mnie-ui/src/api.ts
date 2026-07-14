@@ -179,6 +179,34 @@ export interface HistoryListError {
   message: string
 }
 
+export interface ReconciliationProposal {
+  id: string
+  score: number
+  event: {
+    id: string
+    kind: string
+    state: string
+    completeness: string
+    occurredAt: { from: string; to: string }
+    metadata?: { rail?: string; description?: string }
+  }
+  observations: Array<{
+    id: string
+    description: string
+    direction: 'credit' | 'debit' | 'neutral'
+    amount: { kind: 'money'; money: { currency: string; value: string } } | null
+    occurredAt: string
+  }>
+  bindings: Array<{ id: string; evidence: Array<{ kind: string }> }>
+}
+
+export interface FinancialAccount {
+  id: string
+  connectorTypeId: string
+  providerAccountId: string
+  kind: string
+}
+
 export type ProfileAvailability =
   | { ok: true; checkedAt?: string; operations?: Record<string, unknown> }
   | {
@@ -407,6 +435,23 @@ export const listHistory = (
     limit?: number
   } = {},
 ) => workspaceRequest<{ items: HistoryItem[]; errors: HistoryListError[] }>('history.list', input)
+
+export const listReconciliationProposals = () =>
+  workspaceRequest<{ items: ReconciliationProposal[] }>('reconciliation.proposals.list')
+
+export const listFinancialAccounts = () =>
+  workspaceRequest<FinancialAccount[]>('financial-accounts.list')
+
+export const listAccountLinks = () => workspaceRequest<unknown[]>('account-links.list')
+
+export const saveAccountLink = (input: Record<string, unknown>) =>
+  workspaceRequest('account-links.upsert', input)
+
+export const confirmReconciliationProposal = (proposalId: string) =>
+  workspaceRequest('reconciliation.confirm', { proposalId })
+
+export const rejectReconciliationProposal = (proposalId: string, reason?: string) =>
+  workspaceRequest('reconciliation.reject', { proposalId, ...(reason ? { reason } : {}) })
 
 export const checkAccountProfileAvailability = () =>
   adminRequest<{ availability: Record<string, ProfileAvailability> }>(

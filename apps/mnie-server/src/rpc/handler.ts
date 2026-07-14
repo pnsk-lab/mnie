@@ -45,6 +45,23 @@ const assertOperationScope = (state: RpcSocketState, operation: string, input?: 
   if (!(state.scopes ?? []).includes(required)) throw new Error(`missing OAuth scope: ${required}`)
 }
 
+const isReconciliationWrite = (operation: string) =>
+  operation === 'reconciliation.confirm' ||
+  operation === 'reconciliation.reject' ||
+  operation === 'account-links.upsert' ||
+  operation === 'account-links.delete'
+
+const assertWorkspaceOperationScope = (state: RpcSocketState, operation: string) => {
+  assertReadScope(state)
+  if (
+    state.apiKeyId &&
+    isReconciliationWrite(operation) &&
+    !(state.scopes ?? []).includes('reconcile')
+  ) {
+    throw new Error('missing OAuth scope: reconcile')
+  }
+}
+
 export const tradeLimitParams = (
   input: unknown,
   transactionAmount?: { currency: string; value: string },
@@ -105,12 +122,12 @@ export const handleRpc = async (
   }
 
   if (request.method === 'workspace.invoke') {
-    assertReadScope(state)
     const params = objectParams(request.params)
     const operation = String(params.operation ?? '')
     if (!WORKSPACE_OPERATIONS.includes(operation as (typeof WORKSPACE_OPERATIONS)[number])) {
       return rpcError(request.id, -32601, 'workspace operation not found')
     }
+    assertWorkspaceOperationScope(state, operation)
     return rpcResult(
       request.id,
       await invokeWorkspace(db, providers, operation, objectParams(params.input)),

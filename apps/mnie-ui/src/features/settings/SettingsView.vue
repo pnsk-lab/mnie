@@ -557,7 +557,7 @@ const saveEditingApiKey = () => {
                   </button>
                 </div>
                 <MobileSuicaPanel
-                  v-else-if="selectedProvider === 'mobilesuica'"
+                  v-else-if="selectedProvider === 'mobile-suica'"
                   reauth
                   :profile-id="editedProfile.id"
                   @reauthenticated="emit('forceProfileAvailability', $event)"
@@ -580,14 +580,8 @@ const saveEditingApiKey = () => {
                   </button>
                 </div>
                 <div
-                  v-if="selectedProvider === 'smbc-direct' || selectedProvider === 'mobilesuica'"
-                  v-for="job in cronJobs.filter(
-                    (value) =>
-                      value.id ===
-                      (selectedProvider === 'mobilesuica'
-                        ? 'mobilesuica-session'
-                        : 'smbc-direct-session'),
-                  )"
+                  v-if="selectedProvider === 'smbc-direct' || selectedProvider === 'mobile-suica'"
+                  v-for="job in cronJobs.filter((value) => value.id === 'provider-sessions')"
                   :key="job.id"
                   class="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-slate-800 p-4 text-sm"
                 >
@@ -595,7 +589,7 @@ const saveEditingApiKey = () => {
                     <h4 class="font-black text-slate-100">{{ job.label }}</h4>
                     <p class="mt-1 text-slate-300">
                       {{
-                        selectedProvider === 'mobilesuica'
+                        selectedProvider === 'mobile-suica'
                           ? '5 分ごとに利用履歴を取得して接続を維持します。'
                           : '5 分ごとに接続を維持します。'
                       }}
@@ -756,7 +750,7 @@ const saveEditingApiKey = () => {
               </div>
             </template>
 
-            <template v-else-if="selectedProvider === 'mobilesuica'">
+            <template v-else-if="selectedProvider === 'mobile-suica'">
               <MobileSuicaPanel />
             </template>
             <template v-else-if="selectedProvider === 'paypay-bank'">

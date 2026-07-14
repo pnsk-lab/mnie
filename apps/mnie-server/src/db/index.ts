@@ -85,6 +85,7 @@ export const createDb = (path: string) => {
     .map((column) => column.name)
   if (!accountProfileColumns.includes('color'))
     sqlite.run('ALTER TABLE account_profiles ADD COLUMN color TEXT')
+  sqlite.run(`UPDATE account_profiles SET provider = 'mobile-suica' WHERE provider = 'mobilesuica'`)
   sqlite.run(`
     CREATE TABLE IF NOT EXISTS asset_valuations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -130,6 +131,196 @@ export const createDb = (path: string) => {
       covered_to INTEGER NOT NULL,
       fetched_at INTEGER NOT NULL
     )
+  `)
+  sqlite.run(`
+    CREATE TABLE IF NOT EXISTS financial_accounts (
+      id TEXT PRIMARY KEY,
+      profile_id TEXT NOT NULL,
+      connector_type_id TEXT NOT NULL,
+      institution_id TEXT NOT NULL,
+      provider_account_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE (profile_id, provider_account_id)
+    )
+  `)
+  sqlite.run(`
+    CREATE TABLE IF NOT EXISTS transaction_observation_snapshots (
+      id TEXT PRIMARY KEY,
+      profile_id TEXT NOT NULL,
+      connector_type_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      fetched_at INTEGER NOT NULL
+    )
+  `)
+  sqlite.run(`
+    CREATE INDEX IF NOT EXISTS transaction_observation_snapshots_profile_fetched_idx
+    ON transaction_observation_snapshots (profile_id, fetched_at DESC)
+  `)
+  sqlite.run(`
+    CREATE TABLE IF NOT EXISTS transaction_observations (
+      id TEXT PRIMARY KEY,
+      profile_id TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      connector_type_id TEXT NOT NULL,
+      institution_id TEXT NOT NULL,
+      provider_account_id TEXT NOT NULL,
+      provider_transaction_id TEXT,
+      fingerprint TEXT NOT NULL,
+      current_revision INTEGER NOT NULL,
+      first_seen_at INTEGER NOT NULL,
+      last_seen_at INTEGER NOT NULL
+    )
+  `)
+  sqlite.run(`
+    CREATE UNIQUE INDEX IF NOT EXISTS transaction_observations_profile_upstream_unique
+    ON transaction_observations (profile_id, provider_transaction_id)
+    WHERE provider_transaction_id IS NOT NULL
+  `)
+  sqlite.run(`
+    CREATE INDEX IF NOT EXISTS transaction_observations_profile_fingerprint_idx
+    ON transaction_observations (profile_id, account_id, fingerprint)
+  `)
+  sqlite.run(`
+    CREATE TABLE IF NOT EXISTS transaction_observation_revisions (
+      observation_id TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      snapshot_id TEXT NOT NULL,
+      normalized_json TEXT NOT NULL,
+      parser_version TEXT NOT NULL,
+      fetched_at INTEGER NOT NULL,
+      PRIMARY KEY (observation_id, revision)
+    )
+  `)
+  sqlite.run(`
+    CREATE INDEX IF NOT EXISTS transaction_observation_revisions_snapshot_idx
+    ON transaction_observation_revisions (snapshot_id)
+  `)
+  sqlite.run(`
+    CREATE TABLE IF NOT EXISTS ledger_accounts (
+      id TEXT PRIMARY KEY,
+      class TEXT NOT NULL,
+      financial_account_id TEXT,
+      name TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `)
+  sqlite.run(`
+    CREATE UNIQUE INDEX IF NOT EXISTS ledger_accounts_financial_account_unique
+    ON ledger_accounts (financial_account_id) WHERE financial_account_id IS NOT NULL
+  `)
+  sqlite.run(`
+    CREATE TABLE IF NOT EXISTS economic_events (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      state TEXT NOT NULL,
+      completeness TEXT NOT NULL,
+      occurred_from INTEGER NOT NULL,
+      occurred_to INTEGER NOT NULL,
+      metadata_json TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `)
+  sqlite.run(`
+    CREATE INDEX IF NOT EXISTS economic_events_occurred_idx
+    ON economic_events (occurred_from, occurred_to)
+  `)
+  sqlite.run(`
+    CREATE TABLE IF NOT EXISTS event_postings (
+      id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      ledger_account_id TEXT NOT NULL,
+      side TEXT NOT NULL,
+      amount_json TEXT NOT NULL,
+      role TEXT
+    )
+  `)
+  sqlite.run(`
+    CREATE TABLE IF NOT EXISTS observation_bindings (
+      id TEXT PRIMARY KEY,
+      observation_id TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      posting_ids_json TEXT,
+      state TEXT NOT NULL,
+      provenance TEXT NOT NULL,
+      confidence TEXT,
+      matcher_version TEXT,
+      evidence_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `)
+  sqlite.run(`
+    CREATE UNIQUE INDEX IF NOT EXISTS observation_bindings_confirmed_observation_unique
+    ON observation_bindings (observation_id) WHERE state = 'confirmed'
+  `)
+  sqlite.run(`
+    CREATE TABLE IF NOT EXISTS event_relations (
+      id TEXT PRIMARY KEY,
+      from_event_id TEXT NOT NULL,
+      to_event_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `)
+  sqlite.run(`
+    CREATE TABLE IF NOT EXISTS account_links (
+      id TEXT PRIMARY KEY,
+      source_account_id TEXT NOT NULL,
+      target_account_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      instrument_json TEXT,
+      valid_from INTEGER,
+      valid_to INTEGER,
+      source TEXT NOT NULL,
+      confirmed INTEGER NOT NULL
+    )
+  `)
+  sqlite.run(`
+    CREATE TABLE IF NOT EXISTS reconciliation_proposals (
+      id TEXT PRIMARY KEY,
+      candidate_key TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      score TEXT NOT NULL,
+      state TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `)
+  sqlite.run(`
+    CREATE UNIQUE INDEX IF NOT EXISTS reconciliation_proposals_candidate_unique
+    ON reconciliation_proposals (candidate_key) WHERE state = 'proposed'
+  `)
+  sqlite.run(`
+    CREATE TABLE IF NOT EXISTS reconciliation_decisions (
+      id TEXT PRIMARY KEY,
+      proposal_id TEXT NOT NULL,
+      candidate_key TEXT NOT NULL,
+      decision TEXT NOT NULL,
+      reason TEXT,
+      decided_at INTEGER NOT NULL
+    )
+  `)
+  sqlite.run(`
+    CREATE INDEX IF NOT EXISTS reconciliation_decisions_candidate_idx
+    ON reconciliation_decisions (candidate_key, decided_at DESC)
+  `)
+  sqlite.run(`
+    CREATE TABLE IF NOT EXISTS reconciliation_jobs (
+      id TEXT PRIMARY KEY,
+      from_at INTEGER NOT NULL,
+      to_at INTEGER NOT NULL,
+      state TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      started_at INTEGER,
+      completed_at INTEGER,
+      error TEXT
+    )
+  `)
+  sqlite.run(`
+    CREATE INDEX IF NOT EXISTS reconciliation_jobs_state_created_idx
+    ON reconciliation_jobs (state, created_at)
   `)
   sqlite.run(`
     INSERT OR IGNORE INTO account_profiles (id, provider, label, keyring_account, created_at, updated_at)

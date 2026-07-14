@@ -599,7 +599,7 @@ export type WorkspaceOperations = {
     PortfolioValuation
   >
   'portfolio.overview.get': OperationDefinition<{}, PortfolioOverview>
-}
+} & ReconciliationOperations
 
 export type OperationName<Operations> = Extract<keyof Operations, string>
 export type OperationRequest<Operations, Name extends OperationName<Operations>> =
@@ -689,3 +689,4 @@ export interface FinancialWorkspace<
   ): Promise<OperationResponse<Operations, Name>>
   close(): void | Promise<void>
 }
+import type { ReconciliationOperations } from './reconciliation'

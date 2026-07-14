@@ -13,6 +13,7 @@ import OAuthApprovalPanel from './features/oauth/OAuthApprovalPanel.vue'
 import { useOAuthApproval } from './features/oauth/useOAuthApproval'
 import OrderDialogs from './features/orders/OrderDialogs.vue'
 import PortfolioView from './features/portfolio/PortfolioView.vue'
+import ReconciliationView from './features/reconciliation/ReconciliationView.vue'
 import SettingsView from './features/settings/SettingsView.vue'
 import TradeView from './features/trade/TradeView.vue'
 import { useTradingSession } from './features/trading/useTradingSession'
@@ -460,6 +461,8 @@ onUnmounted(() => {
           @estimate="estimateCashOrder"
           @confirm-order="askPlaceOrder"
         />
+
+        <ReconciliationView v-if="activeTab === 'history'" />
 
         <HistoryView
           v-if="activeTab === 'history'"

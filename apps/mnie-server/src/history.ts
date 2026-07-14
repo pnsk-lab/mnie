@@ -2,7 +2,9 @@ import { and, asc, eq, gte, inArray, lte } from 'drizzle-orm'
 import type { HistoryItem, HistoryListRequest, Transaction } from '@mnie/types'
 import type { Db } from './db'
 import { accountProfiles, assetValuations, historySyncs, historyTransactions } from './db/schema'
+import { persistTransactionObservations } from './observations'
 import type { ProviderRegistry } from './providers/registry'
+import { enqueueReconciliation } from './reconciliation'
 
 const refreshIntervalMs = 5 * 60 * 60_000
 const defaultRangeMs = 30 * 24 * 60 * 60_000
@@ -59,26 +61,43 @@ const syncTransactions = async (
       }
       const items = await fetchPage(from, to)
       const fetchedAt = new Date()
-      for (const item of items) {
-        if (item.kind !== 'transaction') continue
-        const occurredAt = new Date(item.occurredAt)
+      const transactions = items
+        .filter(
+          (item): item is Extract<HistoryItem, { kind: 'transaction' }> =>
+            item.kind === 'transaction',
+        )
+        .map((item) => item.transaction)
+      const uniqueTransactions =
+        profile.provider === 'mobile-suica'
+          ? transactions
+          : [...new Map(transactions.map((transaction) => [transaction.id, transaction])).values()]
+      const observations = await persistTransactionObservations(
+        db,
+        { id: profile.id, provider: profile.provider },
+        uniqueTransactions,
+        fetchedAt,
+      )
+      for (const { historyTransaction } of observations) {
+        const occurredAt = new Date(historyTransaction.occurredAt)
         if (!Number.isFinite(occurredAt.getTime())) {
-          throw new Error(`provider returned invalid transaction date: ${item.occurredAt}`)
+          throw new Error(
+            `provider returned invalid transaction date: ${historyTransaction.occurredAt}`,
+          )
         }
         await db
           .insert(historyTransactions)
           .values({
             profileId: profile.id,
-            transactionId: item.transaction.id,
+            transactionId: historyTransaction.id,
             occurredAt,
-            transaction: item.transaction,
+            transaction: historyTransaction,
             fetchedAt,
           })
           .onConflictDoUpdate({
             target: [historyTransactions.profileId, historyTransactions.transactionId],
             set: {
               occurredAt,
-              transaction: item.transaction,
+              transaction: historyTransaction,
               fetchedAt,
             },
           })
@@ -94,6 +113,7 @@ const syncTransactions = async (
             fetchedAt,
           },
         })
+      if (observations.length) await enqueueReconciliation(db, from, to)
     },
     { forceLogin },
   )

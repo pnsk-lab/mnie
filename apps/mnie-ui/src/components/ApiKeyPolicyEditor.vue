@@ -34,7 +34,7 @@ const tradingMethods = [
 
 const tradingMethodSet = new Set<string>(tradingMethods)
 const readMethods = rpcMethods.filter((method) => !tradingMethodSet.has(method))
-const scopes = ['read', 'trade'] as const
+const scopes = ['read', 'trade', 'reconcile'] as const
 
 const toggleScope = (scope: string) => {
   const current = settings.value.scopes ?? []

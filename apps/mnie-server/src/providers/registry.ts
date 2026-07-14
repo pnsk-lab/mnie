@@ -188,7 +188,7 @@ export class ProviderRegistry {
         ],
       },
       {
-        id: 'mobilesuica',
+        id: 'mobile-suica',
         name: 'Mobile Suica',
         kind: 'transit-card',
         authentication: 'credentials-and-captcha',
@@ -239,7 +239,7 @@ export class ProviderRegistry {
         ? this.config.authBaseUrl
         : providerId === 'smbc-direct'
           ? (this.config.smbcDirectLoginBaseUrl ?? this.config.smbcDirectBaseUrl)
-          : providerId === 'mobilesuica'
+          : providerId === 'mobile-suica'
             ? this.config.mobileSuicaBaseUrl
             : providerId === 'paypay-bank'
               ? this.config.payPayBankBaseUrl
@@ -426,7 +426,7 @@ export class ProviderRegistry {
       }
     }
 
-    if (profile.provider === 'mobilesuica') {
+    if (profile.provider === 'mobile-suica') {
       const secret = await readSecret<StoredMobileSuicaSecret>(profile.keyringAccount)
       if (!secret.session) throw new Error('Mobile Suica authentication is required')
       const imported = await importMobileSuicaSession(secret.session)
@@ -599,7 +599,7 @@ export class ProviderRegistry {
 
     if (reauthenticateProfileId) {
       const profile = await this.profile(reauthenticateProfileId)
-      if (profile.provider !== 'mobilesuica') throw new Error('profile is not Mobile Suica')
+      if (profile.provider !== 'mobile-suica') throw new Error('profile is not Mobile Suica')
       const secret = await readSecret<StoredMobileSuicaSecret>(profile.keyringAccount)
       if (!secret.user || !secret.password) {
         throw new Error('Mobile Suica credentials are not stored')
@@ -614,7 +614,7 @@ export class ProviderRegistry {
       label = requiredCredential(input, 'label')
       user = requiredCredential(input, 'user')
       password = requiredCredential(input, 'password')
-      profileId = randomId('mobilesuica')
+      profileId = randomId('mobile-suica')
       keyringAccount = `profile:${profileId}`
       createProfile = true
     }
@@ -682,7 +682,7 @@ export class ProviderRegistry {
     if (pending.createProfile) {
       await this.db.insert(accountProfiles).values({
         id: pending.profileId,
-        provider: 'mobilesuica',
+        provider: 'mobile-suica',
         label: pending.label,
         keyringAccount: pending.keyringAccount,
         createdAt: now,
@@ -764,7 +764,7 @@ export class ProviderRegistry {
   }
 
   sessionRefreshIntervalMs(profile: AccountProfile) {
-    return profile.provider === 'smbc-direct' || profile.provider === 'mobilesuica'
+    return profile.provider === 'smbc-direct' || profile.provider === 'mobile-suica'
       ? 5 * 60_000
       : undefined
   }
@@ -776,7 +776,7 @@ export class ProviderRegistry {
     if (profile.provider === 'paypay-bank') {
       return { from: dashedDate(from), to: dashedDate(to), kinds: ['transaction'] as const }
     }
-    if (profile.provider === 'mobilesuica') {
+    if (profile.provider === 'mobile-suica') {
       return { from: from.toISOString(), to: to.toISOString(), kinds: ['transaction'] as const }
     }
     return { kinds: ['transaction'] as const }

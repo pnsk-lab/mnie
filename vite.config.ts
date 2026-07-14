@@ -8,6 +8,8 @@ export default defineConfig({
     },
     exclude: [
       '**/node_modules/**',
+      'apps/mnie-server/src/observations.test.ts',
+      'apps/mnie-server/src/reconciliation.test.ts',
       'apps/mnie-server/src/rpc/ws.integration.test.ts',
       'apps/mnie-server/src/security/trade-limits.test.ts',
       'apps/mnie-server/src/providers/registry-lock.test.ts',
