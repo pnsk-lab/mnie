@@ -7,7 +7,7 @@ export default defineConfig({
       alwaysBundle: [/^@repo\//],
       onlyBundle: false,
     },
-    dts: true,
+    dts: process.env.MNIE_BUILD_DTS !== 'false',
     format: ['esm'],
     platform: 'node',
   },

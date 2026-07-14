@@ -27,7 +27,7 @@ RUN bun install --frozen-lockfile
 
 FROM deps AS build
 COPY . .
-RUN ./node_modules/.bin/vp run --no-cache sdk-build \
+RUN MNIE_BUILD_DTS=false ./node_modules/.bin/vp run --no-cache sdk-build \
   && bun --filter @repo/mnie-app build
 RUN mkdir -p /keyring-node-modules/@napi-rs \
   && cp -R /app/node_modules/.bun/@napi-rs+keyring@*/node_modules/@napi-rs/keyring /keyring-node-modules/@napi-rs/keyring \

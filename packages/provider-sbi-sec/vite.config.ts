@@ -7,7 +7,7 @@ export default defineConfig({
       alwaysBundle: [/^@repo\//, 'iconv-lite', 'safer-buffer'],
       onlyBundle: false,
     },
-    dts: { eager: true },
+    dts: process.env.MNIE_BUILD_DTS === 'false' ? false : { eager: true },
     format: ['esm'],
     platform: 'node',
   },
