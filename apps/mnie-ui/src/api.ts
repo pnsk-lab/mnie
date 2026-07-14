@@ -106,7 +106,6 @@ export interface PortfolioOverviewPosition {
   marketValue?: { currency: string; value: string }
   unrealizedProfitLoss?: { currency: string; value: string }
   accountType?: string
-  subClientSeqNo?: string
 }
 
 export interface PortfolioOverviewOrder {
@@ -396,7 +395,8 @@ export const listProviderDefinitions = () =>
 export const listLatestAssetValuations = () =>
   adminRequest<{ valuations: AssetValuation[] }>('assets.valuations.latest')
 
-export const getPortfolioOverview = () => adminRequest<PortfolioOverview>('portfolio.overview.get')
+export const getPortfolioOverview = () =>
+  workspaceRequest<PortfolioOverview>('portfolio.overview.get')
 
 export const listHistory = (
   input: {

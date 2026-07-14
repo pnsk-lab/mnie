@@ -3,7 +3,7 @@ import type { FinancialProvider, OperationMap } from '@mnie/types'
 import type { Db } from '../db'
 import type { AdminRpcService } from './admin'
 import type { ProviderRegistry } from '../providers/registry'
-import { handleRpc, type RpcSocketState } from './handler'
+import { handleRpc, tradeLimitParams, type RpcSocketState } from './handler'
 
 const profile = {
   id: 'profile-1',
@@ -31,6 +31,18 @@ const unusedDb = {} as Db
 const unusedAdmin = {} as AdminRpcService
 
 describe('WebSocket RPC dispatch', () => {
+  test('uses the provider-resolved confirmation amount for API key limits', () => {
+    expect(
+      tradeLimitParams(
+        { confirmationToken: 'ticket', amount: { currency: 'JPY', value: '1' } },
+        { currency: 'JPY', value: '1000' },
+      ),
+    ).toEqual({
+      confirmationToken: 'ticket',
+      amount: { currency: 'JPY', value: '1000' },
+    })
+  })
+
   test('invokes an available profile operation', async () => {
     const invoke = vi.fn(async () => ({ items: [] }))
     const provider = {

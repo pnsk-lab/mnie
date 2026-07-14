@@ -4,11 +4,11 @@ import { emptyStock } from './trading-data'
 
 describe('tradeAdapterFor', () => {
   it('keeps the SBI/default trade surface quantity based', () => {
-    expect(tradeAdapterFor('sbi-sec')).toEqual({ orderInputMode: 'quantity' })
+    expect(tradeAdapterFor('quantity')).toEqual({ orderInputMode: 'quantity' })
   })
 
-  it('maps a PayPay amount order without changing the shared ticket contract', () => {
-    const adapter = tradeAdapterFor('paypay-sec')
+  it('maps a provider-neutral amount order without changing the shared ticket contract', () => {
+    const adapter = tradeAdapterFor('amount')
     expect(adapter.orderInputMode).toBe('amount')
     expect(
       adapter.buildPreviewRequest?.({
@@ -23,8 +23,8 @@ describe('tradeAdapterFor', () => {
       accountId: 'profile-1',
       instrumentId: 'US0378331005',
       side: 'buy',
-      accountType: '3',
-      subClientSeqNo: undefined,
+      accountType: 'growthInvestment',
+      positionId: undefined,
       sellAll: false,
       amount: { currency: 'JPY', value: '1000' },
     })

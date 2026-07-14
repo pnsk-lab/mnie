@@ -35,7 +35,6 @@ import { accountProfiles, assetValuations, historySyncs, historyTransactions } f
 import { syncInitialHistory } from '../history'
 import { withProfileLock } from '../profile-lock'
 import { connectSbi } from './sbi'
-import { connectPayPaySec } from '../rpc/paypay-sec-session'
 import { randomId } from '../security/crypto'
 import { deleteSecret, readSecret, saveSecret } from '../security/keyring'
 import { operationAvailability } from './operations'
@@ -47,7 +46,8 @@ import type {
   StoredSbiPasskeySecret,
   StoredSmbcDirectSecret,
 } from './credentials'
-import { normalizePayPaySecCredential } from '../security/paypay-sec-credentials'
+import { openPayPaySec } from './paypay-sec'
+import { normalizePayPaySecCredential } from './paypay-sec-options'
 
 export type AccountProfile = typeof accountProfiles.$inferSelect
 
@@ -374,11 +374,11 @@ export class ProviderRegistry {
     }
 
     if (profile.provider === 'paypay-sec') {
-      const provider = await connectPayPaySec(this.db, this.config, profile.id)
+      const opened = await openPayPaySec(this.db, this.config, profile.id, options)
       return {
         profile,
-        provider,
-        persist: async () => {},
+        provider: opened.provider,
+        persist: opened.persist,
         release: async () => {},
       }
     }

@@ -241,6 +241,7 @@ export const useTradingSession = (
   const cashPreOrder = ref<RecordLike | null>(null)
   const ws = ref<WebSocket | null>(null)
   const providerOperations = ref(new Set<string>())
+  const providerOrderRules = ref<RecordLike>({})
   const providerAccountId = ref('')
   const rpcPending = new Map<number, RpcResolver>()
   let profileInteractionId = ''
@@ -360,19 +361,25 @@ export const useTradingSession = (
   })
   const socketReady = computed(() => ws.value?.readyState === WebSocket.OPEN)
   const connected = computed(() => profileConnected.value && socketReady.value)
-  const selectedTradeProfile = computed(() =>
-    profiles.value.find((profile) => profile.id === selectedProfileId.value),
+  const orderInputMode = computed(() =>
+    asArray(providerOrderRules.value.sizing).some(
+      (sizing) => textValue(asRecord(sizing).kind) === 'amount',
+    )
+      ? ('amount' as const)
+      : ('quantity' as const),
   )
-  const tradeAdapter = computed(() => tradeAdapterFor(selectedTradeProfile.value?.provider))
-  const orderInputMode = computed(() => tradeAdapter.value.orderInputMode)
+  const tradeAdapter = computed(() => tradeAdapterFor(orderInputMode.value))
   const orderQuantity = computed(() => Number(quantityInput.value || 0))
   const orderAmount = computed(() => Number(amountInput.value || 0))
+  const amountSizing = computed(() =>
+    asArray(providerOrderRules.value.sizing)
+      .map(asRecord)
+      .find((sizing) => sizing.kind === 'amount'),
+  )
+  const orderAmountMinimum = computed(() => numberValue(amountSizing.value?.minimum, 1))
+  const orderAmountIncrement = computed(() => numberValue(amountSizing.value?.increment, 1))
   const selectedHolding = computed(() =>
-    positions.value.find(
-      (position) =>
-        `${position.code}:${position.accountType ?? ''}:${position.subClientSeqNo ?? ''}` ===
-        selectedHoldingId.value,
-    ),
+    positions.value.find((position) => position.id === selectedHoldingId.value),
   )
   const amountOrderDraft = (): AmountOrderDraft => ({
     profileId: selectedProfileId.value,
@@ -416,9 +423,10 @@ export const useTradingSession = (
     return textValue(margin.ippanPaymentLimit) || undefined
   })
   const cashOrderAccountTypeOptions = computed<CashOrderAccountTypeOption[]>(() => {
-    if (orderInputMode.value === 'amount') return defaultCashOrderAccountTypeOptions
     const available = new Set(
-      asArray(cashPreOrder.value?.accountTypes).map((value) => textValue(value)),
+      asArray(cashPreOrder.value?.accountTypes ?? providerOrderRules.value.accountTypes).map(
+        (value) => textValue(value),
+      ),
     )
     if (available.size) {
       return defaultCashOrderAccountTypeOptions.filter((option) => available.has(option.value))
@@ -573,8 +581,7 @@ export const useTradingSession = (
         tradeSide.value === 'sell'
           ? selectedHolding.value?.accountType
           : cashOrderAccountType.value,
-      subClientSeqNo:
-        tradeSide.value === 'sell' ? selectedHolding.value?.subClientSeqNo : undefined,
+      positionId: tradeSide.value === 'sell' ? selectedHolding.value?.id : undefined,
       sellMode: amountSellMode.value,
       amount: amountInput.value,
     }),
@@ -627,7 +634,9 @@ export const useTradingSession = (
     if (tradeSide.value === 'sell' && !selectedHolding.value) return false
     return tradeSide.value === 'sell' && amountSellMode.value === 'all'
       ? true
-      : Number.isSafeInteger(orderAmount.value) && orderAmount.value >= 100
+      : Number.isSafeInteger(orderAmount.value) &&
+          orderAmount.value >= orderAmountMinimum.value &&
+          orderAmount.value % orderAmountIncrement.value === 0
   })
   const previewExpired = computed(
     () =>
@@ -1474,6 +1483,22 @@ export const useTradingSession = (
     }
   }
 
+  const loadProviderOrderRules = async (profileId: string) => {
+    providerOrderRules.value = {}
+    if (!providerOperations.value.has('investments.orders.preview')) return
+    const availability = asRecord(
+      await rpcCall<RecordLike>('profile.availability', {
+        profileId,
+        operation: 'investments.orders.preview',
+      }),
+    )
+    const operation = asRecord(asRecord(availability.operations)['investments.orders.preview'])
+    if (operation.available !== true) {
+      throw new Error(textValue(operation.message, 'このproviderでは注文を利用できません'))
+    }
+    providerOrderRules.value = asRecord(operation.orderRules)
+  }
+
   const connect = () => {
     // Portfolio/history refresh spans every profile and may require unrelated
     // interactions such as SMBC 2FA. A trading connection must only touch the
@@ -1515,6 +1540,7 @@ export const useTradingSession = (
     orderNotice.value = ''
     orderError.value = ''
     orderBusy.value = false
+    providerOrderRules.value = {}
     instrumentDetailRequestId += 1
     quoteLoading.value = false
     stopBoardPolling()
@@ -1544,6 +1570,7 @@ export const useTradingSession = (
         providerOperations.value = new Set(
           await rpcCall<string[]>('profile.operations', { profileId: selectedProfile.id }),
         )
+        await loadProviderOrderRules(selectedProfile.id)
         profileConnected.value = true
         connectedProfileId.value = selectedProfile.id
         await loadTradingData()
@@ -1573,6 +1600,7 @@ export const useTradingSession = (
       profileConnected.value = false
       connectedProfileId.value = ''
       providerOperations.value = new Set()
+      providerOrderRules.value = {}
       dataLoading.value = false
     })
     ws.value = socket
@@ -1590,6 +1618,7 @@ export const useTradingSession = (
       providerOperations.value = new Set(
         await rpcCall<string[]>('profile.operations', { profileId: selectedProfileId.value }),
       )
+      await loadProviderOrderRules(selectedProfileId.value)
       profileConnected.value = true
       connectedProfileId.value = selectedProfileId.value
       await loadTradingData()
@@ -1935,10 +1964,7 @@ export const useTradingSession = (
   }
 
   const refreshCashPreOrder = async () => {
-    if (
-      orderInputMode.value === 'amount' ||
-      !providerOperations.value.has('investments.orders.preview')
-    ) {
+    if (!providerOperations.value.has('investments.orders.preview')) {
       cashPreOrder.value = null
       return
     }
@@ -1952,7 +1978,12 @@ export const useTradingSession = (
         await rpcCall<RecordLike>('profile.availability', {
           profileId: selectedProfileId.value,
           operation: 'investments.orders.preview',
-          input: commonCashOrderParams(),
+          input:
+            orderInputMode.value === 'amount' && canRequestOrderEstimate.value
+              ? tradeAdapter.value.buildPreviewRequest?.(amountOrderDraft())
+              : orderInputMode.value === 'quantity'
+                ? commonCashOrderParams()
+                : undefined,
         }),
       )
       const operation = asRecord(asRecord(availability.operations)['investments.orders.preview'])
@@ -1960,6 +1991,7 @@ export const useTradingSession = (
         throw new Error(textValue(operation.message, 'この注文は現在利用できません'))
       }
       const rules = asRecord(operation.orderRules)
+      providerOrderRules.value = rules
       const preOrder = {
         exchangeList: asArray(rules.venues)
           .map((value) => textValue(value))
@@ -2279,13 +2311,9 @@ export const useTradingSession = (
   watch(selectedHolding, (holding) => {
     if (!holding?.accountType || orderInputMode.value !== 'amount') return
     selectStock(stockFromPosition(holding))
-    cashOrderAccountType.value =
-      (
-        { 1: 'general', 2: 'specific', 3: 'growthInvestment', 4: 'nisa' } as Record<
-          string,
-          CashOrderAccountType
-        >
-      )[holding.accountType] ?? 'specific'
+    if (defaultCashOrderAccountTypeOptions.some((option) => option.value === holding.accountType)) {
+      cashOrderAccountType.value = holding.accountType as CashOrderAccountType
+    }
   })
 
   watch(
@@ -2293,17 +2321,13 @@ export const useTradingSession = (
     ([currentPositions, code, market, mode]) => {
       if (mode !== 'amount') return
       const matchingPositions = positionsForStock(currentPositions, { code, market })
-      const selected = currentPositions.find(
-        (position) =>
-          `${position.code}:${position.accountType ?? ''}:${position.subClientSeqNo ?? ''}` ===
-          selectedHoldingId.value,
-      )
+      const selected = currentPositions.find((position) => position.id === selectedHoldingId.value)
       if (selected && !matchingPositions.includes(selected)) selectedHoldingId.value = ''
       if (!code || selectedHoldingId.value) return
       const holding = matchingPositions[0]
       if (!holding) return
       tradeSide.value = 'sell'
-      selectedHoldingId.value = `${holding.code}:${holding.accountType ?? ''}:${holding.subClientSeqNo ?? ''}`
+      selectedHoldingId.value = holding.id
     },
   )
 
@@ -2390,6 +2414,8 @@ export const useTradingSession = (
     orderError,
     orderBusy,
     orderInputMode,
+    orderAmountMinimum,
+    orderAmountIncrement,
     selectedHolding,
     chartAvailable,
     quoteLoading,

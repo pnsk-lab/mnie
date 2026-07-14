@@ -121,7 +121,25 @@ const fakeClient = () =>
       ]),
     },
     orders: {
+      confirmation: vi.fn((confirmationId: string) =>
+        confirmationId === 'confirmation-1'
+          ? {
+              confirmationId,
+              side: 'buy' as const,
+              brandId: '101',
+              instrumentName: 'Example Holdings',
+              accountType: 2 as const,
+              amount: '1000',
+              quantity: '0.5',
+              price: '2000',
+              exchangeRate: '1',
+              expiresAt: '2099-01-01T00:00:00.000Z',
+              warnings: [],
+            }
+          : undefined,
+      ),
       buy: {
+        availability: vi.fn(async () => ({ buyDisabled: false, sellDisabled: false })),
         preview: vi.fn(async () => ({
           confirmationId: 'confirmation-1',
           side: 'buy' as const,
@@ -145,6 +163,7 @@ const fakeClient = () =>
         })),
       },
       sell: {
+        availability: vi.fn(async () => ({ buyDisabled: false, sellDisabled: false })),
         preview: vi.fn(),
         submit: vi.fn(),
       },
@@ -180,8 +199,7 @@ describe('PayPay Securities provider', () => {
       averagePrice: { currency: 'JPY', value: '960' },
       currentPrice: { currency: 'JPY', value: '1000' },
       market: 'japan',
-      accountType: '2',
-      subClientSeqNo: '42',
+      accountType: 'specific',
     })
     expect(await provider.invoke('balances.list', { accountId: 'other' })).toEqual([])
   })
@@ -216,6 +234,29 @@ describe('PayPay Securities provider', () => {
       confirmationId: 'confirmation-1',
       tradePassword: 'trade-secret',
       allowTransaction: true,
+    })
+  })
+
+  test('publishes provider-neutral amount rules and a trusted confirmation amount', async () => {
+    const provider = createProvider(fakeClient(), { tradePassword: 'trade-secret' })
+
+    await expect(
+      provider.checkOperationAvailability?.({ operation: 'investments.orders.preview' }),
+    ).resolves.toMatchObject({
+      available: true,
+      orderRules: {
+        sizing: [{ kind: 'amount', currency: 'JPY', minimum: '100', increment: '1' }],
+        accountTypes: ['general', 'specific', 'growthInvestment', 'nisa'],
+      },
+    })
+    await expect(
+      provider.checkOperationAvailability?.({
+        operation: 'investments.orders.create',
+        input: { confirmationToken: 'confirmation-1', allowTransaction: true },
+      }),
+    ).resolves.toMatchObject({
+      available: true,
+      transactionAmount: { currency: 'JPY', value: '1000' },
     })
   })
 

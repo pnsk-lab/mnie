@@ -539,6 +539,7 @@ export const positionFromApi = (value: unknown): Position | null => {
       nullableNumberValue(asRecord(item.currentPrice).value) ??
       (quantity && marketValue ? marketValue / quantity : null)
     return {
+      id: textValue(item.id, `${item.accountId ?? ''}:${item.instrumentId}`),
       code: item.instrumentId,
       name: textValue(item.instrumentName, item.instrumentId),
       market: textValue(item.venue, textValue(item.market)),
@@ -557,7 +558,6 @@ export const positionFromApi = (value: unknown): Position | null => {
             ? accountTypeLabel(accountType)
             : '現物',
       accountType: accountType || undefined,
-      subClientSeqNo: textValue(item.subClientSeqNo) || undefined,
     }
   }
   const issue = issueFrom(item.issue)
@@ -570,6 +570,7 @@ export const positionFromApi = (value: unknown): Position | null => {
     numberValue(item.profitLossRate) || (costBasis ? (profitLoss / costBasis) * 100 : 0)
   const accountType = textValue(item.accountType, textValue(item.depositType))
   return {
+    id: textValue(item.id, `${issue.market}:${issue.code}:${accountType}`),
     code: issue.code,
     name: issue.name,
     market: issue.market,

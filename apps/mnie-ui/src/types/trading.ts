@@ -177,6 +177,7 @@ export interface TradeRecordRow {
 }
 
 export interface Position {
+  id: string
   code: string
   name: string
   market: string
@@ -188,7 +189,6 @@ export interface Position {
   profitLossRate: number
   type?: string
   accountType?: CashOrderAccountType | string
-  subClientSeqNo?: string
   profileId?: string
   profileLabel?: string
   providerId?: string

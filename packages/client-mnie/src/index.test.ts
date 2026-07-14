@@ -22,7 +22,12 @@ class OpeningWebSocket extends EventTarget {
           data: JSON.stringify({
             jsonrpc: '2.0',
             id: request.id,
-            result: ['profiles.list', 'portfolio.valuation.get', 'history.list'],
+            result: [
+              'profiles.list',
+              'portfolio.valuation.get',
+              'portfolio.overview.get',
+              'history.list',
+            ],
           }),
         }),
       ),

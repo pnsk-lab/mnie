@@ -154,6 +154,8 @@ const {
   orderError,
   orderBusy,
   orderInputMode,
+  orderAmountMinimum,
+  orderAmountIncrement,
   chartAvailable,
   quoteLoading,
   searchQuotesAvailable,
@@ -433,6 +435,8 @@ onUnmounted(() => {
           :connected="connected"
           :order-quantity="orderQuantity"
           :order-amount="orderAmount"
+          :order-amount-minimum="orderAmountMinimum"
+          :order-amount-increment="orderAmountIncrement"
           :estimated-amount="estimatedAmount"
           :cash-order-account-type-options="cashOrderAccountTypeOptions"
           :cash-order-market-options="cashOrderMarketOptions"

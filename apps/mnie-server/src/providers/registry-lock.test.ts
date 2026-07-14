@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test } from 'bun:test'
 import type { AccountProfile, OpenProvider } from './registry'
 import { ProviderRegistry } from './registry'
 

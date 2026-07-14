@@ -87,6 +87,8 @@ defineProps<
     connected: boolean
     orderQuantity: number
     orderAmount: number
+    orderAmountMinimum: number
+    orderAmountIncrement: number
     estimatedAmount: number
     cashOrderAccountTypeOptions: CashOrderAccountTypeOption[]
     cashOrderMarketOptions: CashOrderMarketOption[]
@@ -516,11 +518,7 @@ const emit = defineEmits<{
                 label="売却する保有明細"
               >
                 <option value="">選択してください</option>
-                <option
-                  v-for="holding in positions"
-                  :key="`${holding.code}:${holding.accountType}:${holding.subClientSeqNo}`"
-                  :value="`${holding.code}:${holding.accountType ?? ''}:${holding.subClientSeqNo ?? ''}`"
-                >
+                <option v-for="holding in positions" :key="holding.id" :value="holding.id">
                   {{ holding.name }} / {{ holding.quantity }}株 / 口座{{
                     holding.accountType ?? '不明'
                   }}
@@ -540,9 +538,9 @@ const emit = defineEmits<{
                 v-model="amountInput"
                 label="注文金額"
                 type="number"
-                min="100"
-                step="1"
-                placeholder="100円以上"
+                :min="orderAmountMinimum"
+                :step="orderAmountIncrement"
+                :placeholder="`${orderAmountMinimum}円以上`"
               />
             </template>
             <section :class="ui.advancedOptions">

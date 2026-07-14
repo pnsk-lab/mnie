@@ -30,24 +30,16 @@ const quantityTradeAdapter: TradeAdapter = {
   orderInputMode: 'quantity',
 }
 
-const payPaySecAccountType: Record<CashOrderAccountType, string> = {
-  general: '1',
-  specific: '2',
-  growthInvestment: '3',
-  nisa: '4',
-}
-
-const payPaySecTradeAdapter: TradeAdapter = {
+const amountTradeAdapter: TradeAdapter = {
   orderInputMode: 'amount',
   buildPreviewRequest: (draft) => ({
     accountId: draft.profileId,
     instrumentId: draft.side === 'sell' ? draft.holding?.code : draft.stock.code,
     side: draft.side,
-    accountType:
-      draft.side === 'sell'
-        ? String(draft.holding?.accountType ?? '')
-        : payPaySecAccountType[draft.accountType],
-    subClientSeqNo: draft.side === 'sell' ? draft.holding?.subClientSeqNo : undefined,
+    accountType: String(
+      draft.side === 'sell' ? (draft.holding?.accountType ?? '') : draft.accountType,
+    ),
+    positionId: draft.side === 'sell' ? draft.holding?.id : undefined,
     sellAll: draft.side === 'sell' && draft.sellAll,
     amount:
       draft.side === 'sell' && draft.sellAll ? undefined : { currency: 'JPY', value: draft.amount },
@@ -104,9 +96,5 @@ const payPaySecTradeAdapter: TradeAdapter = {
               : fallback,
 }
 
-const adapters: Record<string, TradeAdapter> = {
-  'paypay-sec': payPaySecTradeAdapter,
-}
-
-export const tradeAdapterFor = (providerId: string | undefined): TradeAdapter =>
-  (providerId && adapters[providerId]) || quantityTradeAdapter
+export const tradeAdapterFor = (inputMode: TradeOrderInputMode): TradeAdapter =>
+  inputMode === 'amount' ? amountTradeAdapter : quantityTradeAdapter

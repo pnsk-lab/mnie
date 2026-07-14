@@ -526,13 +526,7 @@ const indexTone = (index: MarketIndex) => {
   return ui.muted
 }
 const positionKey = (position: Position) =>
-  [
-    position.profileId,
-    position.market,
-    position.code,
-    position.accountType,
-    position.subClientSeqNo,
-  ]
+  [position.profileId, position.id, position.market, position.code, position.accountType]
     .filter(Boolean)
     .join(':')
 const canLoadPositionDetail = (position: Position) =>

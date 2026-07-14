@@ -370,6 +370,11 @@ export const createPayPaySecClient = (options: PayPaySecClientOptions = {}): Pay
         ),
     },
     orders: {
+      confirmation: (confirmationId) => {
+        const ticket = tickets.get(confirmationId)
+        if (!ticket || Date.now() >= ticket.expiresAt) return undefined
+        return ticket.preview
+      },
       buy: {
         availability: ({ brandId }) => fetchBuyAvailability(brandId),
         preview: async (previewOptions: PayPaySecBuyPreviewOptions) => {

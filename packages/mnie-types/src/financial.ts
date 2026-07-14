@@ -273,8 +273,6 @@ export interface InvestmentPosition {
   accountInformation?: string
   /** Legacy provider market identifier; prefer venue for new integrations. */
   market?: string
-  /** Opaque provider holding identifier. */
-  subClientSeqNo?: string
 }
 
 export interface InvestmentTrade {
@@ -345,8 +343,8 @@ export interface InvestmentOrderRequest {
   allowTransaction?: true
   /** Sell the complete addressed holding instead of a monetary amount. */
   sellAll?: boolean
-  /** Opaque provider holding identifier returned by investments.positions.list. */
-  subClientSeqNo?: string
+  /** Position identifier returned by investments.positions.list when a sale addresses one holding. */
+  positionId?: string
 }
 
 export type InvestmentOrderSizing =
@@ -386,6 +384,10 @@ export interface InvestmentOrderRules {
 
 export interface InvestmentOrderPreview {
   estimatedAmount?: Money
+  quantity?: string
+  price?: Money
+  exchangeRate?: string
+  expiresAt?: string
   warnings: string[]
   confirmationToken?: string
 }
@@ -596,6 +598,7 @@ export type WorkspaceOperations = {
     { baseCurrency: string; profileIds?: string[] },
     PortfolioValuation
   >
+  'portfolio.overview.get': OperationDefinition<{}, PortfolioOverview>
 }
 
 export type OperationName<Operations> = Extract<keyof Operations, string>
@@ -629,6 +632,8 @@ export type OperationAvailability =
       available: true
       /** Present for investment order operations when known by the provider. */
       orderRules?: InvestmentOrderRules
+      /** Trusted transaction amount resolved by the provider, for example from a confirmation token. */
+      transactionAmount?: Money
       notices?: string[]
     }
   | {

@@ -278,6 +278,7 @@ export interface PayPaySecClient {
     grossProfits(): Promise<PayPaySecHistoryRecord[]>
   }
   orders: {
+    confirmation(confirmationId: string): PayPaySecOrderPreview | undefined
     buy: {
       availability(options: { brandId: string }): Promise<PayPaySecAvailability>
       preview(options: PayPaySecBuyPreviewOptions): Promise<PayPaySecOrderPreview>

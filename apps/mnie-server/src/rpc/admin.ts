@@ -9,7 +9,6 @@ import { forceSyncHistory } from '../history'
 import type { StoredBitwardenAuthManagerSecret } from '../providers/credentials'
 import type { StoredPayPaySecSecret } from '../providers/credentials'
 import type { ProviderRegistry } from '../providers/registry'
-import { loadPortfolioOverview, type OverviewProfile } from '../portfolio-overview'
 import {
   createApiKey,
   listApiKeys,
@@ -154,17 +153,6 @@ export class AdminRpcService {
     if (operation === 'assets.valuations.latest') {
       await ensureInitialAssetValuations(this.db, this.providers)
       return { valuations: await latestAssetValuations(this.db) }
-    }
-    if (operation === 'portfolio.overview.get') {
-      const profiles = await this.providers.profiles()
-      return loadPortfolioOverview(
-        profiles.map(
-          (profile): OverviewProfile => ({
-            descriptor: this.providers.descriptor(profile),
-            use: (action) => this.providers.use(profile, ({ provider }) => action(provider)),
-          }),
-        ),
-      )
     }
     if (operation === 'history.sync') {
       return forceSyncHistory(this.db, this.providers, {
