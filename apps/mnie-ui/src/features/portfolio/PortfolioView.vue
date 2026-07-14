@@ -826,9 +826,7 @@ const confirmCancel = () => {
               <strong>{{ position.name }}</strong>
               <small>{{ position.code }}</small>
             </button>
-            <b :class="ui.typePill">{{
-              position.type ?? (position.quantity >= 100 ? '単元' : 'S株')
-            }}</b>
+            <b :class="ui.typePill">{{ position.type ?? '現物' }}</b>
             <span>{{ position.quantity }}</span>
             <span :class="ui.muted">{{
               currencyForMarket(position.marketValue, position.market)

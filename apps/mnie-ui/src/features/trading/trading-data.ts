@@ -277,6 +277,20 @@ const accountTypeLabels: Record<string, string> = {
 
 const accountTypeLabel = (value: string) => accountTypeLabels[value] ?? value
 
+const lotTypeLabels: Record<string, string> = {
+  standard: '単元',
+  oddLot: 'S株',
+}
+
+export const orderSizingForSide = (sizing: unknown, kind: string, side: 'buy' | 'sell') => {
+  const candidates = asArray(sizing)
+    .map(asRecord)
+    .filter((rule) => rule.kind === kind)
+  return (
+    candidates.find((rule) => rule.side === side) ?? candidates.find((rule) => !rule.side) ?? {}
+  )
+}
+
 export const stockFromBoard = (value: unknown, fallbackIssue?: IssueLike): Stock => {
   const board = asRecord(value)
   const quoteRecord = asRecord(board.quote)
@@ -531,6 +545,7 @@ export const positionFromApi = (value: unknown): Position | null => {
     const marketValue = numberValue(asRecord(item.marketValue).value)
     const profitLoss = numberValue(asRecord(item.unrealizedProfitLoss).value)
     const accountType = textValue(item.accountType)
+    const lotType = textValue(item.lotType)
     const costBasis = marketValue - profitLoss
     const avgPrice =
       nullableNumberValue(asRecord(item.averagePrice).value) ??
@@ -554,9 +569,7 @@ export const positionFromApi = (value: unknown): Position | null => {
       type:
         item.positionType === 'margin'
           ? '信用'
-          : accountType
-            ? accountTypeLabel(accountType)
-            : '現物',
+          : (lotTypeLabels[lotType] ?? (accountType ? accountTypeLabel(accountType) : '現物')),
       accountType: accountType || undefined,
     }
   }

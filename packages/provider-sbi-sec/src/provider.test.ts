@@ -61,7 +61,16 @@ const client = (orderFlags: { cancelable?: boolean; correctable?: boolean } = {}
       },
       power: { buyingPower: async () => ({}) },
       positions: {
-        cash: async () => ({ positions: [] }),
+        cash: async () => ({
+          positions: [
+            {
+              issue: { code: '7203', market: 'XTKS', name: 'Toyota' },
+              accountType: 'specific',
+              quantity: 100,
+              marketValue: { currency: 'JPY', value: 250000 },
+            },
+          ],
+        }),
         margin: async () => ({ positions: [] }),
         cashDetail: async () => ({
           positions: [
@@ -271,6 +280,10 @@ describe('SBI provider-neutral order adapter', () => {
 
   test('preserves order, trade, and position detail through common operations', async () => {
     const provider = createProviderFromClient(client().value)
+    const positions = await provider.invoke('investments.positions.list', {
+      accountId: '12345678',
+      positionType: 'cash',
+    })
     const position = await provider.invoke('investments.positions.get', {
       accountId: '12345678',
       instrumentId: '7203',
@@ -295,7 +308,9 @@ describe('SBI provider-neutral order adapter', () => {
       venue: 'XNAS',
       averagePrice: { currency: 'USD', value: '180' },
       currentPrice: { currency: 'USD', value: '190' },
+      lotType: 'oddLot',
     })
+    expect(positions.items[0]).toMatchObject({ quantity: '100', lotType: 'standard' })
     expect(order).toMatchObject({
       id: 'order-1',
       venue: 'XNAS',

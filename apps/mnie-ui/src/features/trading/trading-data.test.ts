@@ -5,6 +5,7 @@ import {
   homeAssetHistoryFrom,
   orderAmountText,
   orderFromApi,
+  orderSizingForSide,
   positionFromApi,
   positionsForStock,
   stockFromInvestmentInstrument,
@@ -12,6 +13,17 @@ import {
 } from './trading-data'
 
 describe('provider-neutral order amounts', () => {
+  test('selects side-specific sizing rules before shared rules', () => {
+    const sizing = [
+      { kind: 'amount', minimum: '500', increment: '1' },
+      { kind: 'amount', side: 'buy', minimum: '1000', increment: '1' },
+      { kind: 'amount', side: 'sell', minimum: '100', increment: '1' },
+    ]
+    expect(orderSizingForSide(sizing, 'amount', 'buy')).toMatchObject({ minimum: '1000' })
+    expect(orderSizingForSide(sizing, 'amount', 'sell')).toMatchObject({ minimum: '100' })
+    expect(orderSizingForSide(sizing, 'quantity', 'buy')).toEqual({})
+  })
+
   test('uses the JPY settlement amount instead of treating a USD unit price as yen', () => {
     const order = orderFromApi({
       id: 'order-1',
@@ -171,6 +183,30 @@ describe('provider-neutral position normalization', () => {
         unrealizedProfitLoss: { currency: 'JPY', value: '50' },
       })?.avgPrice,
     ).toBe(960)
+  })
+
+  test('uses provider lot knowledge instead of inferring it from quantity', () => {
+    const position = (lotType: string, quantity: string, accountType?: string) =>
+      positionFromApi({
+        instrumentId: '101',
+        positionType: 'cash',
+        lotType,
+        accountType,
+        quantity,
+      })?.type
+
+    expect(position('standard', '1')).toBe('単元')
+    expect(position('oddLot', '1000')).toBe('S株')
+    expect(position('notApplicable', '0.25', 'specific')).toBe('特定')
+    expect(position('notApplicable', '0.25')).toBe('現物')
+    expect(
+      positionFromApi({
+        instrumentId: '101',
+        positionType: 'margin',
+        lotType: 'standard',
+        quantity: '100',
+      })?.type,
+    ).toBe('信用')
   })
 })
 

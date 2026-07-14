@@ -254,6 +254,8 @@ export interface TransferRecipient {
   maskedAccountNumber?: string
 }
 
+export type InvestmentPositionLotType = 'standard' | 'oddLot' | 'notApplicable'
+
 export interface InvestmentPosition {
   id: string
   accountId: string
@@ -263,6 +265,8 @@ export interface InvestmentPosition {
   quantity: string
   availableQuantity?: string
   positionType: 'cash' | 'margin'
+  /** Provider-defined lot classification. Omitted when the provider cannot determine it. */
+  lotType?: InvestmentPositionLotType
   side?: 'long' | 'short'
   accountType?: string
   averagePrice?: Money
@@ -350,6 +354,8 @@ export interface InvestmentOrderRequest {
 export type InvestmentOrderSizing =
   | {
       kind: 'quantity'
+      /** Restricts this sizing rule to one order side. Omitted for a shared rule. */
+      side?: 'buy' | 'sell'
       minimum: string
       increment: string
       maximum?: string
@@ -358,6 +364,8 @@ export type InvestmentOrderSizing =
     }
   | {
       kind: 'amount'
+      /** Restricts this sizing rule to one order side. Omitted for a shared rule. */
+      side?: 'buy' | 'sell'
       currency: string
       minimum: string
       increment: string
