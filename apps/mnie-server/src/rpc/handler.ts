@@ -10,7 +10,7 @@ import { objectParams, rpcError, rpcResult } from './protocol'
 import { invokeWorkspace, WORKSPACE_OPERATIONS } from './workspace'
 import type { AdminRpcService } from './admin'
 import { ADMIN_OPERATIONS } from './admin-operations'
-import { invokeAvailableOperation } from '../providers/operations'
+import { operationAvailability, ProviderOperationUnavailableError } from '../providers/operations'
 
 export interface RpcSocketState {
   open?: OpenProvider
@@ -43,6 +43,14 @@ const assertOperationScope = (state: RpcSocketState, operation: string, input?: 
   if (!state.apiKeyId) return
   const required = isTransactionOperation(operation, input) ? 'trade' : 'read'
   if (!(state.scopes ?? []).includes(required)) throw new Error(`missing OAuth scope: ${required}`)
+}
+
+export const tradeLimitParams = (
+  input: unknown,
+  transactionAmount?: { currency: string; value: string },
+) => {
+  const params = objectParams(input)
+  return transactionAmount ? { ...params, amount: transactionAmount } : params
 }
 
 export const closeOpenProvider = async (state: RpcSocketState) => {
@@ -169,18 +177,24 @@ export const handleRpc = async (
     assertOperationScope(state, operation, params.input)
     if (state.apiKeyId) {
       await assertApiKeyMethodAllowed(db, state.apiKeyId, operation)
+    }
+    const availability = await operationAvailability(provider, {
+      operation,
+      input: params.input,
+    })
+    if (!availability.available) {
+      throw new ProviderOperationUnavailableError(operation, availability)
+    }
+    if (state.apiKeyId) {
       if (isTransactionOperation(operation, params.input)) {
         await assertAndConsumeApiKeyTradeLimits({
           db,
           apiKeyId: state.apiKeyId,
-          params: objectParams(params.input),
+          params: tradeLimitParams(params.input, availability.transactionAmount),
         })
       }
     }
-    return rpcResult(
-      request.id,
-      await invokeAvailableOperation(provider, operation, params.input ?? {}),
-    )
+    return rpcResult(request.id, await provider.invoke(operation, params.input ?? {}))
   }
 
   return rpcError(request.id, -32601, 'method not found')

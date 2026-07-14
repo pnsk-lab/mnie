@@ -1,5 +1,9 @@
 import type { MobileSuicaSession } from '@mnie/provider-mobile-suica'
 import type { PlaintextStoredWebAuthnCredential } from '@mnie/provider-sbi-sec'
+import type {
+  PayPaySecSession,
+  PlaintextStoredWebAuthnCredential as PayPaySecPasskeyCredential,
+} from '@mnie/provider-paypay-sec'
 
 export type SbiPasskeySource =
   | { kind: 'json'; credential: PlaintextStoredWebAuthnCredential }
@@ -35,6 +39,13 @@ export interface StoredPayPayBankSecret {
   session?: unknown
 }
 
+export interface StoredPayPaySecSecret {
+  credential: PayPaySecPasskeyCredential
+  deviceId: string
+  tradePassword?: string
+  session?: PayPaySecSession
+}
+
 export interface StoredMobileSuicaSecret {
   session?: MobileSuicaSession
   user?: string
@@ -49,4 +60,5 @@ export type StoredProfileSecret =
   | StoredSbiPasskeySecret
   | StoredSmbcDirectSecret
   | StoredPayPayBankSecret
+  | StoredPayPaySecSecret
   | StoredMobileSuicaSecret

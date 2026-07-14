@@ -20,6 +20,7 @@ import {
   saveBitwardenAuthManager,
   saveSmbcDirectProfile,
   savePayPayBankProfile,
+  savePayPaySecProfile,
   updateApiKeySettings,
   updateAccountProfile,
   verifyLogin,
@@ -69,6 +70,9 @@ export const useAuthAdmin = () => {
   const payPayBankBranchNo = ref('')
   const payPayBankAccountNo = ref('')
   const payPayBankPassword = ref('')
+  const payPaySecLabel = ref('PayPay証券')
+  const payPaySecCredentialJson = ref('')
+  const payPaySecTradePassword = ref('')
 
   watch(payPayBankBranchNo, (value) => {
     const match = /^(\d{3})-(\d{1,7})$/.exec(value)
@@ -115,7 +119,12 @@ export const useAuthAdmin = () => {
         }
       }
       cronJobs.value = (await listCronJobs()).jobs
-      selectedProfileId.value ||= profiles.value[0]?.id ?? ''
+      selectedProfileId.value ||=
+        profiles.value.find(
+          (profile) => profile.provider === 'sbisec' || profile.provider === 'paypay-sec',
+        )?.id ??
+        profiles.value[0]?.id ??
+        ''
       if (options?.autoConnect && selectedProfileId.value) options.connect?.()
     }
   }
@@ -215,12 +224,12 @@ export const useAuthAdmin = () => {
     await refresh()
   }
 
-  const fillProviderCredentials = async () => {
+  const fillProviderCredentials = async (provider: AccountProfile['provider'] = 'sbisec') => {
     if (!selectedAuthManagerId.value) throw new Error('Auth Manager が設定されていません')
     if (!authManagerMasterPassword.value) throw new Error('Master Password を入力してください')
     const credentials = await fillFromAuthManager(
       selectedAuthManagerId.value,
-      'sbisec',
+      provider,
       authManagerMasterPassword.value,
     )
       .then((result) => result.credentials)
@@ -231,12 +240,33 @@ export const useAuthAdmin = () => {
       throw new Error(`認証情報を1件に特定できませんでした（${credentials.length}件）`)
     }
     const credential = credentials[0]!
-    if (credential.passkeys.length !== 1) {
-      throw new Error(`パスキーを1件に特定できませんでした（${credential.passkeys.length}件）`)
+    if (provider === 'sbisec') {
+      if (credential.passkeys.length !== 1) {
+        throw new Error(`パスキーを1件に特定できませんでした（${credential.passkeys.length}件）`)
+      }
+      const portableCredential = credential.passkeys[0]!.portableCredential
+      if (!portableCredential) throw new Error('パスキーをエクスポートできませんでした')
+      sbiCredentialJson.value = JSON.stringify(portableCredential, null, 2)
+      return
     }
-    const portableCredential = credential.passkeys[0]!.portableCredential
-    if (!portableCredential) throw new Error('パスキーをエクスポートできませんでした')
-    sbiCredentialJson.value = JSON.stringify(portableCredential, null, 2)
+    if (provider === 'paypay-sec') {
+      if (credential.passkeys.length !== 1) {
+        throw new Error(`パスキーを1件に特定できませんでした（${credential.passkeys.length}件）`)
+      }
+      const portableCredential = credential.passkeys[0]!.portableCredential
+      if (!portableCredential) throw new Error('パスキーをエクスポートできませんでした')
+      payPaySecCredentialJson.value = JSON.stringify(portableCredential, null, 2)
+      return
+    }
+    if (provider === 'smbc-direct') {
+      smbcUser.value = credential.username ?? ''
+      smbcPassword.value = credential.password ?? ''
+      return
+    }
+    if (provider === 'paypay-bank') {
+      payPayBankBranchNo.value = credential.username ?? ''
+      payPayBankPassword.value = credential.password ?? ''
+    }
   }
 
   const removeSbiPasskey = async (id: string) => {
@@ -245,8 +275,8 @@ export const useAuthAdmin = () => {
     await refresh()
   }
 
-  const updateProfile = async (id: string, label: string, color: string) => {
-    await updateAccountProfile(id, { label, color })
+  const updateProfile = async (id: string, label: string, color: string, password?: string) => {
+    await updateAccountProfile(id, { label, color, tradePassword: password || undefined })
     await refresh()
   }
 
@@ -271,6 +301,28 @@ export const useAuthAdmin = () => {
     })
     selectedProfileId.value = profile.id
     payPayBankPassword.value = ''
+    await refresh()
+  }
+
+  const addPayPaySecProfile = async () => {
+    if (!payPaySecCredentialJson.value.trim()) {
+      throw new Error('パスキー JSON を入力してください')
+    }
+    if (!payPaySecTradePassword.value) throw new Error('取引パスワードを入力してください')
+    let credential: unknown
+    try {
+      credential = JSON.parse(payPaySecCredentialJson.value)
+    } catch {
+      throw new Error('パスキー JSON の形式が不正です')
+    }
+    const { profile } = await savePayPaySecProfile({
+      label: payPaySecLabel.value,
+      credential,
+      tradePassword: payPaySecTradePassword.value,
+    })
+    selectedProfileId.value = profile.id
+    payPaySecCredentialJson.value = ''
+    payPaySecTradePassword.value = ''
     await refresh()
   }
 
@@ -307,6 +359,9 @@ export const useAuthAdmin = () => {
     payPayBankBranchNo,
     payPayBankAccountNo,
     payPayBankPassword,
+    payPaySecLabel,
+    payPaySecCredentialJson,
+    payPaySecTradePassword,
     refresh,
     forceProfileAvailability,
     addApiKey,
@@ -319,6 +374,7 @@ export const useAuthAdmin = () => {
     fillProviderCredentials,
     addSmbcDirectProfile,
     addPayPayBankProfile,
+    addPayPaySecProfile,
     removeSbiPasskey,
     updateProfile,
   }

@@ -320,4 +320,14 @@ describe('SBI provider-neutral order adapter', () => {
       message: 'orderId is required',
     })
   })
+
+  test('returns static order rules when the UI asks before selecting an instrument', async () => {
+    const provider = createProviderFromClient(client().value)
+    await expect(
+      provider.checkOperationAvailability?.({ operation: 'investments.orders.preview' }),
+    ).resolves.toMatchObject({
+      available: true,
+      orderRules: { sizing: [{ kind: 'quantity', minimum: '1', increment: '1' }] },
+    })
+  })
 })

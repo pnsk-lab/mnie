@@ -29,6 +29,7 @@ import type {
   ChartMode,
   ChartNotice,
   ChartRange,
+  AmountSellMode,
   CashOrderAccountType,
   CashOrderMarket,
   CashOrderMethod,
@@ -36,9 +37,11 @@ import type {
   CashOrderTerm,
   CashOrderTriggerZone,
   OrderKind,
+  Position,
   ProviderPosition,
   RealtimePricePoint,
   Stock,
+  TradeViewModel,
   TradeSide,
 } from '../../types/trading'
 import { currency, currencyForMarket } from '../../utils/format'
@@ -64,25 +67,42 @@ interface CashOrderDateOption {
 
 const chartRangeOptions: ChartRange[] = ['1D', '3D', '3M', '1Y', 'ALL']
 
-defineProps<{
-  viewedStocks: Stock[]
-  selectedStock: Stock
-  providerPositions: ProviderPosition[]
-  connected: boolean
-  orderQuantity: number
-  estimatedAmount: number
-  cashOrderAccountTypeOptions: CashOrderAccountTypeOption[]
-  cashOrderMarketOptions: CashOrderMarketOption[]
-  cashOrderTermOptions: CashOrderTermOption[]
-  cashOrderDateOptions: CashOrderDateOption[]
-  cashOrderPriceStep: number
-  canRequestCashEstimate: boolean
-  canPlaceCashOrder: boolean
-  realtimePricePoints: RealtimePricePoint[]
-  chartNotice: ChartNotice | null
-  pricePolling: boolean
-  hasQuote: (stock: Stock) => boolean
-}>()
+defineProps<
+  TradeViewModel & {
+    viewedStocks: Stock[]
+    selectedStock: Stock
+    providerPositions: ProviderPosition[]
+    selectedPosition?: Position
+    positions: Position[]
+    brokerageProfiles: Array<{
+      id: string
+      providerName: string
+      label: string
+    }>
+    selectedProfileId: string
+    profileName: string
+    orderBusy: boolean
+    orderNotice: string
+    orderError: string
+    connected: boolean
+    orderQuantity: number
+    orderAmount: number
+    orderAmountMinimum: number
+    orderAmountIncrement: number
+    estimatedAmount: number
+    cashOrderAccountTypeOptions: CashOrderAccountTypeOption[]
+    cashOrderMarketOptions: CashOrderMarketOption[]
+    cashOrderTermOptions: CashOrderTermOption[]
+    cashOrderDateOptions: CashOrderDateOption[]
+    cashOrderPriceStep: number
+    canRequestCashEstimate: boolean
+    canPlaceCashOrder: boolean
+    realtimePricePoints: RealtimePricePoint[]
+    chartNotice: ChartNotice | null
+    pricePolling: boolean
+    hasQuote: (stock: Stock) => boolean
+  }
+>()
 
 const tradeSide = defineModel<TradeSide>('tradeSide', { required: true })
 const orderKind = defineModel<OrderKind>('orderKind', { required: true })
@@ -114,6 +134,9 @@ const cashOrderSecondaryPriceInput = defineModel<string>('cashOrderSecondaryPric
   required: true,
 })
 const quantityInput = defineModel<string>('quantityInput', { required: true })
+const amountInput = defineModel<string>('amountInput', { required: true })
+const amountSellMode = defineModel<AmountSellMode>('amountSellMode', { required: true })
+const selectedHoldingId = defineModel<string>('selectedHoldingId', { required: true })
 const priceInput = defineModel<string>('priceInput', { required: true })
 const chartMode = defineModel<ChartMode>('chartMode', { required: true })
 const chartRange = defineModel<ChartRange>('chartRange', { required: true })
@@ -137,6 +160,7 @@ const advancedTransition = uiMotion.trade.advancedOptions
 const emit = defineEmits<{
   openSearch: []
   selectStock: [stock: Stock]
+  selectProfile: [profileId: string]
   downloadCsv: []
   estimate: []
   confirmOrder: []
@@ -147,16 +171,43 @@ const emit = defineEmits<{
   <section :class="ui.tradeLayout">
     <div :class="ui.centerStack">
       <article :class="ui.stockMetadataPanel">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <span class="text-[0.65rem] font-black tracking-[0.14em] text-[#8f949d] uppercase">
+            取引口座
+          </span>
+          <label class="relative block min-w-0">
+            <span class="sr-only">取引口座を選択</span>
+            <select
+              :value="selectedProfileId"
+              class="h-9 max-w-full cursor-pointer appearance-none rounded-full border border-[#333a44] bg-[#111418] py-1 pr-9 pl-4 text-xs font-bold text-[#d3e3fd] outline-none transition hover:border-[#596270] focus:border-[#8ab4f8] focus:ring-2 focus:ring-[#8ab4f8]/20 sm:min-w-64"
+              @change="emit('selectProfile', ($event.target as HTMLSelectElement).value)"
+            >
+              <option v-for="profile in brokerageProfiles" :key="profile.id" :value="profile.id">
+                {{ profile.providerName }} / {{ profile.label }}
+              </option>
+            </select>
+            <ChevronDown
+              class="pointer-events-none absolute top-1/2 right-3 h-3.5 w-3.5 -translate-y-1/2 text-[#8f949d]"
+              aria-hidden="true"
+            />
+          </label>
+        </div>
         <div :class="ui.stockTitle">
           <div>
             <p :class="ui.eyebrow">{{ selectedStock.symbol }}</p>
             <h2>{{ selectedStock.name }}</h2>
+            <p v-if="orderInputMode === 'amount'" class="mt-1 text-xs text-[#a8c7fa]">
+              取引口座: {{ profileName }}
+            </p>
           </div>
           <div :class="ui.quoteBox">
             <strong>
               <template v-if="hasQuote(selectedStock)">{{
                 currencyForMarket(selectedStock.price, selectedStock.market)
               }}</template>
+              <template v-else-if="orderInputMode === 'amount' && !quoteLoading">
+                データなし
+              </template>
               <Spinner v-else size="sm" />
             </strong>
             <small
@@ -164,6 +215,9 @@ const emit = defineEmits<{
               :class="selectedStock.change >= 0 ? ui.positive : ui.negative"
             >
               {{ selectedStock.change >= 0 ? '+' : '' }}{{ selectedStock.change }}%
+            </small>
+            <small v-else-if="orderInputMode === 'amount' && !quoteLoading" :class="ui.muted">
+              この口座では取得できません
             </small>
             <Spinner v-else size="sm" />
           </div>
@@ -208,7 +262,9 @@ const emit = defineEmits<{
                   class="grid h-8 w-8 place-items-center rounded-md border border-[#2d3440] text-[#d3e3fd] transition hover:bg-[#1d232b] disabled:opacity-40"
                   type="button"
                   aria-label="縮小"
-                  :disabled="!hasQuote(selectedStock)"
+                  :disabled="
+                    !hasQuote(selectedStock) || (orderInputMode === 'amount' && !chartAvailable)
+                  "
                   @click="priceChart?.zoomOut()"
                 >
                   <Minus class="h-3.5 w-3.5" aria-hidden="true" />
@@ -217,7 +273,9 @@ const emit = defineEmits<{
                   class="grid h-8 w-8 place-items-center rounded-md border border-[#2d3440] text-[#d3e3fd] transition hover:bg-[#1d232b] disabled:opacity-40"
                   type="button"
                   aria-label="拡大"
-                  :disabled="!hasQuote(selectedStock)"
+                  :disabled="
+                    !hasQuote(selectedStock) || (orderInputMode === 'amount' && !chartAvailable)
+                  "
                   @click="priceChart?.zoomIn()"
                 >
                   <Plus class="h-3.5 w-3.5" aria-hidden="true" />
@@ -226,7 +284,9 @@ const emit = defineEmits<{
                   class="grid h-8 w-8 place-items-center rounded-md border border-[#2d3440] text-[#8f949d] transition hover:bg-[#1d232b] hover:text-[#d3e3fd] disabled:opacity-40"
                   type="button"
                   aria-label="縮尺を戻す"
-                  :disabled="!hasQuote(selectedStock)"
+                  :disabled="
+                    !hasQuote(selectedStock) || (orderInputMode === 'amount' && !chartAvailable)
+                  "
                   @click="priceChart?.resetZoom()"
                 >
                   <RotateCcw class="h-3.5 w-3.5" aria-hidden="true" />
@@ -241,7 +301,10 @@ const emit = defineEmits<{
 
           <div :class="[ui.chartBox, 'overflow-visible']">
             <RealtimePriceChart
-              v-if="hasQuote(selectedStock) || realtimePricePoints.length > 0 || chartNotice"
+              v-if="
+                (hasQuote(selectedStock) || realtimePricePoints.length > 0 || chartNotice) &&
+                (orderInputMode === 'quantity' || chartAvailable)
+              "
               ref="priceChart"
               :points="realtimePricePoints"
               :stock-name="selectedStock.name"
@@ -252,6 +315,12 @@ const emit = defineEmits<{
               :previous-close="selectedStock.prevClose"
               :notice="chartNotice"
             />
+            <span
+              v-else-if="orderInputMode === 'amount' && !chartAvailable"
+              class="grid h-full place-items-center text-[#8f949d]"
+            >
+              データなし（この口座では価格チャートを取得できません）
+            </span>
             <span v-else class="grid h-full place-items-center text-[#8f949d]">
               <Spinner />
             </span>
@@ -329,41 +398,41 @@ const emit = defineEmits<{
                 >
                   <div :class="ui.detailItem">
                     <dt class="text-xs text-[#9aa0a9]">国</dt>
-                    <dd class="font-bold">{{ selectedStock.country }}</dd>
+                    <dd class="font-bold">{{ selectedStock.country || 'データなし' }}</dd>
                   </div>
                   <div :class="ui.detailItem">
                     <dt class="text-xs text-[#9aa0a9]">市場</dt>
-                    <dd class="font-bold">{{ selectedStock.market }}</dd>
+                    <dd class="font-bold">{{ selectedStock.market || 'データなし' }}</dd>
                   </div>
                   <div :class="ui.detailItem">
                     <dt class="text-xs text-[#9aa0a9]">業種</dt>
-                    <dd class="font-bold">{{ selectedStock.sector }}</dd>
+                    <dd class="font-bold">{{ selectedStock.sector || 'データなし' }}</dd>
                   </div>
                   <div :class="ui.detailItem">
                     <dt class="text-xs text-[#9aa0a9]">始値</dt>
                     <dd class="font-bold">
-                      <template v-if="hasQuote(selectedStock)">{{
+                      <template v-if="selectedStock.open > 0">{{
                         currencyForMarket(selectedStock.open, selectedStock.market)
                       }}</template>
-                      <Spinner v-else size="sm" />
+                      <template v-else>データなし</template>
                     </dd>
                   </div>
                   <div :class="ui.detailItem">
                     <dt class="text-xs text-[#9aa0a9]">高値</dt>
                     <dd class="font-bold">
-                      <template v-if="hasQuote(selectedStock)">{{
+                      <template v-if="selectedStock.high > 0">{{
                         currencyForMarket(selectedStock.high, selectedStock.market)
                       }}</template>
-                      <Spinner v-else size="sm" />
+                      <template v-else>データなし</template>
                     </dd>
                   </div>
                   <div :class="ui.detailItem">
                     <dt class="text-xs text-[#9aa0a9]">安値</dt>
                     <dd class="font-bold">
-                      <template v-if="hasQuote(selectedStock)">{{
+                      <template v-if="selectedStock.low > 0">{{
                         currencyForMarket(selectedStock.low, selectedStock.market)
                       }}</template>
-                      <Spinner v-else size="sm" />
+                      <template v-else>データなし</template>
                     </dd>
                   </div>
                 </motion.dl>
@@ -424,15 +493,56 @@ const emit = defineEmits<{
       </div>
       <div :class="ui.ticketScroll">
         <div :class="ui.ticketScrollInner">
-          <UiSegmented v-model="orderKind" :options="orderKindOptions" />
+          <UiSegmented
+            v-if="orderInputMode === 'quantity'"
+            v-model="orderKind"
+            :options="orderKindOptions"
+          />
+          <div v-else class="rounded-lg border border-[#30343a] p-3 text-sm text-[#9aa0a9]">
+            注文種別: 通常（金額指定）
+          </div>
           <div :class="ui.ticketBox">
             <UiField
+              v-if="orderInputMode === 'quantity'"
               v-model="quantityInput"
               label="発注株数"
               type="number"
               min="1"
               placeholder="株数を入力"
             />
+            <template v-else>
+              <UiField
+                v-if="tradeSide === 'sell'"
+                v-model="selectedHoldingId"
+                as="select"
+                label="売却する保有明細"
+              >
+                <option value="">選択してください</option>
+                <option v-for="holding in positions" :key="holding.id" :value="holding.id">
+                  {{ holding.name }} / {{ holding.quantity }}株 / 口座{{
+                    holding.accountType ?? '不明'
+                  }}
+                </option>
+              </UiField>
+              <UiField
+                v-if="tradeSide === 'sell'"
+                v-model="amountSellMode"
+                as="select"
+                label="売却方法"
+              >
+                <option value="amount">金額指定</option>
+                <option value="all">全売却</option>
+              </UiField>
+              <UiField
+                v-if="tradeSide === 'buy' || amountSellMode === 'amount'"
+                v-model="amountInput"
+                label="注文金額"
+                type="number"
+                :min="orderAmountMinimum"
+                :step="orderAmountIncrement"
+                :placeholder="`${orderAmountMinimum}円以上`"
+              />
+            </template>
             <section :class="ui.advancedOptions">
               <button
                 type="button"
@@ -472,6 +582,7 @@ const emit = defineEmits<{
                           ui.accountTypeButton,
                           cashOrderAccountType === option.value && ui.accountTypeButtonActive,
                         ]"
+                        :disabled="orderInputMode === 'amount' && tradeSide === 'sell'"
                         @click="cashOrderAccountType = option.value"
                       >
                         <motion.span
@@ -484,7 +595,18 @@ const emit = defineEmits<{
                       </button>
                     </div>
                   </LayoutGroup>
-                  <UiField v-model="cashOrderMarket" as="select" label="注文市場">
+                  <div
+                    v-if="orderInputMode === 'amount'"
+                    class="rounded-lg border border-[#30343a] bg-[#15181d] p-3 text-sm text-[#8f949d]"
+                  >
+                    注文市場・執行条件・有効期限・特殊注文はこの口座では未対応です。
+                  </div>
+                  <UiField
+                    v-model="cashOrderMarket"
+                    as="select"
+                    label="注文市場"
+                    :disabled="orderInputMode === 'amount'"
+                  >
                     <option
                       v-for="option in cashOrderMarketOptions"
                       :key="option.value"
@@ -494,7 +616,12 @@ const emit = defineEmits<{
                     </option>
                   </UiField>
                   <template>
-                    <UiField v-model="cashOrderPriceCondition" as="select" label="執行条件">
+                    <UiField
+                      v-model="cashOrderPriceCondition"
+                      as="select"
+                      label="執行条件"
+                      :disabled="orderInputMode === 'amount'"
+                    >
                       <option
                         v-for="option in cashOrderPriceConditionOptions"
                         :key="option.value"
@@ -504,7 +631,7 @@ const emit = defineEmits<{
                       </option>
                     </UiField>
                     <UiField
-                      v-if="primaryPriceConditionRequiresPrice"
+                      v-if="orderInputMode === 'quantity' && primaryPriceConditionRequiresPrice"
                       v-model="priceInput"
                       label="注文価格"
                       type="number"
@@ -512,7 +639,12 @@ const emit = defineEmits<{
                       :step="cashOrderPriceStep"
                       placeholder="価格を入力"
                     />
-                    <UiField v-model="cashOrderTerm" as="select" label="有効期限">
+                    <UiField
+                      v-model="cashOrderTerm"
+                      as="select"
+                      label="有効期限"
+                      :disabled="orderInputMode === 'amount'"
+                    >
                       <option
                         v-for="option in cashOrderTermOptions"
                         :key="option.value"
@@ -522,7 +654,11 @@ const emit = defineEmits<{
                       </option>
                     </UiField>
                     <UiField
-                      v-if="cashOrderTerm === 'date' && cashOrderDateOptions.length"
+                      v-if="
+                        orderInputMode === 'quantity' &&
+                        cashOrderTerm === 'date' &&
+                        cashOrderDateOptions.length
+                      "
                       v-model="cashOrderDateInput"
                       as="select"
                       label="指定日"
@@ -536,12 +672,17 @@ const emit = defineEmits<{
                       </option>
                     </UiField>
                     <UiField
-                      v-else-if="cashOrderTerm === 'date'"
+                      v-else-if="orderInputMode === 'quantity' && cashOrderTerm === 'date'"
                       v-model="cashOrderDateInput"
                       label="指定日"
                       type="date"
                     />
-                    <UiField v-model="cashOrderMethod" as="select" label="特殊注文">
+                    <UiField
+                      v-model="cashOrderMethod"
+                      as="select"
+                      label="特殊注文"
+                      :disabled="orderInputMode === 'amount'"
+                    >
                       <option
                         v-for="option in cashOrderMethodOptions"
                         :key="option.value"
@@ -550,7 +691,7 @@ const emit = defineEmits<{
                         {{ option.label }}
                       </option>
                     </UiField>
-                    <template v-if="cashOrderMethod !== 'normal'">
+                    <template v-if="orderInputMode === 'quantity' && cashOrderMethod !== 'normal'">
                       <UiField v-model="cashOrderTriggerZone" as="select" label="逆指値条件">
                         <option
                           v-for="option in cashOrderTriggerZoneOptions"
@@ -569,7 +710,7 @@ const emit = defineEmits<{
                         placeholder="価格を入力"
                       />
                     </template>
-                    <template v-if="cashOrderMethod === 'oco'">
+                    <template v-if="orderInputMode === 'quantity' && cashOrderMethod === 'oco'">
                       <UiField
                         v-model="cashOrderSecondaryPriceCondition"
                         as="select"
@@ -603,23 +744,44 @@ const emit = defineEmits<{
       <div :class="ui.ticketBottom">
         <div :class="ui.estimateSummary">
           <span>概算金額</span>
-          <strong>{{ currencyForMarket(estimatedAmount, selectedStock.market) }}</strong>
+          <strong>{{
+            currencyForMarket(
+              orderInputMode === 'amount' ? orderAmount : estimatedAmount,
+              selectedStock.market,
+            )
+          }}</strong>
         </div>
         <div :class="ui.actions">
-          <UiButton type="button" :disabled="!canRequestCashEstimate" @click="emit('estimate')">
+          <UiButton
+            type="button"
+            :disabled="!canRequestCashEstimate || (orderInputMode === 'amount' && orderBusy)"
+            @click="emit('estimate')"
+          >
             <FileCheck2 class="h-4 w-4" aria-hidden="true" />
             見積
           </UiButton>
           <UiButton
             variant="danger"
             type="button"
-            :disabled="!canPlaceCashOrder"
+            :disabled="!canPlaceCashOrder || (orderInputMode === 'amount' && orderBusy)"
             @click="emit('confirmOrder')"
           >
             <ShieldCheck class="h-4 w-4" aria-hidden="true" />
             注文確認
           </UiButton>
         </div>
+        <p
+          v-if="orderInputMode === 'amount' && orderNotice"
+          class="mt-3 rounded-lg bg-emerald-950/50 p-3 text-sm text-emerald-200"
+        >
+          {{ orderNotice }}
+        </p>
+        <p
+          v-if="orderInputMode === 'amount' && orderError"
+          class="mt-3 rounded-lg bg-red-950/50 p-3 text-sm text-red-200"
+        >
+          {{ orderError }}
+        </p>
       </div>
     </article>
 
@@ -645,16 +807,26 @@ const emit = defineEmits<{
             <template v-if="hasQuote(stock)">{{
               currencyForMarket(stock.price, stock.market)
             }}</template>
+            <template v-else-if="orderInputMode === 'amount' && !quoteLoading">
+              データなし
+            </template>
             <Spinner v-else size="sm" />
           </strong>
           <small v-if="hasQuote(stock)" :class="stock.change >= 0 ? ui.positive : ui.negative">
             {{ stock.change >= 0 ? '+' : '' }}{{ stock.change }}%
           </small>
+          <small v-else-if="orderInputMode === 'amount' && !quoteLoading" :class="ui.muted">
+            データなし
+          </small>
           <Spinner v-else size="sm" />
         </span>
       </button>
       <p v-if="!viewedStocks.length" :class="[ui.muted, 'p-5 text-sm']">
-        対応する証券口座に接続するか検索すると銘柄を表示します
+        {{
+          orderInputMode === 'quantity'
+            ? '対応する証券口座に接続するか検索すると銘柄を表示します'
+            : '取引口座へ接続して銘柄を検索してください'
+        }}
       </p>
     </article>
   </section>

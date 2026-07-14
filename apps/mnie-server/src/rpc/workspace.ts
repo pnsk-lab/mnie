@@ -2,11 +2,13 @@ import type { HistoryListRequest } from '@mnie/types'
 import { fetchAssetValuation } from '../assets'
 import type { Db } from '../db'
 import { listHistory } from '../history'
+import { loadPortfolioOverview, type OverviewProfile } from '../portfolio-overview'
 import type { ProviderRegistry } from '../providers/registry'
 
 export const WORKSPACE_OPERATIONS = [
   'profiles.list',
   'portfolio.valuation.get',
+  'portfolio.overview.get',
   'history.list',
 ] as const
 
@@ -17,11 +19,19 @@ export const invokeWorkspace = async (
   input: Record<string, unknown>,
 ) => {
   if (operation === 'profiles.list') {
-    return (await providers.profiles()).map((profile) => ({
-      id: profile.id,
-      provider: { id: profile.provider, name: profile.provider },
-      label: profile.label,
-    }))
+    return (await providers.profiles()).map((profile) => providers.descriptor(profile))
+  }
+
+  if (operation === 'portfolio.overview.get') {
+    const profiles = await providers.profiles()
+    return loadPortfolioOverview(
+      profiles.map(
+        (profile): OverviewProfile => ({
+          descriptor: providers.descriptor(profile),
+          use: (action) => providers.use(profile, ({ provider }) => action(provider)),
+        }),
+      ),
+    )
   }
 
   if (operation === 'history.list') {

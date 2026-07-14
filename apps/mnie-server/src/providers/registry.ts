@@ -27,11 +27,13 @@ import type {
   OperationMap,
   ProviderAvailability,
   OperationAvailabilityRequest,
+  ProfileDescriptor,
 } from '@mnie/types'
 import type { ServerConfig } from '../config'
 import type { Db } from '../db'
 import { accountProfiles, assetValuations, historySyncs, historyTransactions } from '../db/schema'
 import { syncInitialHistory } from '../history'
+import { withProfileLock } from '../profile-lock'
 import { connectSbi } from './sbi'
 import { randomId } from '../security/crypto'
 import { deleteSecret, readSecret, saveSecret } from '../security/keyring'
@@ -40,9 +42,12 @@ import type {
   SbiPasskeySource,
   StoredMobileSuicaSecret,
   StoredPayPayBankSecret,
+  StoredPayPaySecSecret,
   StoredSbiPasskeySecret,
   StoredSmbcDirectSecret,
 } from './credentials'
+import { openPayPaySec } from './paypay-sec'
+import { normalizePayPaySecCredential } from './paypay-sec-options'
 
 export type AccountProfile = typeof accountProfiles.$inferSelect
 
@@ -107,8 +112,13 @@ const requiredCredential = (credentials: Record<string, unknown>, key: string) =
 const optionalCredential = (value: unknown) =>
   typeof value === 'string' && value.trim() ? value.trim() : undefined
 
-const compactDate = (date: Date) =>
-  `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`
+const tokyoOffsetMs = 9 * 60 * 60_000
+const smbcDirectHistoryStart = new Date('2019-01-01T00:00:00+09:00')
+const smbcDirectHistoryStartDate = '20190101'
+const compactDate = (date: Date) => {
+  const tokyo = new Date(date.getTime() + tokyoOffsetMs)
+  return `${tokyo.getUTCFullYear()}${String(tokyo.getUTCMonth() + 1).padStart(2, '0')}${String(tokyo.getUTCDate()).padStart(2, '0')}`
+}
 
 const dashedDate = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
@@ -147,6 +157,7 @@ export class ProviderRegistry {
         name: 'SBI Securities',
         kind: 'brokerage',
         authentication: 'passkey',
+        defaultColor: '#0a3e86',
         credentialFields: [
           { name: 'source', kind: 'passkey', required: true, secret: true },
           { name: 'tradePassword', kind: 'password', required: false, secret: true },
@@ -154,10 +165,22 @@ export class ProviderRegistry {
         ],
       },
       {
+        id: 'paypay-sec',
+        name: 'PayPay Securities',
+        kind: 'brokerage',
+        authentication: 'passkey',
+        defaultColor: '#ff003c',
+        credentialFields: [
+          { name: 'credential', kind: 'passkey', required: true, secret: true },
+          { name: 'tradePassword', kind: 'password', required: true, secret: true },
+        ],
+      },
+      {
         id: 'smbc-direct',
         name: 'SMBC Direct',
         kind: 'bank',
         authentication: 'credentials-and-qr',
+        defaultColor: '#005b47',
         credentialFields: [
           { name: 'user', kind: 'text', required: true, secret: true },
           { name: 'password', kind: 'password', required: true, secret: true },
@@ -169,6 +192,7 @@ export class ProviderRegistry {
         name: 'Mobile Suica',
         kind: 'transit-card',
         authentication: 'credentials-and-captcha',
+        defaultColor: '#2f8e3c',
         credentialFields: [
           { name: 'user', kind: 'text', required: true, secret: true },
           { name: 'password', kind: 'password', required: true, secret: true },
@@ -179,6 +203,7 @@ export class ProviderRegistry {
         name: 'PayPay Bank',
         kind: 'bank',
         authentication: 'credentials',
+        defaultColor: '#f5bac4',
         credentialFields: [
           { name: 'branchNo', kind: 'text', required: true, secret: true },
           { name: 'accountNo', kind: 'text', required: true, secret: true },
@@ -186,6 +211,26 @@ export class ProviderRegistry {
         ],
       },
     ] as const
+  }
+
+  descriptor(profile: AccountProfile): ProfileDescriptor {
+    const definition = this.definitions().find((item) => item.id === profile.provider)
+    const category =
+      definition?.kind === 'brokerage' || definition?.kind === 'bank'
+        ? definition.kind
+        : definition?.kind === 'transit-card'
+          ? 'transit'
+          : 'other'
+    return {
+      id: profile.id,
+      provider: {
+        id: profile.provider,
+        name: definition?.name ?? profile.provider,
+      },
+      label: profile.label,
+      category,
+      defaultColor: definition?.defaultColor ?? '#9aa0a9',
+    }
   }
 
   credentialOrigin(providerId: string) {
@@ -198,7 +243,9 @@ export class ProviderRegistry {
             ? this.config.mobileSuicaBaseUrl
             : providerId === 'paypay-bank'
               ? this.config.payPayBankBaseUrl
-              : undefined
+              : providerId === 'paypay-sec'
+                ? this.config.payPaySecPasskeyOrigin
+                : undefined
     if (!configured) throw new Error(`provider origin is not configured: ${providerId}`)
     return new URL(configured).origin
   }
@@ -239,6 +286,16 @@ export class ProviderRegistry {
         tradePassword: optionalCredential(credentials.tradePassword),
         deviceId: optionalCredential(credentials.deviceId),
       } satisfies StoredSbiPasskeySecret)
+    } else if (providerId === 'paypay-sec') {
+      const credential = normalizePayPaySecCredential(
+        credentials.credential,
+        this.config.payPaySecPasskeyOrigin,
+      )
+      await saveSecret(keyringAccount, {
+        credential,
+        deviceId: randomId('device'),
+        tradePassword: requiredCredential(credentials, 'tradePassword'),
+      } satisfies StoredPayPaySecSecret)
     } else if (providerId === 'smbc-direct') {
       const user = requiredCredential(credentials, 'user')
       if (!/^\d+-\d+$/.test(user)) throw new Error('user must be <branch>-<account>')
@@ -278,7 +335,7 @@ export class ProviderRegistry {
       await deleteSecret(keyringAccount)
       throw cause
     }
-    if (providerId === 'sbisec') {
+    if (providerId === 'sbisec' || providerId === 'paypay-sec') {
       try {
         await syncInitialHistory(this.db, this, id)
       } catch (cause) {
@@ -312,6 +369,16 @@ export class ProviderRegistry {
         profile,
         provider,
         persist: async () => {},
+        release: async () => {},
+      }
+    }
+
+    if (profile.provider === 'paypay-sec') {
+      const opened = await openPayPaySec(this.db, this.config, profile.id, options)
+      return {
+        profile,
+        provider: opened.provider,
+        persist: opened.persist,
         release: async () => {},
       }
     }
@@ -384,14 +451,17 @@ export class ProviderRegistry {
     action: (open: OpenProvider) => Promise<T>,
     options: { forceLogin?: boolean } = {},
   ) {
-    const open = await this.open(profileOrId, options)
-    try {
-      const value = await action(open)
-      await open.persist()
-      return value
-    } finally {
-      await open.release()
-    }
+    const profile = typeof profileOrId === 'string' ? await this.profile(profileOrId) : profileOrId
+    return withProfileLock(profile.id, async () => {
+      const open = await this.open(profile, options)
+      try {
+        const value = await action(open)
+        await open.persist()
+        return value
+      } finally {
+        await open.release()
+      }
+    })
   }
 
   async connect(profileId: string): Promise<ProviderConnection> {
@@ -704,6 +774,12 @@ export class ProviderRegistry {
       return { from: dashedDate(from), to: dashedDate(to), kinds: ['transaction'] as const }
     }
     return { kinds: ['transaction'] as const }
+  }
+
+  normalizeHistoryRange(profile: AccountProfile, from: Date, to: Date): [Date, Date] | undefined {
+    if (profile.provider !== 'smbc-direct') return [from, to]
+    if (compactDate(to) < smbcDirectHistoryStartDate) return undefined
+    return [compactDate(from) < smbcDirectHistoryStartDate ? smbcDirectHistoryStart : from, to]
   }
 
   splitHistoryRange(profile: AccountProfile, cause: unknown, from: Date, to: Date) {

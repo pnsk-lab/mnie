@@ -20,6 +20,7 @@ const props = defineProps<{
   countries: string[]
   markets: string[]
   loading?: boolean
+  priceDataAvailable: boolean
 }>()
 const selectedButtonRefs = ref(new Map<string, Element | null>())
 const setSelectedButtonRef =
@@ -144,7 +145,8 @@ const emit = defineEmits<{
                 <template v-if="stock.price > 0">{{
                   currencyForMarket(stock.price, stock.market)
                 }}</template>
-                <Spinner v-else size="sm" />
+                <Spinner v-else-if="priceDataAvailable" size="sm" />
+                <span v-else :class="ui.muted">データなし</span>
               </span>
             </button>
           </template>
