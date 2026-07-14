@@ -2,6 +2,10 @@ import { defineConfig } from 'vite-plus'
 
 export default defineConfig({
   test: {
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov'],
+    },
     exclude: [
       '**/node_modules/**',
       'apps/mnie-server/src/rpc/ws.integration.test.ts',
