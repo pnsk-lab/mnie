@@ -27,7 +27,7 @@ MOBILE_SUICA_USER=your-email@example.com
 MOBILE_SUICA_PASS=your-password
 ```
 
-The client accepts credentials explicitly as well. The CAPTCHA answer must always be supplied by the account holder.
+The client accepts credentials explicitly as well. `onCaptcha` is responsible for returning the five-character CAPTCHA answer and can use either user input or an image recognition model.
 
 ## SDK
 
@@ -40,27 +40,27 @@ bun add @mnie/provider-mobile-suica
 ### Usage
 
 ```ts
-import { login } from '@mnie/provider-mobile-suica'
+import { captchaModelPath, createCaptchaSolver } from '@repo/capsolve-sp'
+import { createProvider, login } from '@mnie/provider-mobile-suica'
+
+const captchaSolver = await createCaptchaSolver(captchaModelPath())
 
 const profile = await login({
   baseURL: process.env.MOBILE_SUICA_BASE_URL!,
-  onCaptcha: async ({ image, contentType }): Promise<string> => {
-    // Display `image` to the account holder and return their answer.
-    return askAccountHolder(image, contentType)
-  },
-
-  user: process.env.MOBILE_SUICA_USER,
-  password: process.env.MOBILE_SUICA_PASS,
-  /** Mobile Suica web origin. Paths, queries, and fragments are not accepted. */
-  baseURL: 'https://mobilesuica.example.com',
+  user: process.env.MOBILE_SUICA_USER!,
+  password: process.env.MOBILE_SUICA_PASS!,
+  onCaptcha: ({ image }) => captchaSolver.solve(image),
 })
 
 try {
-  console.log(await profile.getUsageHistory())
+  const provider = createProvider(profile)
+  console.log(await provider.invoke('transactions.list', {}))
 } finally {
   await profile.logout()
 }
 ```
+
+`@repo/capsolve-sp` is a private workspace package in this monorepo. Its model is downloaded by the root `bun install`; set `CAPSOLVE_MODEL_PATH` only when the model is stored somewhere other than the default location. A recognition error causes `login()` to reject rather than prompting for a fallback answer.
 
 `login()` reads `MOBILE_SUICA_USER` and `MOBILE_SUICA_PASS` when `user` and `password` are not supplied. CAPTCHA answers are not logged or retained by the client.
 

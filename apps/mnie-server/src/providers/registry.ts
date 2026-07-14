@@ -632,6 +632,7 @@ export class ProviderRegistry {
       rejectCaptcha = reject
     })
     let login: Promise<MobileSuicaProfile> | undefined
+    let captchaAttempt = 0
     login = loginMobileSuica({
       baseURL,
       user,
@@ -639,6 +640,8 @@ export class ProviderRegistry {
       onCaptcha: async ({ image, contentType }) => {
         const interactionId = randomId('interaction')
         const suggestedAnswer = await solveCaptcha(image)
+        if (captchaAttempt > 0) return suggestedAnswer
+        captchaAttempt += 1
         const answer = new Promise<string>((resolve) => {
           if (!login) throw new Error('Mobile Suica login was not initialized')
           this.#pendingMobileSuica.set(interactionId, {

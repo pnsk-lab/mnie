@@ -15,6 +15,8 @@ export interface MobileSuicaLoginOptions {
   onCaptcha: (captcha: MobileSuicaCaptcha) => string | Promise<string>
 }
 
+const mobileSuicaLoginAttempts = 4
+
 interface ParsedHistoryTableRowBase {
   id: string
   date: string
@@ -492,67 +494,73 @@ const formBody = (fields: Record<string, string>) => new URLSearchParams(fields)
 export const login = async (options: MobileSuicaLoginOptions): Promise<MobileSuicaProfile> => {
   const baseURL = normalizeMobileSuicaOrigin(options.baseURL)
   const { user, password } = readCredentials(options)
-  const jar = new CookieJar()
-  const entryUrl = new URL('/index.aspx', baseURL)
-  const loginResponse = await fetchWithCookies(
-    entryUrl,
-    {
-      headers: {
-        ...browserHeaders,
-        referer: new URL('/cm/lb/SessionTimeout.html', baseURL).toString(),
+  for (let attempt = 1; attempt <= mobileSuicaLoginAttempts; attempt += 1) {
+    const jar = new CookieJar()
+    const entryUrl = new URL('/index.aspx', baseURL)
+    const loginResponse = await fetchWithCookies(
+      entryUrl,
+      {
+        headers: {
+          ...browserHeaders,
+          referer: new URL('/cm/lb/SessionTimeout.html', baseURL).toString(),
+        },
       },
-    },
-    jar,
-  )
-  const loginPage = parseLoginPage(
-    await responseText(loginResponse, 'login page request'),
-    entryUrl,
-  )
-  const captchaResponse = await fetchWithCookies(
-    loginPage.captchaUrl,
-    {
-      headers: {
-        ...browserHeaders,
-        accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-        'sec-fetch-dest': 'image',
-        'sec-fetch-mode': 'no-cors',
+      jar,
+    )
+    const loginPage = parseLoginPage(
+      await responseText(loginResponse, 'login page request'),
+      entryUrl,
+    )
+    const captchaResponse = await fetchWithCookies(
+      loginPage.captchaUrl,
+      {
+        headers: {
+          ...browserHeaders,
+          accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+          'sec-fetch-dest': 'image',
+          'sec-fetch-mode': 'no-cors',
+        },
       },
-    },
-    jar,
-  )
-  if (!captchaResponse.ok)
-    throw new Error(`CAPTCHA image request failed: HTTP ${captchaResponse.status}`)
-  const answer = (
-    await options.onCaptcha({
-      image: new Uint8Array(await captchaResponse.arrayBuffer()),
-      contentType: captchaResponse.headers.get('content-type') ?? 'application/octet-stream',
-    })
-  ).trim()
-  if (!answer) throw new Error('onCaptcha must return a non-empty answer')
+      jar,
+    )
+    if (!captchaResponse.ok) {
+      throw new Error(`CAPTCHA image request failed: HTTP ${captchaResponse.status}`)
+    }
+    const answer = (
+      await options.onCaptcha({
+        image: new Uint8Array(await captchaResponse.arrayBuffer()),
+        contentType: captchaResponse.headers.get('content-type') ?? 'application/octet-stream',
+      })
+    ).trim()
+    if (!answer) throw new Error('onCaptcha must return a non-empty answer')
 
-  const loginUrl = new URL(loginPage.formAction, loginPage.url)
-  const topPage = await submit(
-    loginUrl,
-    {
-      ...loginPage.fields,
-      MailAddress: user,
-      Password: password,
-      WebCaptcha1__editor: answer,
-      WebCaptcha1__editor_clientState: captchaEditorState(answer),
-      WebCaptcha1_clientState: captchaState,
-      // Preserve the form's Shift_JIS submit-label bytes exactly as emitted by
-      // the working web flow. URLSearchParams encodes the percent characters.
-      LOGIN: '%83%8D%83O%83C%83%93',
-    },
-    jar,
-    loginUrl,
-    'login request',
-  )
-  const error = loginError(topPage)
-  if (error) throw new Error(`Mobile Suica login failed: ${error}`)
-  const historyUrl = usageHistoryUrl(topPage, baseURL)
-
-  return createProfile(baseURL, user, password, jar, historyUrl)
+    const loginUrl = new URL(loginPage.formAction, loginPage.url)
+    const topPage = await submit(
+      loginUrl,
+      {
+        ...loginPage.fields,
+        MailAddress: user,
+        Password: password,
+        WebCaptcha1__editor: answer,
+        WebCaptcha1__editor_clientState: captchaEditorState(answer),
+        WebCaptcha1_clientState: captchaState,
+        // Preserve the form's Shift_JIS submit-label bytes exactly as emitted by
+        // the working web flow. URLSearchParams encodes the percent characters.
+        LOGIN: '%83%8D%83O%83C%83%93',
+      },
+      jar,
+      loginUrl,
+      'login request',
+    )
+    const error = loginError(topPage)
+    if (!error) {
+      return createProfile(baseURL, user, password, jar, usageHistoryUrl(topPage, baseURL))
+    }
+    if (attempt === mobileSuicaLoginAttempts) {
+      throw new Error(`Mobile Suica login failed after 3 CAPTCHA retries: ${error}`)
+    }
+  }
+  throw new Error('Mobile Suica login attempts exhausted')
 }
 
 /** Connects to Mobile Suica and returns the provider-neutral financial interface. */
