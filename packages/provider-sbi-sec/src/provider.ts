@@ -221,6 +221,16 @@ const commonReceipt = (
   orderedAt: receipt.acceptedAt,
 })
 
+const baseOrderRules: InvestmentOrderRules = {
+  sizing: [{ kind: 'quantity', minimum: '1', increment: '1' }],
+  priceTypes: ['market', 'limit'],
+  timings: ['realtime', 'opening'],
+  timeInForce: ['day', 'week', 'date'],
+  accountTypes: ['specific', 'general', 'growthInvestment', 'nisa'],
+  supportsCorrection: true,
+  supportsCancellation: true,
+}
+
 const orderRules = (
   preOrder: Awaited<ReturnType<SbiClientMethods['orders']['cash']['preOrder']>>,
   request: InvestmentOrderRequest,
@@ -406,6 +416,12 @@ export const createProviderFromClient = (
       if (!operation.startsWith('investments.orders.')) return { available: true }
       if (operation === 'investments.orders.list' || operation === 'investments.orders.get') {
         return { available: true }
+      }
+      if (
+        (operation === 'investments.orders.preview' || operation === 'investments.orders.create') &&
+        (!input || typeof input !== 'object')
+      ) {
+        return { available: true, orderRules: baseOrderRules }
       }
       if (
         operation === 'investments.orders.replace' ||
