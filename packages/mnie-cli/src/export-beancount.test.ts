@@ -1,5 +1,5 @@
 import type { HistoryItem } from '@repo/client-mnie'
-import { expect, test, vi } from 'vitest'
+import { expect, test, vi } from 'vite-plus/test'
 import { exportBeancount } from './export-beancount'
 
 const transaction: HistoryItem = {

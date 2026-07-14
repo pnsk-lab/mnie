@@ -2,7 +2,7 @@ import { createCipheriv, createHash, createHmac, generateKeyPairSync } from 'nod
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expect, test } from 'vitest'
+import { expect, test } from 'vite-plus/test'
 import { keyFromBytes, type SymmetricKey } from './crypto'
 import { createBitwardenPasskeyProvider } from './provider'
 

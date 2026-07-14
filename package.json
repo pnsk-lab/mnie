@@ -21,7 +21,7 @@
     "model:download": "bun scripts/download-capsolve-model.ts",
     "fmt": "vp check --fix",
     "sdk:build": "vp run sdk-build",
-    "test": "vp run sdk-build && vitest run && bun test apps/mnie-server/src/rpc/ws.integration.test.ts apps/mnie-server/src/security/trade-limits.test.ts apps/mnie-server/src/providers/registry-lock.test.ts",
+    "test": "vp run sdk-build && vp test run && bun test apps/mnie-server/src/rpc/ws.integration.test.ts apps/mnie-server/src/security/trade-limits.test.ts apps/mnie-server/src/providers/registry-lock.test.ts",
     "typecheck": "vp run typecheck:all",
     "verify:paypay-bank-runtime": "bun scripts/verify-paypay-bank-runtime.ts",
     "mnie": "cd packages/mnie-cli && bun mnie"
@@ -33,8 +33,7 @@
   "devDependencies": {
     "@repo/tsconfig": "workspace:*",
     "@types/bun": "latest",
-    "vite-plus": "^0.1.24",
-    "vitest": "^4.1.10"
+    "vite-plus": "^0.1.24"
   },
   "peerDependencies": {
     "typescript": "^5"

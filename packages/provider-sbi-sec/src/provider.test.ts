@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from 'vitest'
+import { describe, expect, test, vi } from 'vite-plus/test'
 import type { InvestmentOrderPlacement, InvestmentOrderRequest } from '@mnie/types'
 import type { SbiClientMethods } from './methods/types'
 import { createProviderFromClient } from './provider'

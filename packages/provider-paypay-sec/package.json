@@ -14,7 +14,7 @@
     "build": "cd ../.. && vp run @mnie/types#build && cd packages/provider-paypay-sec && vp pack",
     "dev": "vp pack --watch",
     "clean": "rm -rf dist",
-    "test": "vitest run",
+    "test": "vp test run",
     "typecheck": "tsc"
   },
   "dependencies": {
@@ -23,8 +23,7 @@
   },
   "devDependencies": {
     "@repo/tsconfig": "workspace:*",
-    "@types/bun": "latest",
-    "vitest": "^4.1.10"
+    "@types/bun": "latest"
   },
   "peerDependencies": {
     "typescript": "^5"

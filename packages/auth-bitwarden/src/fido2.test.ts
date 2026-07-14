@@ -1,5 +1,5 @@
 import { createHash, generateKeyPairSync, verify } from 'node:crypto'
-import { expect, test } from 'vitest'
+import { expect, test } from 'vite-plus/test'
 import { createBitwardenAssertion, parseBitwardenCredentialId } from './fido2'
 import type { BitwardenPasskey } from './vault'
 

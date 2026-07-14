@@ -1,5 +1,5 @@
 import { createCipheriv, createHash, createHmac } from 'node:crypto'
-import { expect, test } from 'vitest'
+import { expect, test } from 'vite-plus/test'
 import { keyFromBytes, type SymmetricKey } from './crypto'
 import { openBitwardenVaultFromObject } from './vault'
 

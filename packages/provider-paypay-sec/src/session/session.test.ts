@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from 'node:crypto'
 import type { KeyObject } from 'node:crypto'
-import { describe, expect, test, vi } from 'vitest'
+import { describe, expect, test, vi } from 'vite-plus/test'
 import {
   createStoredCredentialPasskeyProvider,
   loginWithPasskey,

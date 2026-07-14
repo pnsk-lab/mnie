@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from 'vitest'
+import { describe, expect, test, vi } from 'vite-plus/test'
 import type { FinancialProvider, OperationMap } from '@mnie/types'
 import type { Db } from '../db'
 import type { AdminRpcService } from './admin'

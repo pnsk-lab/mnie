@@ -6,7 +6,7 @@ import {
   verify,
 } from 'node:crypto'
 import type { KeyObject } from 'node:crypto'
-import { expect, test } from 'vitest'
+import { expect, test } from 'vite-plus/test'
 import { createStoredCredentialPasskeyProvider } from './passkey'
 import type { PlaintextStoredWebAuthnCredential, WebAuthnJwk } from '../types'
 
