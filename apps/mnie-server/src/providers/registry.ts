@@ -776,6 +776,9 @@ export class ProviderRegistry {
     if (profile.provider === 'paypay-bank') {
       return { from: dashedDate(from), to: dashedDate(to), kinds: ['transaction'] as const }
     }
+    if (profile.provider === 'mobilesuica') {
+      return { from: from.toISOString(), to: to.toISOString(), kinds: ['transaction'] as const }
+    }
     return { kinds: ['transaction'] as const }
   }
 

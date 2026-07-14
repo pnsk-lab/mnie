@@ -75,7 +75,12 @@ export interface MobileSuicaProfile {
   logout(): Promise<void>
 }
 
-const historyReaders = new WeakMap<MobileSuicaProfile, () => Promise<ParsedHistoryTableRow[]>>()
+const mobileSuicaHistoryPageLimit = 100
+
+const historyReaders = new WeakMap<
+  MobileSuicaProfile,
+  (onOrBefore?: Date) => Promise<ParsedHistoryTableRow[]>
+>()
 
 class MobileSuicaCaptchaRequiredError extends Error {}
 
@@ -117,18 +122,16 @@ export const createProvider = (
     invoke: async (name, request) => {
       if (name === 'accounts.list') return { items: [account] } as Page<Account> as never
       if (name === 'transactions.list') {
-        const readHistory = historyReaders.get(profile)
-        if (!readHistory) throw new Error('Mobile Suica profile does not have a transaction reader')
-        const items = (await readHistory()).map((row) => transactionFromHistoryRow(account.id, row))
+        const input = (request ?? {}) as DateRangeRequest
+        const items = await transactionsForRequest(profile, account, input)
         return { items } as Page<Transaction> as never
       }
       if (name === 'history.list') {
-        const input = request as HistoryListRequest
+        const input = (request ?? {}) as HistoryListRequest
         if (input.kinds?.some((kind) => kind !== 'transaction')) {
           throw new Error('Mobile Suica history.list supports transaction history only')
         }
-        const transactions = (await createProvider(profile).invoke('transactions.list', input))
-          .items
+        const transactions = await transactionsForRequest(profile, account, input)
         return {
           items: transactions.map((transaction) => ({
             kind: 'transaction' as const,
@@ -142,6 +145,87 @@ export const createProvider = (
     exportSession: () => profile.session.export(),
     close: () => profile.logout(),
   }
+}
+
+const validHistoryDate = (value: string | undefined, name: 'from' | 'to') => {
+  if (value === undefined) return undefined
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) throw new Error(`Mobile Suica ${name} must be a valid date`)
+  return date
+}
+
+const transactionsForRequest = async (
+  profile: MobileSuicaProfile,
+  account: Account,
+  request: DateRangeRequest,
+) => {
+  if (request.accountId && request.accountId !== account.id) return []
+  if (request.cursor) {
+    throw new Error('Mobile Suica transaction history does not support cursors')
+  }
+  if (request.limit !== undefined && (!Number.isSafeInteger(request.limit) || request.limit < 0)) {
+    throw new Error('Mobile Suica transaction history limit must be a non-negative safe integer')
+  }
+  const from = validHistoryDate(request.from, 'from')
+  const to = validHistoryDate(request.to, 'to')
+  if (from && to && from > to) throw new Error('Mobile Suica from must not be after to')
+
+  const readHistory = historyReaders.get(profile)
+  if (!readHistory) throw new Error('Mobile Suica profile does not have a transaction reader')
+  const fromDay = from && startOfTokyoDay(from)
+  const toDay = to ? endOfTokyoDay(to) : new Date()
+  const rows: ParsedHistoryTableRow[] = []
+  let cursor = toDay
+  while (true) {
+    const page = await readHistory(cursor)
+    if (page.length === 0) break
+    const oldest = oldestHistoryDate(page)
+    rows.push(...page)
+
+    if (request.limit !== undefined && rows.length >= request.limit) break
+    if (page.length < mobileSuicaHistoryPageLimit) break
+    if (fromDay && oldest <= fromDay) {
+      if (oldest.getTime() === fromDay.getTime()) {
+        throw new Error(
+          `Mobile Suica history reached the ${mobileSuicaHistoryPageLimit}-record limit on ${tokyoDate(oldest)}; the requested range cannot be retrieved completely`,
+        )
+      }
+      break
+    }
+    cursor = dayBeforeTokyo(oldest)
+  }
+
+  const transactions = rows.map((row) => transactionFromHistoryRow(account.id, row))
+  const filtered = transactions.filter((transaction) => {
+    const occurredAt = new Date(transaction.occurredAt)
+    return (!fromDay || occurredAt >= fromDay) && occurredAt <= toDay
+  })
+  const unique = [...new Map(filtered.map((transaction) => [transaction.id, transaction])).values()]
+  unique.sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))
+  return request.limit === undefined ? unique : unique.slice(0, request.limit)
+}
+
+const tokyoOffsetMs = 9 * 60 * 60_000
+
+const tokyoDate = (date: Date) => {
+  const shifted = new Date(date.getTime() + tokyoOffsetMs)
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}-${String(shifted.getUTCDate()).padStart(2, '0')}`
+}
+
+const startOfTokyoDay = (date: Date) => new Date(`${tokyoDate(date)}T00:00:00+09:00`)
+const endOfTokyoDay = (date: Date) => new Date(`${tokyoDate(date)}T23:59:59.999+09:00`)
+const dayBeforeTokyo = (date: Date) => new Date(startOfTokyoDay(date).getTime() - 24 * 60 * 60_000)
+
+const oldestHistoryDate = (records: ParsedHistoryTableRow[]) => {
+  const oldest = records.reduce<Date | undefined>((current, record) => {
+    const date = new Date(record.date)
+    if (!Number.isFinite(date.getTime())) {
+      throw new Error(`Mobile Suica returned an invalid history date: ${record.date}`)
+    }
+    return !current || date < current ? date : current
+  }, undefined)
+  if (!oldest) throw new Error('Mobile Suica history page had no records')
+  return oldest
 }
 
 export interface MobileSuicaSession {
@@ -346,6 +430,7 @@ const tableRows = (html: string) =>
 const normalizeHistoryDates = (records: ParsedHistoryTableRow[], now = new Date()) => {
   let inferredYear = now.getFullYear()
   let previousTime = Number.POSITIVE_INFINITY
+  const occurrences = new Map<string, number>()
   return records.map((record) => {
     const match = record.date.trim().match(/^(?:(\d{4})[年/.-])?(\d{1,2})[月/.-](\d{1,2})日?$/)
     if (!match) throw new Error(`unsupported Mobile Suica history date: ${record.date}`)
@@ -367,11 +452,29 @@ const normalizeHistoryDates = (records: ParsedHistoryTableRow[], now = new Date(
     }
     previousTime = time
     const isoDate = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T00:00:00+09:00`
-    return { ...record, date: isoDate }
+    const fingerprint = stableHistoryId(record, isoDate)
+    const occurrence = occurrences.get(fingerprint) ?? 0
+    occurrences.set(fingerprint, occurrence + 1)
+    return { ...record, date: isoDate, id: `${fingerprint}:${occurrence}` }
   })
 }
 
-const parseMobileSuicaUsageHistory = (html: string): ParsedHistoryTableRow[] => {
+const stableHistoryId = (record: ParsedHistoryTableRowBase, date: string) =>
+  JSON.stringify([
+    date,
+    record.typeFrom,
+    record.placeFrom,
+    record.typeTo,
+    record.placeTo,
+    record.balanceText,
+    record.amountText,
+  ])
+
+const parseMobileSuicaUsageHistory = (
+  html: string,
+  referenceDate = new Date(),
+  allowEmpty = false,
+): ParsedHistoryTableRow[] => {
   const records: ParsedHistoryTableRow[] = []
   for (const cells of tableRows(html)) {
     // The first cell is the print-selection checkbox. The 100 history rows in
@@ -409,9 +512,10 @@ const parseMobileSuicaUsageHistory = (html: string): ParsedHistoryTableRow[] => 
       return classes.includes('loginBtn') && classes.includes('ButtonBox')
     })
     if (hasLoginButton) throw new MobileSuicaCaptchaRequiredError('logged out, CAPTCHA is needed')
+    if (allowEmpty) return []
     throw new Error('usage history page did not include any usage rows')
   }
-  return normalizeHistoryDates(records)
+  return normalizeHistoryDates(records, referenceDate)
 }
 
 const yenAmount = (value: number | null) =>
@@ -490,6 +594,18 @@ const submit = async (
   )
 
 const formBody = (fields: Record<string, string>) => new URLSearchParams(fields).toString()
+
+const historySearchFields = (html: string, onOrBefore: Date) => {
+  const baseVariable = inputFields(html).baseVariable
+  if (!baseVariable) throw new Error('Mobile Suica history page did not include baseVariable')
+  const [year, month, day] = tokyoDate(onOrBefore).split('-')
+  return {
+    baseVariable,
+    specifyYearMonth: `${year}/${month}`,
+    specifyDay: day!,
+    SEARCH: '検索',
+  }
+}
 
 export const login = async (options: MobileSuicaLoginOptions): Promise<MobileSuicaProfile> => {
   const baseURL = normalizeMobileSuicaOrigin(options.baseURL)
@@ -602,9 +718,17 @@ const createProfile = (
       if (!response.ok) throw new Error(`logout request failed: HTTP ${response.status}`)
     },
   }
-  historyReaders.set(profile, async () => {
+  historyReaders.set(profile, async (onOrBefore) => {
     const html = await submit(historyUrl, {}, jar, historyUrl, 'usage history request')
-    return parseMobileSuicaUsageHistory(html)
+    if (!onOrBefore) return parseMobileSuicaUsageHistory(html)
+    const result = await submit(
+      historyUrl,
+      historySearchFields(html, onOrBefore),
+      jar,
+      historyUrl,
+      'usage history search request',
+    )
+    return parseMobileSuicaUsageHistory(result, onOrBefore, true)
   })
   return profile
 }
@@ -627,6 +751,7 @@ export const importSession = async (session: MobileSuicaSession): Promise<Mobile
 import type {
   Account,
   CommonOperations,
+  DateRangeRequest,
   FinancialProvider,
   HistoryItem,
   HistoryListRequest,
