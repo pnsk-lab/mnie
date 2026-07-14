@@ -805,6 +805,7 @@ const confirmCancel = () => {
       </div>
       <div :class="ui.holdingsBody">
         <div :class="ui.holdingsHead">
+          <span>プロファイル</span>
           <span>銘柄</span>
           <span>タイプ</span>
           <span>数量</span>
@@ -814,6 +815,9 @@ const confirmCancel = () => {
         </div>
         <div v-if="positions.length" :class="ui.holdingsRows">
           <div v-for="position in positions" :key="positionKey(position)" :class="ui.holdingRow">
+            <span class="col-span-2 truncate text-sm font-semibold text-[#c3c7cf] md:col-span-1">
+              {{ position.profileLabel ?? '-' }}
+            </span>
             <button
               class="grid gap-1 text-left text-[#e3e3e9]"
               type="button"
@@ -821,9 +825,6 @@ const confirmCancel = () => {
             >
               <strong>{{ position.name }}</strong>
               <small>{{ position.code }}</small>
-              <small v-if="position.profileLabel" class="text-[#a8c7fa]">
-                {{ position.providerName }} / {{ position.profileLabel }}
-              </small>
             </button>
             <b :class="ui.typePill">{{
               position.type ?? (position.quantity >= 100 ? '単元' : 'S株')
