@@ -1,6 +1,8 @@
 # client-mobilesuica
 
-Mobile Suica web client for Mnie. It only reads SF (electronic money) usage history.
+Mobile Suica web client for Mnie. It reads SF (electronic money) usage history. Mobile Suica has
+no pagination, but supports searching for records on or before a selected date; range requests
+repeat that search to retrieve older history.
 
 ```ts
 import { login } from '@mnie/provider-mobile-suica'
