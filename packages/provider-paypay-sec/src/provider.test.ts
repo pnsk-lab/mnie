@@ -200,6 +200,7 @@ describe('PayPay Securities provider', () => {
       currentPrice: { currency: 'JPY', value: '1000' },
       market: 'japan',
       accountType: 'specific',
+      lotType: 'notApplicable',
     })
     expect(await provider.invoke('balances.list', { accountId: 'other' })).toEqual([])
   })
@@ -245,7 +246,10 @@ describe('PayPay Securities provider', () => {
     ).resolves.toMatchObject({
       available: true,
       orderRules: {
-        sizing: [{ kind: 'amount', currency: 'JPY', minimum: '100', increment: '1' }],
+        sizing: [
+          { kind: 'amount', side: 'buy', currency: 'JPY', minimum: '1000', increment: '1' },
+          { kind: 'amount', side: 'sell', currency: 'JPY', minimum: '100', increment: '1' },
+        ],
         accountTypes: ['general', 'specific', 'growthInvestment', 'nisa'],
       },
     })
@@ -258,6 +262,52 @@ describe('PayPay Securities provider', () => {
       available: true,
       transactionAmount: { currency: 'JPY', value: '1000' },
     })
+  })
+
+  test('enforces side-specific amount minimums while allowing sell-all', async () => {
+    const client = fakeClient()
+    const provider = createProvider(client)
+    const availability = (side: 'buy' | 'sell', value: string) =>
+      provider.checkOperationAvailability?.({
+        operation: 'investments.orders.preview',
+        input: {
+          accountId: 'account-1',
+          instrumentId: '101',
+          side,
+          accountType: 'specific',
+          positionId: side === 'sell' ? 'japan:101:0' : undefined,
+          amount: { currency: 'JPY', value },
+        },
+      })
+
+    await expect(availability('buy', '999')).resolves.toMatchObject({ available: false })
+    await expect(availability('buy', '1000')).resolves.toMatchObject({ available: true })
+    await expect(availability('sell', '99')).resolves.toMatchObject({ available: false })
+    await expect(availability('sell', '100')).resolves.toMatchObject({ available: true })
+    await expect(
+      provider.checkOperationAvailability?.({
+        operation: 'investments.orders.preview',
+        input: {
+          accountId: 'account-1',
+          instrumentId: '101',
+          side: 'sell',
+          accountType: 'specific',
+          positionId: 'japan:101:0',
+          sellAll: true,
+        },
+      }),
+    ).resolves.toMatchObject({ available: true })
+
+    await expect(
+      provider.invoke('investments.orders.preview', {
+        accountId: 'account-1',
+        instrumentId: '101',
+        side: 'buy',
+        accountType: 'specific',
+        amount: { currency: 'JPY', value: '999' },
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' })
+    expect(client.orders.buy.preview).not.toHaveBeenCalled()
   })
 
   test('resolves the market when instrument detail is requested directly', async () => {

@@ -57,6 +57,7 @@ import {
   orderDetailFromApi,
   orderFromApi,
   orderHistoryKey,
+  orderSizingForSide,
   chartNoticeFromIssueChart,
   pricePointsFromIssueChart,
   positionFromApi,
@@ -295,6 +296,7 @@ export const useTradingSession = (
   let chartHistoryRequestId = 0
   let cashPreOrderRequestId = 0
   let instrumentDetailRequestId = 0
+  let connectingProfileId = ''
 
   const maxRealtimePricePoints = 120
   const errorMessage = (cause: unknown, fallback: string) =>
@@ -372,9 +374,7 @@ export const useTradingSession = (
   const orderQuantity = computed(() => Number(quantityInput.value || 0))
   const orderAmount = computed(() => Number(amountInput.value || 0))
   const amountSizing = computed(() =>
-    asArray(providerOrderRules.value.sizing)
-      .map(asRecord)
-      .find((sizing) => sizing.kind === 'amount'),
+    orderSizingForSide(providerOrderRules.value.sizing, 'amount', tradeSide.value),
   )
   const orderAmountMinimum = computed(() => numberValue(amountSizing.value?.minimum, 1))
   const orderAmountIncrement = computed(() => numberValue(amountSizing.value?.increment, 1))
@@ -1338,6 +1338,29 @@ export const useTradingSession = (
     }
   }
 
+  const loadSelectedStockDetail = async () => {
+    const stock = selectedStock.value
+    if (!stock.code || !providerOperations.value.has('investments.instruments.get')) {
+      quoteLoading.value = false
+      return
+    }
+    const requestId = ++instrumentDetailRequestId
+    quoteLoading.value = true
+    try {
+      const detail = await rpcCall<unknown>('investments.instruments.get', {
+        instrumentId: stock.code,
+      })
+      if (requestId !== instrumentDetailRequestId) return
+      const merged = mergeInvestmentInstrument(stock, detail)
+      mergeStocks([merged])
+      selectStock(merged)
+    } catch (cause) {
+      reportDataError(errorMessage(cause, '現在価格を取得できませんでした'), cause)
+    } finally {
+      if (requestId === instrumentDetailRequestId) quoteLoading.value = false
+    }
+  }
+
   const loadOrderHistoryFromSdk = async () => {
     orderHistoryLoaded.value = false
     orderHistoryNotice.value = ''
@@ -1438,6 +1461,7 @@ export const useTradingSession = (
       positions.value = nextPositions
       mergeStocks(nextPositions.map(stockFromPosition))
       await enrichPositionStocks(nextPositions)
+      await loadSelectedStockDetail()
       const summedHoldingsMarketValue = nextPositions.reduce(
         (sum, position) => sum + position.marketValue,
         0,
@@ -1515,6 +1539,12 @@ export const useTradingSession = (
     ) {
       return
     }
+    if (
+      connectingProfileId === selectedProfile.id &&
+      (ws.value?.readyState === WebSocket.CONNECTING || ws.value?.readyState === WebSocket.OPEN)
+    ) {
+      return
+    }
 
     const previousSocket = ws.value
     rejectPendingRpc(new Error('RPC socket reconnecting'))
@@ -1550,6 +1580,7 @@ export const useTradingSession = (
     smbcQrUrl.value = ''
     smbcBalance.value = null
     dataLoading.value = true
+    connectingProfileId = selectedProfile.id
     const socket = createRpcSocket()
     socket.addEventListener('open', async () => {
       try {
@@ -1580,6 +1611,7 @@ export const useTradingSession = (
         reportDataError(errorMessage(cause, '接続に失敗しました'), cause)
         socket.close()
       } finally {
+        if (connectingProfileId === selectedProfile.id) connectingProfileId = ''
         dataLoading.value = false
       }
     })
@@ -1601,6 +1633,7 @@ export const useTradingSession = (
       connectedProfileId.value = ''
       providerOperations.value = new Set()
       providerOrderRules.value = {}
+      if (connectingProfileId === selectedProfile.id) connectingProfileId = ''
       dataLoading.value = false
     })
     ws.value = socket
@@ -1819,25 +1852,7 @@ export const useTradingSession = (
 
   const selectTradeStock = async (stock: Stock) => {
     selectStock(stock)
-    if (!providerOperations.value.has('investments.instruments.get')) {
-      quoteLoading.value = false
-      return
-    }
-    const requestId = ++instrumentDetailRequestId
-    quoteLoading.value = true
-    try {
-      const detail = await rpcCall<unknown>('investments.instruments.get', {
-        instrumentId: stock.code,
-      })
-      if (requestId !== instrumentDetailRequestId) return
-      const merged = mergeInvestmentInstrument(stock, detail)
-      mergeStocks([merged])
-      selectStock(merged)
-    } catch (cause) {
-      reportDataError(errorMessage(cause, '現在価格を取得できませんでした'), cause)
-    } finally {
-      if (requestId === instrumentDetailRequestId) quoteLoading.value = false
-    }
+    await loadSelectedStockDetail()
   }
 
   const estimateCashOrder = async () => {
