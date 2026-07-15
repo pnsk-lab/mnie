@@ -82,7 +82,9 @@ export interface SmbcDirectProfile {
   logout(): Promise<void>
 }
 
-class SmbcDirectTwoFactorRequiredError extends Error {}
+class SmbcDirectTwoFactorRequiredError extends Error {
+  override name = 'ProviderInteractionRequiredError'
+}
 
 /** Converts an authenticated SMBC Direct session to the provider-neutral API. */
 export const createProvider = (profile: SmbcDirectProfile): FinancialProvider<CommonOperations> => {
@@ -99,6 +101,12 @@ export const createProvider = (profile: SmbcDirectProfile): FinancialProvider<Co
   return {
     descriptor: { id: 'smbc-direct', name: 'SMBC Direct' },
     accountId,
+    transactionObservationPolicy: {
+      accountKind: 'bank',
+      institutionId: 'smbc',
+      timePrecision: 'instant',
+      identity: { kind: 'stable-provider-id' },
+    },
     capabilities: () => ['accounts:read', 'balances:read', 'transactions:read', 'transfers:read'],
     operations: () => [
       'accounts.list',

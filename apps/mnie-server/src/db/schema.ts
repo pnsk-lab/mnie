@@ -119,6 +119,7 @@ export const transactionObservations = sqliteTable(
     providerAccountId: text('provider_account_id').notNull(),
     providerTransactionId: text('provider_transaction_id'),
     fingerprint: text('fingerprint').notNull(),
+    timePrecision: text('time_precision').notNull(),
     currentRevision: integer('current_revision').notNull(),
     firstSeenAt: integer('first_seen_at', { mode: 'timestamp_ms' }).notNull(),
     lastSeenAt: integer('last_seen_at', { mode: 'timestamp_ms' }).notNull(),

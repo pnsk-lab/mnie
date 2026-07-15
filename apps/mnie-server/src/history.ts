@@ -38,6 +38,10 @@ const syncTransactions = async (
   await providers.use(
     profile,
     async ({ provider }) => {
+      const observationPolicy = provider.transactionObservationPolicy
+      if (!observationPolicy) {
+        throw new Error(`${profile.provider} does not declare a transaction observation policy`)
+      }
       if (!provider.operations().includes('history.list')) {
         throw new Error(`${profile.provider} does not provide transaction history`)
       }
@@ -68,12 +72,12 @@ const syncTransactions = async (
         )
         .map((item) => item.transaction)
       const uniqueTransactions =
-        profile.provider === 'mobile-suica'
+        observationPolicy.identity.kind === 'ordered-snapshot'
           ? transactions
           : [...new Map(transactions.map((transaction) => [transaction.id, transaction])).values()]
       const observations = await persistTransactionObservations(
         db,
-        { id: profile.id, provider: profile.provider },
+        { id: profile.id, connectorTypeId: profile.provider, policy: observationPolicy },
         uniqueTransactions,
         fetchedAt,
       )
@@ -85,7 +89,7 @@ const syncTransactions = async (
           )
         }
         if (
-          profile.provider === 'mobile-suica' &&
+          observationPolicy.identity.kind === 'ordered-snapshot' &&
           observation.transaction.id !== historyTransaction.id
         ) {
           await db
@@ -142,7 +146,12 @@ export const listHistory = async (
   const profiles = (
     await db.select().from(accountProfiles).orderBy(accountProfiles.createdAt)
   ).filter((profile) => !request.profileIds || request.profileIds.includes(profile.id))
-  const errors: Array<{ profileId: string; providerId: string; message: string }> = []
+  const errors: Array<{
+    profileId: string
+    providerId: string
+    message: string
+    reason?: 'INTERACTION_REQUIRED'
+  }> = []
 
   if (kinds.has('transaction')) {
     const allowCachedCurrentRange = request.to == null
@@ -159,7 +168,14 @@ export const listHistory = async (
         )
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause)
-        errors.push({ profileId: profile.id, providerId: profile.provider, message })
+        errors.push({
+          profileId: profile.id,
+          providerId: profile.provider,
+          message,
+          ...(cause instanceof Error && cause.name === 'ProviderInteractionRequiredError'
+            ? { reason: 'INTERACTION_REQUIRED' as const }
+            : {}),
+        })
         console.error(`History synchronization failed for ${profile.id}:`, cause)
       }
     }
@@ -258,6 +274,38 @@ export const forceSyncHistory = async (
     to: request.to,
     synced: result.items.filter(
       (item) => item.kind === 'transaction' && item.profileId === request.profileId,
+    ).length,
+    errors: result.errors,
+  }
+}
+
+export const syncHistorySinceLastCoverage = async (
+  db: Db,
+  providers: ProviderRegistry,
+  profileId: string,
+) => {
+  const [sync] = await db
+    .select()
+    .from(historySyncs)
+    .where(eq(historySyncs.profileId, profileId))
+    .limit(1)
+  if (!sync) {
+    throw new Error('history has not been synchronized; run a full history sync first')
+  }
+  const to = new Date()
+  const result = await listHistory(db, providers, {
+    profileIds: [profileId],
+    kinds: ['transaction'],
+    from: sync.coveredTo.toISOString(),
+    to: to.toISOString(),
+    forceRefresh: true,
+  })
+  return {
+    profileId,
+    from: sync.coveredTo.toISOString(),
+    to: to.toISOString(),
+    synced: result.items.filter(
+      (item) => item.kind === 'transaction' && item.profileId === profileId,
     ).length,
     errors: result.errors,
   }

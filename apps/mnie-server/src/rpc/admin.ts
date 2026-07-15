@@ -5,7 +5,7 @@ import { ensureInitialAssetValuations, latestAssetValuations } from '../assets'
 import type { CronSystem } from '../cron'
 import type { Db } from '../db'
 import { accountProfiles, authManagers } from '../db/schema'
-import { forceSyncHistory } from '../history'
+import { forceSyncHistory, syncHistorySinceLastCoverage } from '../history'
 import type { StoredBitwardenAuthManagerSecret } from '../providers/credentials'
 import type { StoredPayPaySecSecret } from '../providers/credentials'
 import type { ProviderRegistry } from '../providers/registry'
@@ -160,6 +160,13 @@ export class AdminRpcService {
         from: requiredString(input, 'from'),
         to: requiredString(input, 'to'),
       })
+    }
+    if (operation === 'history.sync.since-last') {
+      return syncHistorySinceLastCoverage(
+        this.db,
+        this.providers,
+        requiredString(input, 'profileId'),
+      )
     }
     if (operation === 'jobs.list') return { jobs: this.cron.jobs() }
 

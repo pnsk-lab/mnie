@@ -1,5 +1,5 @@
 import { and, desc, eq } from 'drizzle-orm'
-import type { AccountKind, TimePrecision, Transaction, TransactionObservation } from '@mnie/types'
+import type { Transaction, TransactionObservation, TransactionObservationPolicy } from '@mnie/types'
 import type { Db } from './db'
 import {
   financialAccounts,
@@ -13,7 +13,8 @@ const parserVersion = 'observation-v1'
 
 export interface ObservationProfile {
   id: string
-  provider: string
+  connectorTypeId: string
+  policy: TransactionObservationPolicy
 }
 
 interface SnapshotItem {
@@ -23,6 +24,7 @@ interface SnapshotItem {
 
 interface SnapshotPayload {
   version: 1
+  fingerprintVersion: string
   items: SnapshotItem[]
 }
 
@@ -35,40 +37,36 @@ interface PendingObservation {
 
 export interface PersistedObservation {
   observation: TransactionObservation
-  /** The history-compatible transaction; Mobile Suica uses the persistent observation ID. */
+  /** Ordered snapshots use the persistent observation ID for history storage. */
   historyTransaction: Transaction
 }
 
-const institutionId = (connectorTypeId: string) => connectorTypeId
+const fingerprintVersion = (policy: TransactionObservationPolicy) =>
+  policy.identity.kind === 'ordered-snapshot'
+    ? policy.identity.fingerprintVersion
+    : 'stable-provider-id-v1'
 
-const accountKind = (connectorTypeId: string): AccountKind => {
-  if (connectorTypeId === 'mobile-suica') return 'transit-card'
-  if (connectorTypeId === 'smbc-direct' || connectorTypeId === 'paypay-bank') return 'bank'
-  return 'other'
-}
-
-const precisionFor = (connectorTypeId: string): TimePrecision =>
-  connectorTypeId === 'mobile-suica' ? 'day' : 'instant'
-
-const hasStableProviderTransactionId = (connectorTypeId: string) =>
-  connectorTypeId !== 'mobile-suica'
-
-const fingerprintFor = (transaction: Transaction) =>
+const fingerprintFor = (policy: TransactionObservationPolicy, transaction: Transaction) =>
   sha256(
-    JSON.stringify([
-      transaction.occurredAt,
-      transaction.kind,
-      transaction.direction,
-      transaction.status,
-      transaction.amount,
-      transaction.description,
-      transaction.balanceAfter,
-    ]),
+    policy.identity.kind === 'ordered-snapshot'
+      ? policy.identity.fingerprint(transaction)
+      : JSON.stringify(transaction),
   )
+
+const classificationIndependentKey = (accountId: string, transaction: Transaction) =>
+  JSON.stringify([
+    accountId,
+    transaction.accountId,
+    transaction.occurredAt,
+    transaction.status,
+    transaction.amount,
+    transaction.description,
+    transaction.balanceAfter,
+  ])
 
 const parseSnapshot = (payload: unknown): SnapshotPayload | undefined => {
   if (!payload || typeof payload !== 'object') return undefined
-  const value = payload as { version?: unknown; items?: unknown }
+  const value = payload as { version?: unknown; fingerprintVersion?: unknown; items?: unknown }
   if (value.version !== 1 || !Array.isArray(value.items)) return undefined
   const items = value.items.flatMap((item) => {
     if (!item || typeof item !== 'object') return []
@@ -77,7 +75,12 @@ const parseSnapshot = (payload: unknown): SnapshotPayload | undefined => {
       ? [{ observationId: value.observationId, fingerprint: value.fingerprint }]
       : []
   })
-  return { version: 1, items }
+  return {
+    version: 1,
+    fingerprintVersion:
+      typeof value.fingerprintVersion === 'string' ? value.fingerprintVersion : 'legacy-v1',
+    items,
+  }
 }
 
 /** Returns maximum ordered equal-fingerprint matches between two snapshots. */
@@ -123,14 +126,14 @@ const normalizedObservation = (
   lastSeenAt: Date,
   providerTransactionId?: string,
 ): TransactionObservation => {
-  const connectorTypeId = profile.provider
+  const connectorTypeId = profile.connectorTypeId
   return {
     id: observationId,
     profileId: profile.id,
     accountId: `financial-account_${sha256(`${profile.id}:${transaction.accountId}`).slice(0, 32)}`,
     source: {
       connectorTypeId,
-      institutionId: institutionId(connectorTypeId),
+      institutionId: profile.policy.institutionId,
       providerAccountId: transaction.accountId,
       ...(providerTransactionId ? { providerTransactionId } : {}),
       fingerprint,
@@ -139,7 +142,7 @@ const normalizedObservation = (
       lastSeenAt: lastSeenAt.toISOString(),
     },
     transaction,
-    timestamps: { occurredAt: transaction.occurredAt, precision: precisionFor(connectorTypeId) },
+    timestamps: { occurredAt: transaction.occurredAt, precision: profile.policy.timePrecision },
   }
 }
 
@@ -155,10 +158,10 @@ const ensureFinancialAccount = async (
     .values({
       id,
       profileId: profile.id,
-      connectorTypeId: profile.provider,
-      institutionId: institutionId(profile.provider),
+      connectorTypeId: profile.connectorTypeId,
+      institutionId: profile.policy.institutionId,
       providerAccountId: transaction.accountId,
-      kind: accountKind(profile.provider),
+      kind: profile.policy.accountKind,
       createdAt: now,
       updatedAt: now,
     })
@@ -180,25 +183,57 @@ export const persistTransactionObservations = async (
   transactions: Transaction[],
   fetchedAt = new Date(),
 ): Promise<PersistedObservation[]> => {
-  const connectorTypeId = profile.provider
+  const connectorTypeId = profile.connectorTypeId
   const pending: PendingObservation[] = transactions.map((transaction) => ({
     transaction,
-    fingerprint: fingerprintFor(transaction),
-    ...(hasStableProviderTransactionId(connectorTypeId)
+    fingerprint: fingerprintFor(profile.policy, transaction),
+    ...(profile.policy.identity.kind === 'stable-provider-id'
       ? { providerTransactionId: transaction.id }
       : {}),
   }))
 
-  if (!hasStableProviderTransactionId(connectorTypeId)) {
+  if (profile.policy.identity.kind === 'ordered-snapshot') {
     const [previousSnapshot] = await db
       .select()
       .from(transactionObservationSnapshots)
       .where(eq(transactionObservationSnapshots.profileId, profile.id))
       .orderBy(desc(transactionObservationSnapshots.fetchedAt))
       .limit(1)
-    const previous = parseSnapshot(previousSnapshot?.payload)?.items ?? []
+    const parsedPrevious = parseSnapshot(previousSnapshot?.payload)
+    const previous =
+      parsedPrevious?.fingerprintVersion === fingerprintVersion(profile.policy)
+        ? parsedPrevious.items
+        : []
     const matches = alignSnapshot(previous, pending)
     for (const [index, observationId] of matches) pending[index]!.observationId = observationId
+
+    const existingObservations = await db
+      .select()
+      .from(transactionObservations)
+      .where(eq(transactionObservations.profileId, profile.id))
+    const existingRevisions = await db.select().from(transactionObservationRevisions)
+    const revisionByObservation = new Map(
+      existingRevisions.map((revision) => [
+        `${revision.observationId}:${revision.revision}`,
+        revision.normalized as Transaction,
+      ]),
+    )
+    const observationBySourceId = new Map(
+      existingObservations.flatMap((observation) => {
+        const transaction = revisionByObservation.get(
+          `${observation.id}:${observation.currentRevision}`,
+        )
+        return transaction ? [[transaction.id, observation.id] as const] : []
+      }),
+    )
+    const claimed = new Set(pending.flatMap((item) => item.observationId ?? []))
+    for (const item of pending) {
+      if (item.observationId) continue
+      const observationId = observationBySourceId.get(item.transaction.id)
+      if (!observationId || claimed.has(observationId)) continue
+      item.observationId = observationId
+      claimed.add(observationId)
+    }
   }
 
   for (const item of pending) {
@@ -226,6 +261,7 @@ export const persistTransactionObservations = async (
     connectorTypeId,
     payload: {
       version: 1,
+      fingerprintVersion: fingerprintVersion(profile.policy),
       items: pending.map((item) => ({
         observationId: item.observationId!,
         fingerprint: item.fingerprint,
@@ -269,10 +305,11 @@ export const persistTransactionObservations = async (
         profileId: profile.id,
         accountId: financialAccountId,
         connectorTypeId,
-        institutionId: institutionId(connectorTypeId),
+        institutionId: profile.policy.institutionId,
         providerAccountId: item.transaction.accountId,
         providerTransactionId: item.providerTransactionId ?? null,
         fingerprint: item.fingerprint,
+        timePrecision: profile.policy.timePrecision,
         currentRevision: revision,
         firstSeenAt: fetchedAt,
         lastSeenAt: fetchedAt,
@@ -283,6 +320,7 @@ export const persistTransactionObservations = async (
         .set({
           accountId: financialAccountId,
           fingerprint: item.fingerprint,
+          timePrecision: profile.policy.timePrecision,
           currentRevision: revision,
           lastSeenAt: fetchedAt,
         })
@@ -311,10 +349,84 @@ export const persistTransactionObservations = async (
     result.push({
       observation,
       historyTransaction:
-        connectorTypeId === 'mobile-suica'
+        profile.policy.identity.kind === 'ordered-snapshot'
           ? { ...item.transaction, id: observationId }
           : item.transaction,
     })
   }
   return result
+}
+
+/** Returns the latest normalized revision of every persisted transaction without contacting providers. */
+export const listTransactionObservations = async (db: Db): Promise<TransactionObservation[]> => {
+  const [observations, revisions, snapshots] = await Promise.all([
+    db.select().from(transactionObservations),
+    db.select().from(transactionObservationRevisions),
+    db
+      .select()
+      .from(transactionObservationSnapshots)
+      .orderBy(desc(transactionObservationSnapshots.fetchedAt)),
+  ])
+  const latestSnapshotByProfile = new Map<string, SnapshotPayload>()
+  for (const snapshot of snapshots) {
+    if (latestSnapshotByProfile.has(snapshot.profileId)) continue
+    const parsed = parseSnapshot(snapshot.payload)
+    if (parsed) latestSnapshotByProfile.set(snapshot.profileId, parsed)
+  }
+  const activeOrderedObservationIds = new Set(
+    [...latestSnapshotByProfile.values()].flatMap((snapshot) =>
+      snapshot.items.map((item) => item.observationId),
+    ),
+  )
+  const revisionById = new Map(
+    revisions.map((revision) => [
+      `${revision.observationId}:${revision.revision}`,
+      revision.normalized as Transaction,
+    ]),
+  )
+  const normalized = observations.flatMap((observation) => {
+    const transaction = revisionById.get(`${observation.id}:${observation.currentRevision}`)
+    if (!transaction) return []
+    return [
+      {
+        id: observation.id,
+        profileId: observation.profileId,
+        accountId: observation.accountId,
+        source: {
+          connectorTypeId: observation.connectorTypeId,
+          institutionId: observation.institutionId,
+          providerAccountId: observation.providerAccountId,
+          ...(observation.providerTransactionId
+            ? { providerTransactionId: observation.providerTransactionId }
+            : {}),
+          fingerprint: observation.fingerprint,
+          revision: observation.currentRevision,
+          firstSeenAt: observation.firstSeenAt.toISOString(),
+          lastSeenAt: observation.lastSeenAt.toISOString(),
+        },
+        transaction,
+        timestamps: {
+          occurredAt: transaction.occurredAt,
+          precision: observation.timePrecision as TransactionObservationPolicy['timePrecision'],
+        },
+      } satisfies TransactionObservation,
+    ]
+  })
+  const orderedSnapshotGroups = new Map<string, TransactionObservation[]>()
+  const stableObservations: TransactionObservation[] = []
+  for (const observation of normalized) {
+    if (observation.source.providerTransactionId) {
+      stableObservations.push(observation)
+      continue
+    }
+    const key = classificationIndependentKey(observation.accountId, observation.transaction)
+    orderedSnapshotGroups.set(key, [...(orderedSnapshotGroups.get(key) ?? []), observation])
+  }
+  const orderedSnapshotObservations = [...orderedSnapshotGroups.values()].flatMap((group) => {
+    const active = group.filter((observation) => activeOrderedObservationIds.has(observation.id))
+    return active.length ? active : group
+  })
+  return [...stableObservations, ...orderedSnapshotObservations].sort((left, right) =>
+    right.timestamps.occurredAt.localeCompare(left.timestamps.occurredAt),
+  )
 }

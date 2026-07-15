@@ -368,6 +368,12 @@ export const createProviderFromClient = (
   return {
     descriptor: { id: 'sbi-sec', name: 'SBI Securities' },
     accountId: 'primary',
+    transactionObservationPolicy: {
+      accountKind: 'brokerage',
+      institutionId: 'sbi-sec',
+      timePrecision: 'instant',
+      identity: { kind: 'stable-provider-id' },
+    },
     capabilities: () => [
       'accounts:read',
       'balances:read',

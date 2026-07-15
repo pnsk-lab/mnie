@@ -212,7 +212,7 @@ const {
   otherAssetBreakdown,
   portfolioOtherAssetBreakdown,
   portfolioOverviewLoading,
-  portfolioOverviewNotice,
+  portfolioOrderHistoryNotice,
   assetHistory,
   assetHistoryLoading,
   hasQuote,
@@ -251,8 +251,11 @@ const selectBrokerageProfile = (id: string) => {
 }
 
 const finishSmbc2faAndRefreshAvailability = async () => {
-  await finishSmbc2fa()
+  const connected = await finishSmbc2fa()
+  if (!connected) return
   if (selectedProfileId.value) await forceProfileAvailability(selectedProfileId.value)
+  await loadStoredAssetValuations()
+  await loadPortfolioOverview()
 }
 
 const { oauthApproval, oauthSettings, loadOAuthApproval, approveOAuth } = useOAuthApproval()
@@ -386,7 +389,7 @@ onUnmounted(() => {
           :data-loading="portfolioOverviewLoading"
           :connected="true"
           :order-history-loaded="!portfolioOverviewLoading"
-          :order-history-notice="portfolioOverviewNotice"
+          :order-history-notice="portfolioOrderHistoryNotice"
           @connect="refreshPortfolio"
           @open-position="openPortfolioPosition"
         />

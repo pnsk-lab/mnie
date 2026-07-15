@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vite-plus/test'
 import type { Transaction } from '@mnie/types'
 import { createDb } from './db'
-import { persistTransactionObservations } from './observations'
+import { persistTransactionObservations, type ObservationProfile } from './observations'
 import {
   confirmReconciliationProposal,
   deleteAccountLink,
@@ -15,6 +15,21 @@ import {
   runQueuedReconciliation,
   upsertAccountLink,
 } from './reconciliation'
+
+const observationProfile = (
+  id: string,
+  connectorTypeId: string,
+  accountKind: 'bank' | 'transit-card',
+): ObservationProfile => ({
+  id,
+  connectorTypeId,
+  policy: {
+    accountKind,
+    institutionId: connectorTypeId,
+    timePrecision: accountKind === 'transit-card' ? 'day' : 'instant',
+    identity: { kind: 'stable-provider-id' },
+  },
+})
 
 const transaction = (id: string, accountId: string): Transaction => ({
   id,
@@ -44,12 +59,12 @@ describe('reconciliation store', () => {
     const db = createDb(':memory:')
     const [bank] = await persistTransactionObservations(
       db,
-      { id: 'bank', provider: 'smbc-direct' },
+      observationProfile('bank', 'smbc-direct', 'bank'),
       [transaction('bank-row', 'bank-account')],
     )
     const [suica] = await persistTransactionObservations(
       db,
-      { id: 'suica', provider: 'mobile-suica' },
+      observationProfile('suica', 'mobile-suica', 'transit-card'),
       [transaction('suica-row', 'mobile-suica')],
     )
     const saved = await upsertAccountLink(db, {
@@ -133,16 +148,84 @@ describe('reconciliation store', () => {
     await expect(listEconomicEvents(db)).resolves.toEqual({ items: [] })
   })
 
+  test('proposes matching transactions without requiring an account link', async () => {
+    const db = createDb(':memory:')
+    await persistTransactionObservations(db, observationProfile('bank', 'smbc-direct', 'bank'), [
+      transaction('bank-row', 'bank-account'),
+    ])
+    await persistTransactionObservations(
+      db,
+      observationProfile('suica', 'mobile-suica', 'transit-card'),
+      [charge('suica-row', 'mobile-suica')],
+    )
+    await enqueueReconciliation(
+      db,
+      new Date('2026-07-13T00:00:00+09:00'),
+      new Date('2026-07-15T00:00:00+09:00'),
+    )
+
+    await expect(runQueuedReconciliation(db)).resolves.toBe(1)
+    const [proposal] = (await listReconciliationProposals(db)).items
+    expect(proposal?.score).toBe(0.75)
+    expect(
+      proposal?.bindings.every((binding) =>
+        binding.evidence.every((item) => item.kind !== 'account-link'),
+      ),
+    ).toBe(true)
+  })
+
+  test('selects one nearest one-to-one wallet top-up proposal per transaction', async () => {
+    const db = createDb(':memory:')
+    const bank = await persistTransactionObservations(
+      db,
+      observationProfile('bank', 'smbc-direct', 'bank'),
+      [transaction('bank-row-1', 'bank-account'), transaction('bank-row-2', 'bank-account')],
+    )
+    const suica = await persistTransactionObservations(
+      db,
+      observationProfile('suica', 'mobile-suica', 'transit-card'),
+      [charge('suica-row-1', 'mobile-suica'), charge('suica-row-2', 'mobile-suica')],
+    )
+    await upsertAccountLink(db, {
+      sourceAccountId: bank[0]!.observation.accountId,
+      targetAccountId: suica[0]!.observation.accountId,
+      type: 'funds',
+      source: 'user',
+      confirmed: true,
+    })
+    await enqueueReconciliation(
+      db,
+      new Date('2026-07-13T00:00:00+09:00'),
+      new Date('2026-07-15T00:00:00+09:00'),
+    )
+
+    await expect(runQueuedReconciliation(db)).resolves.toBe(2)
+    const proposals = (await listReconciliationProposals(db)).items
+    expect(proposals).toHaveLength(2)
+    expect(proposals.every((proposal) => proposal.score === 0.95)).toBe(true)
+    const observationIds = proposals.flatMap((proposal) =>
+      proposal.bindings.map((binding) => binding.observationId),
+    )
+    expect(new Set(observationIds).size).toBe(observationIds.length)
+    expect(
+      proposals.every((proposal) =>
+        proposal.bindings.every((binding) =>
+          binding.evidence.every((item) => item.kind !== 'competing-candidates'),
+        ),
+      ),
+    ).toBe(true)
+  })
+
   test('queues, proposes, confirms, and respects rejected wallet top-ups', async () => {
     const db = createDb(':memory:')
     const [bank] = await persistTransactionObservations(
       db,
-      { id: 'bank', provider: 'smbc-direct' },
+      observationProfile('bank', 'smbc-direct', 'bank'),
       [transaction('bank-row', 'bank-account')],
     )
     const [suica] = await persistTransactionObservations(
       db,
-      { id: 'suica', provider: 'mobile-suica' },
+      observationProfile('suica', 'mobile-suica', 'transit-card'),
       [charge('suica-row', 'mobile-suica')],
     )
     await upsertAccountLink(db, {
@@ -196,12 +279,12 @@ describe('reconciliation store', () => {
     const dbRejected = createDb(':memory:')
     const [rejectedBank] = await persistTransactionObservations(
       dbRejected,
-      { id: 'bank', provider: 'smbc-direct' },
+      observationProfile('bank', 'smbc-direct', 'bank'),
       [transaction('bank-row', 'bank-account')],
     )
     const [rejectedSuica] = await persistTransactionObservations(
       dbRejected,
-      { id: 'suica', provider: 'mobile-suica' },
+      observationProfile('suica', 'mobile-suica', 'transit-card'),
       [charge('suica-row', 'mobile-suica')],
     )
     await upsertAccountLink(dbRejected, {

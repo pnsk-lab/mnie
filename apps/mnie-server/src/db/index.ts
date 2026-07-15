@@ -168,11 +168,24 @@ export const createDb = (path: string) => {
       provider_account_id TEXT NOT NULL,
       provider_transaction_id TEXT,
       fingerprint TEXT NOT NULL,
+      time_precision TEXT NOT NULL DEFAULT 'instant',
       current_revision INTEGER NOT NULL,
       first_seen_at INTEGER NOT NULL,
       last_seen_at INTEGER NOT NULL
     )
   `)
+  const observationColumns = sqlite
+    .query<{ name: string }, []>('PRAGMA table_info(transaction_observations)')
+    .all()
+    .map((column) => column.name)
+  if (!observationColumns.includes('time_precision')) {
+    sqlite.run(
+      "ALTER TABLE transaction_observations ADD COLUMN time_precision TEXT NOT NULL DEFAULT 'instant'",
+    )
+    sqlite.run(
+      "UPDATE transaction_observations SET time_precision = 'day' WHERE connector_type_id = 'mobile-suica'",
+    )
+  }
   sqlite.run(`
     CREATE UNIQUE INDEX IF NOT EXISTS transaction_observations_profile_upstream_unique
     ON transaction_observations (profile_id, provider_transaction_id)

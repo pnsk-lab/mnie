@@ -38,8 +38,6 @@ interface ParsedHistoryTableRowRail extends ParsedHistoryTableRowBase {
 
 interface ParsedHistoryTableRowCharge extends ParsedHistoryTableRowBase {
   kind: 'charge'
-  typeFrom: 'ｶｰﾄﾞ'
-  placeFrom: 'ﾓﾊﾞｲﾙ'
 }
 
 interface ParsedHistoryTableRowPayment extends ParsedHistoryTableRowBase {
@@ -97,6 +95,25 @@ export const createProvider = (
   return {
     descriptor: { id: 'mobile-suica', name: 'Mobile Suica' },
     accountId: account.id,
+    transactionObservationPolicy: {
+      accountKind: 'transit-card',
+      institutionId: 'mobile-suica',
+      timePrecision: 'day',
+      identity: {
+        kind: 'ordered-snapshot',
+        fingerprintVersion: 'legacy-v1',
+        fingerprint: (transaction) =>
+          JSON.stringify([
+            transaction.occurredAt,
+            transaction.kind,
+            transaction.direction,
+            transaction.status,
+            transaction.amount,
+            transaction.description,
+            transaction.balanceAfter,
+          ]),
+      },
+    },
     capabilities: () => ['accounts:read', 'transactions:read', 'transit-cards:read'],
     operations: () => ['accounts.list', 'transactions.list', 'history.list'],
     checkAvailability: async () => {
@@ -427,6 +444,9 @@ const tableRows = (html: string) =>
     ),
   )
 
+export const isMobileSuicaCardCharge = (typeFrom: string, placeFrom: string) =>
+  typeFrom.normalize('NFKC') === 'カード' && placeFrom.normalize('NFKC') === 'モバイル'
+
 const normalizeHistoryDates = (records: ParsedHistoryTableRow[], now = new Date()) => {
   let inferredYear = now.getFullYear()
   let previousTime = Number.POSITIVE_INFINITY
@@ -494,8 +514,8 @@ const parseMobileSuicaUsageHistory = (
     }
     if ((row.typeFrom === '入' || row.typeFrom === '＊入') && row.typeTo === '出') {
       records.push({ ...row, kind: 'rail', typeFrom: row.typeFrom, typeTo: '出' })
-    } else if (row.typeFrom === 'ｶｰﾄﾞ' && row.placeFrom === 'ﾓﾊﾞｲﾙ') {
-      records.push({ ...row, kind: 'charge', typeFrom: 'ｶｰﾄﾞ', placeFrom: 'ﾓﾊﾞｲﾙ' })
+    } else if (isMobileSuicaCardCharge(row.typeFrom, row.placeFrom)) {
+      records.push({ ...row, kind: 'charge' })
     } else if (row.typeFrom === '物販') {
       records.push({ ...row, kind: 'payment', typeFrom: '物販' })
     } else if (row.typeFrom === 'ﾊﾞｽ等') {
