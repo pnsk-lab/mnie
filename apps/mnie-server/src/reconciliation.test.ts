@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vite-plus/test'
 import type { Transaction } from '@mnie/types'
 import { createDb } from './db'
 import { persistTransactionObservations } from './observations'
