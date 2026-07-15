@@ -117,7 +117,25 @@ export const listEconomicEvents = async (db: Db, request: EventsListRequest = {}
       (!to || event.occurredFrom <= to) &&
       (!request.states || request.states.includes(event.state as EconomicEvent['state'])),
   )
-  const items = await Promise.all(filtered.slice(0, limit).map((event) => eventView(db, event)))
+  let matching = filtered
+  if (request.accountId) {
+    const ledgerIds = new Set(
+      (
+        await db
+          .select({ id: ledgerAccounts.id })
+          .from(ledgerAccounts)
+          .where(eq(ledgerAccounts.financialAccountId, request.accountId))
+      ).map((account) => account.id),
+    )
+    const postings = await db.select().from(eventPostings)
+    const eventIds = new Set(
+      postings
+        .filter((posting) => ledgerIds.has(posting.ledgerAccountId))
+        .map((posting) => posting.eventId),
+    )
+    matching = matching.filter((event) => eventIds.has(event.id))
+  }
+  const items = await Promise.all(matching.slice(0, limit).map((event) => eventView(db, event)))
   return { items }
 }
 
@@ -464,7 +482,7 @@ export const runQueuedReconciliation = async (db: Db) => {
     .where(eq(reconciliationJobs.state, 'queued'))
     .orderBy(asc(reconciliationJobs.createdAt))
     .limit(1)
-  if (!job) return 0
+  if (!job) return null
   const startedAt = new Date()
   await db
     .update(reconciliationJobs)

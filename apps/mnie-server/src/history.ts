@@ -77,12 +77,25 @@ const syncTransactions = async (
         uniqueTransactions,
         fetchedAt,
       )
-      for (const { historyTransaction } of observations) {
+      for (const { observation, historyTransaction } of observations) {
         const occurredAt = new Date(historyTransaction.occurredAt)
         if (!Number.isFinite(occurredAt.getTime())) {
           throw new Error(
             `provider returned invalid transaction date: ${historyTransaction.occurredAt}`,
           )
+        }
+        if (
+          profile.provider === 'mobile-suica' &&
+          observation.transaction.id !== historyTransaction.id
+        ) {
+          await db
+            .delete(historyTransactions)
+            .where(
+              and(
+                eq(historyTransactions.profileId, profile.id),
+                eq(historyTransactions.transactionId, observation.transaction.id),
+              ),
+            )
         }
         await db
           .insert(historyTransactions)

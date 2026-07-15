@@ -171,6 +171,12 @@ describe('reconciliation store', () => {
         limit: 1,
       }),
     ).resolves.toEqual({ items: [confirmed] })
+    await expect(
+      listEconomicEvents(db, { accountId: bank!.observation.accountId }),
+    ).resolves.toEqual({ items: [confirmed] })
+    await expect(listEconomicEvents(db, { accountId: 'unrelated-account' })).resolves.toEqual({
+      items: [],
+    })
     await expect(listEconomicEvents(db, { from: 'invalid' })).rejects.toThrow(
       'events.list from must be a valid date',
     )
@@ -211,5 +217,6 @@ describe('reconciliation store', () => {
     await rejectReconciliationProposal(dbRejected, rejectedProposal!.id, 'not related')
     await enqueueReconciliation(dbRejected, from, to)
     await expect(runQueuedReconciliation(dbRejected)).resolves.toBe(0)
+    await expect(runQueuedReconciliation(dbRejected)).resolves.toBeNull()
   })
 })
