@@ -2,7 +2,6 @@ import type { EventsListRequest, HistoryListRequest } from '@mnie/types'
 import { fetchAssetValuation } from '../assets'
 import type { Db } from '../db'
 import { listHistory } from '../history'
-import { listTransactionObservations } from '../observations'
 import { loadPortfolioOverview, type OverviewProfile } from '../portfolio-overview'
 import type { ProviderRegistry } from '../providers/registry'
 import {
@@ -22,7 +21,6 @@ export const WORKSPACE_OPERATIONS = [
   'portfolio.valuation.get',
   'portfolio.overview.get',
   'history.list',
-  'transaction-observations.list',
   'financial-accounts.list',
   'events.list',
   'events.get',
@@ -59,8 +57,6 @@ export const invokeWorkspace = async (
   if (operation === 'history.list') {
     return listHistory(db, providers, input as HistoryListRequest & { profileIds?: string[] })
   }
-
-  if (operation === 'transaction-observations.list') return listTransactionObservations(db)
 
   if (operation === 'events.list') return listEconomicEvents(db, input as EventsListRequest)
   if (operation === 'financial-accounts.list') return listFinancialAccounts(db)

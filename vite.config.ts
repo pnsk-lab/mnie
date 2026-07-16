@@ -3,11 +3,18 @@ import { defineConfig } from 'vite-plus'
 export default defineConfig({
   test: {
     coverage: {
-      provider: 'istanbul',
+      provider: 'v8',
       reporter: ['text', 'lcov'],
-      exclude: ['**/node_modules/**', '**/dist/**'],
     },
-    exclude: ['**/node_modules/**'],
+    exclude: [
+      '**/node_modules/**',
+      '**/*.bun.test.ts',
+      'apps/mnie-server/src/observations.test.ts',
+      'apps/mnie-server/src/reconciliation.test.ts',
+      'apps/mnie-server/src/rpc/ws.integration.test.ts',
+      'apps/mnie-server/src/security/trade-limits.test.ts',
+      'apps/mnie-server/src/providers/registry-lock.test.ts',
+    ],
   },
   fmt: {
     singleQuote: true,

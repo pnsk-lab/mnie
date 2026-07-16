@@ -137,7 +137,7 @@ export const createCronSystem = (
   }
 
   const reconcile = async () => {
-    while ((await runQueuedReconciliation(db)) !== null) {
+    while (await runQueuedReconciliation(db)) {
       // Drain queued ranges before the next cron interval.
     }
   }

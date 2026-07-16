@@ -21,8 +21,8 @@
     "model:download": "bun scripts/download-capsolve-model.ts",
     "fmt": "vp check --fix",
     "sdk:build": "vp run sdk-build",
-    "test": "bun --bun vp run sdk-build && bun --bun vp test run",
-    "test:coverage": "bun --bun vp run sdk-build && bun --bun vp test run --coverage",
+    "test": "vp run sdk-build && vp test run && bun test $(rg --files -g '*.bun.test.ts')",
+    "test:coverage": "vp run sdk-build && vp test run --coverage",
     "typecheck": "vp run typecheck:all",
     "verify:paypay-bank-runtime": "bun scripts/verify-paypay-bank-runtime.ts",
     "mnie": "cd packages/mnie-cli && bun mnie"
@@ -34,9 +34,8 @@
   "devDependencies": {
     "@repo/tsconfig": "workspace:*",
     "@types/bun": "latest",
-    "@vitest/coverage-istanbul": "4.1.8",
-    "vite-plus": "^0.1.24",
-    "vitest": "4.1.8"
+    "@vitest/coverage-v8": "4.1.8",
+    "vite-plus": "^0.1.24"
   },
   "peerDependencies": {
     "typescript": "^5"
