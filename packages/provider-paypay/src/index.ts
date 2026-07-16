@@ -64,6 +64,12 @@ export const createProvider = (profile: PayPayProfile): FinancialProvider<Common
   return {
     descriptor: { id: 'paypay', name: 'PayPay' },
     accountId: profile.accountId,
+    transactionObservationPolicy: {
+      accountKind: 'payment-wallet',
+      institutionId: 'paypay',
+      timePrecision: 'instant',
+      identity: { kind: 'stable-provider-id' },
+    },
     capabilities: () => ['accounts:read', 'balances:read'],
     operations: () => ['accounts.list', 'balances.list'],
     checkAvailability: async () => {

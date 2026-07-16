@@ -16,6 +16,7 @@ import type {
   FinancialAccount,
 } from '@mnie/types'
 import type { Db } from './db'
+import { listTransactionObservations } from './observations'
 import {
   accountLinks,
   economicEvents,
@@ -117,7 +118,25 @@ export const listEconomicEvents = async (db: Db, request: EventsListRequest = {}
       (!to || event.occurredFrom <= to) &&
       (!request.states || request.states.includes(event.state as EconomicEvent['state'])),
   )
-  const items = await Promise.all(filtered.slice(0, limit).map((event) => eventView(db, event)))
+  let matching = filtered
+  if (request.accountId) {
+    const ledgerIds = new Set(
+      (
+        await db
+          .select({ id: ledgerAccounts.id })
+          .from(ledgerAccounts)
+          .where(eq(ledgerAccounts.financialAccountId, request.accountId))
+      ).map((account) => account.id),
+    )
+    const postings = await db.select().from(eventPostings)
+    const eventIds = new Set(
+      postings
+        .filter((posting) => ledgerIds.has(posting.ledgerAccountId))
+        .map((posting) => posting.eventId),
+    )
+    matching = matching.filter((event) => eventIds.has(event.id))
+  }
+  const items = await Promise.all(matching.slice(0, limit).map((event) => eventView(db, event)))
   return { items }
 }
 
@@ -229,9 +248,6 @@ const sameAmount = (left: Amount | null, right: Amount | null) => {
 const candidateKey = (sourceObservationId: string, targetObservationId: string) =>
   `wallet-topup:${[sourceObservationId, targetObservationId].sort().join(':')}`
 
-const timeDistanceMs = (left: Transaction, right: Transaction) =>
-  Math.abs(new Date(left.occurredAt).getTime() - new Date(right.occurredAt).getTime())
-
 const ledgerForFinancialAccount = async (db: Db, financialAccountId: string) => {
   const [existing] = await db
     .select()
@@ -263,24 +279,43 @@ const ledgerForFinancialAccount = async (db: Db, financialAccountId: string) => 
 interface StoredObservation {
   id: string
   accountId: string
+  timePrecision: 'instant' | 'minute' | 'day'
   transaction: Transaction
 }
 
+const observationTimeRange = (observation: StoredObservation): [number, number] => {
+  const from = new Date(observation.transaction.occurredAt).getTime()
+  const duration =
+    observation.timePrecision === 'day'
+      ? 24 * 60 * 60_000 - 1
+      : observation.timePrecision === 'minute'
+        ? 60_000 - 1
+        : 0
+  return [from, from + duration]
+}
+
+const timeDistanceMs = (left: StoredObservation, right: StoredObservation) => {
+  const [leftFrom, leftTo] = observationTimeRange(left)
+  const [rightFrom, rightTo] = observationTimeRange(right)
+  if (leftTo < rightFrom) return rightFrom - leftTo
+  if (rightTo < leftFrom) return leftFrom - rightTo
+  return 0
+}
+
 const storedObservations = async (db: Db, from: Date, to: Date): Promise<StoredObservation[]> => {
-  const [observations, revisions] = await Promise.all([
-    db.select().from(transactionObservations),
-    db.select().from(transactionObservationRevisions),
-  ])
-  const revisionByObservation = new Map(
-    revisions.map((revision) => [`${revision.observationId}:${revision.revision}`, revision]),
-  )
+  const observations = await listTransactionObservations(db)
   return observations.flatMap((observation) => {
-    const revision = revisionByObservation.get(`${observation.id}:${observation.currentRevision}`)
-    const transaction = revision?.normalized as Transaction | undefined
-    if (!transaction) return []
+    const transaction = observation.transaction
     const occurredAt = new Date(transaction.occurredAt)
     if (!Number.isFinite(occurredAt.getTime()) || occurredAt < from || occurredAt > to) return []
-    return [{ id: observation.id, accountId: observation.accountId, transaction }]
+    return [
+      {
+        id: observation.id,
+        accountId: observation.accountId,
+        timePrecision: observation.timestamps.precision,
+        transaction,
+      },
+    ]
   })
 }
 
@@ -288,7 +323,8 @@ const createWalletTopupProposal = async (
   db: Db,
   source: StoredObservation,
   target: StoredObservation,
-  link: AccountLink,
+  link: AccountLink | undefined,
+  competingCandidates: number,
 ) => {
   const key = candidateKey(source.id, target.id)
   const [rejected] = await db
@@ -322,7 +358,7 @@ const createWalletTopupProposal = async (
     completeness: 'complete',
     occurredFrom: sourceTime < targetTime ? sourceTime : targetTime,
     occurredTo: sourceTime < targetTime ? targetTime : sourceTime,
-    metadata: link.instrument?.network ? { rail: link.instrument.network } : null,
+    metadata: link?.instrument?.network ? { rail: link.instrument.network } : null,
     createdAt: now,
     updatedAt: now,
   })
@@ -346,10 +382,14 @@ const createWalletTopupProposal = async (
   ])
   const evidence: MatchEvidence[] = [
     { kind: 'same-amount', value: amount.money.value, currency: amount.money.currency },
-    { kind: 'time-distance', milliseconds: timeDistanceMs(source.transaction, target.transaction) },
-    { kind: 'account-link', accountLinkId: link.id },
+    { kind: 'time-distance', milliseconds: timeDistanceMs(source, target) },
+    ...(link ? ([{ kind: 'account-link', accountLinkId: link.id }] satisfies MatchEvidence[]) : []),
     { kind: 'rule', ruleId: 'wallet-topup-v1' },
+    ...(competingCandidates > 1
+      ? ([{ kind: 'competing-candidates', count: competingCandidates }] satisfies MatchEvidence[])
+      : []),
   ]
+  const score = competingCandidates > 1 ? '0.60' : link ? '0.95' : '0.75'
   await db.insert(observationBindings).values([
     {
       id: sourceBindingId,
@@ -358,7 +398,7 @@ const createWalletTopupProposal = async (
       postingIds: [sourcePostingId],
       state: 'proposed',
       provenance: 'deterministic-rule',
-      confidence: '0.95',
+      confidence: score,
       matcherVersion: 'wallet-topup-v1',
       evidence,
       createdAt: now,
@@ -371,7 +411,7 @@ const createWalletTopupProposal = async (
       postingIds: [targetPostingId],
       state: 'proposed',
       provenance: 'deterministic-rule',
-      confidence: '0.95',
+      confidence: score,
       matcherVersion: 'wallet-topup-v1',
       evidence,
       createdAt: now,
@@ -382,65 +422,89 @@ const createWalletTopupProposal = async (
     id: randomId('reconciliation-proposal'),
     candidateKey: key,
     eventId,
-    score: '0.95',
+    score,
     state: 'proposed',
     createdAt: now,
   })
   return true
 }
 
-/** Generates only unambiguous debit-funded wallet top-up proposals. */
+const selectOneToOneCandidates = <
+  T extends { sourceObservation: StoredObservation; targetObservation: StoredObservation },
+>(
+  candidates: T[],
+) => {
+  const usedSourceIds = new Set<string>()
+  const usedTargetIds = new Set<string>()
+  return [...candidates]
+    .sort((left, right) => {
+      const distance =
+        timeDistanceMs(left.sourceObservation, left.targetObservation) -
+        timeDistanceMs(right.sourceObservation, right.targetObservation)
+      if (distance !== 0) return distance
+      const source = left.sourceObservation.id.localeCompare(right.sourceObservation.id)
+      return source !== 0
+        ? source
+        : left.targetObservation.id.localeCompare(right.targetObservation.id)
+    })
+    .filter((candidate) => {
+      if (
+        usedSourceIds.has(candidate.sourceObservation.id) ||
+        usedTargetIds.has(candidate.targetObservation.id)
+      ) {
+        return false
+      }
+      usedSourceIds.add(candidate.sourceObservation.id)
+      usedTargetIds.add(candidate.targetObservation.id)
+      return true
+    })
+}
+
+/** Generates the nearest one-to-one debit-funded wallet top-up candidates for user review. */
 export const reconcileRange = async (db: Db, from: Date, to: Date) => {
   const [links, observations] = await Promise.all([
     listAccountLinks(db),
     storedObservations(db, from, to),
   ])
   let created = 0
-  for (const link of links.filter(
-    (candidate) => candidate.confirmed && candidate.type === 'funds',
-  )) {
-    const source = observations.filter(
-      (observation) =>
-        observation.accountId === link.sourceAccountId &&
-        observation.transaction.direction === 'debit',
-    )
-    const target = observations.filter(
-      (observation) =>
-        observation.accountId === link.targetAccountId &&
-        observation.transaction.direction === 'credit' &&
-        observation.transaction.kind === 'charge',
-    )
-    const candidates = source.flatMap((sourceObservation) =>
+  const source = observations.filter((observation) => observation.transaction.direction === 'debit')
+  const target = observations.filter(
+    (observation) =>
+      observation.transaction.direction === 'credit' && observation.transaction.kind === 'charge',
+  )
+  const candidates = selectOneToOneCandidates(
+    source.flatMap((sourceObservation) =>
       target
         .filter(
           (targetObservation) =>
+            sourceObservation.accountId !== targetObservation.accountId &&
             sameAmount(
               sourceObservation.transaction.amount,
               targetObservation.transaction.amount,
             ) &&
-            timeDistanceMs(sourceObservation.transaction, targetObservation.transaction) <=
-              36 * 60 * 60_000,
+            timeDistanceMs(sourceObservation, targetObservation) <= 36 * 60 * 60_000,
         )
         .map((targetObservation) => ({ sourceObservation, targetObservation })),
+    ),
+  )
+  for (const candidate of candidates) {
+    const link = links.find(
+      (candidateLink) =>
+        candidateLink.confirmed &&
+        candidateLink.type === 'funds' &&
+        candidateLink.sourceAccountId === candidate.sourceObservation.accountId &&
+        candidateLink.targetAccountId === candidate.targetObservation.accountId,
     )
-    for (const candidate of candidates) {
-      const sourceCount = candidates.filter(
-        (other) => other.sourceObservation.id === candidate.sourceObservation.id,
-      ).length
-      const targetCount = candidates.filter(
-        (other) => other.targetObservation.id === candidate.targetObservation.id,
-      ).length
-      if (sourceCount !== 1 || targetCount !== 1) continue
-      if (
-        await createWalletTopupProposal(
-          db,
-          candidate.sourceObservation,
-          candidate.targetObservation,
-          link,
-        )
-      ) {
-        created += 1
-      }
+    if (
+      await createWalletTopupProposal(
+        db,
+        candidate.sourceObservation,
+        candidate.targetObservation,
+        link,
+        1,
+      )
+    ) {
+      created += 1
     }
   }
   return created
@@ -464,7 +528,7 @@ export const runQueuedReconciliation = async (db: Db) => {
     .where(eq(reconciliationJobs.state, 'queued'))
     .orderBy(asc(reconciliationJobs.createdAt))
     .limit(1)
-  if (!job) return 0
+  if (!job) return null
   const startedAt = new Date()
   await db
     .update(reconciliationJobs)
@@ -515,7 +579,6 @@ export const listReconciliationProposals = async (
   db: Db,
   request: ReconciliationProposalRequest = {},
 ) => {
-  const limit = request.limit ?? 100
   const rows = await db
     .select()
     .from(reconciliationProposals)
@@ -524,18 +587,20 @@ export const listReconciliationProposals = async (
     (proposal) => !request.states || request.states.includes(proposal.state as never),
   )
   const items = await Promise.all(
-    filtered.slice(0, limit).map(async (proposal): Promise<ReconciliationProposal> => {
-      const view = await getEconomicEvent(db, proposal.eventId)
-      return {
-        id: proposal.id,
-        candidateKey: proposal.candidateKey,
-        event: view.event,
-        observations: await proposalObservations(db, proposal.eventId),
-        bindings: view.bindings,
-        score: Number(proposal.score),
-        createdAt: proposal.createdAt.toISOString(),
-      }
-    }),
+    filtered
+      .slice(0, request.limit ?? filtered.length)
+      .map(async (proposal): Promise<ReconciliationProposal> => {
+        const view = await getEconomicEvent(db, proposal.eventId)
+        return {
+          id: proposal.id,
+          candidateKey: proposal.candidateKey,
+          event: view.event,
+          observations: await proposalObservations(db, proposal.eventId),
+          bindings: view.bindings,
+          score: Number(proposal.score),
+          createdAt: proposal.createdAt.toISOString(),
+        }
+      }),
   )
   return { items }
 }

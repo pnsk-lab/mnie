@@ -299,6 +299,7 @@ const commonCashPosition = (position: CashPosition, accountId: string): Investme
   availableQuantity:
     position.availableQuantity == null ? undefined : String(position.availableQuantity),
   positionType: 'cash',
+  lotType: position.quantity == null ? undefined : position.quantity >= 100 ? 'standard' : 'oddLot',
   accountType: position.accountType,
   averagePrice: money(position.averagePrice ?? position.purchasePrice),
   currentPrice: money(position.currentPrice),
@@ -367,6 +368,12 @@ export const createProviderFromClient = (
   return {
     descriptor: { id: 'sbi-sec', name: 'SBI Securities' },
     accountId: 'primary',
+    transactionObservationPolicy: {
+      accountKind: 'brokerage',
+      institutionId: 'sbi-sec',
+      timePrecision: 'instant',
+      identity: { kind: 'stable-provider-id' },
+    },
     capabilities: () => [
       'accounts:read',
       'balances:read',

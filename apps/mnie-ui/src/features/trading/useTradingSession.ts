@@ -57,6 +57,7 @@ import {
   orderDetailFromApi,
   orderFromApi,
   orderHistoryKey,
+  orderSizingForSide,
   chartNoticeFromIssueChart,
   pricePointsFromIssueChart,
   positionFromApi,
@@ -283,7 +284,7 @@ export const useTradingSession = (
   const portfolioOrders = ref<OrderRow[]>([])
   const portfolioOverview = ref<PortfolioOverview | null>(null)
   const portfolioOverviewLoading = ref(false)
-  const portfolioOverviewNotice = ref('')
+  const portfolioOrderHistoryNotice = ref('')
   const stocks = ref<Stock[]>([])
   const historicalPricePoints = ref<RealtimePricePoint[]>([])
   const chartNotice = ref<ChartNotice | null>(null)
@@ -295,6 +296,7 @@ export const useTradingSession = (
   let chartHistoryRequestId = 0
   let cashPreOrderRequestId = 0
   let instrumentDetailRequestId = 0
+  let connectingProfileId = ''
 
   const maxRealtimePricePoints = 120
   const errorMessage = (cause: unknown, fallback: string) =>
@@ -372,9 +374,7 @@ export const useTradingSession = (
   const orderQuantity = computed(() => Number(quantityInput.value || 0))
   const orderAmount = computed(() => Number(amountInput.value || 0))
   const amountSizing = computed(() =>
-    asArray(providerOrderRules.value.sizing)
-      .map(asRecord)
-      .find((sizing) => sizing.kind === 'amount'),
+    orderSizingForSide(providerOrderRules.value.sizing, 'amount', tradeSide.value),
   )
   const orderAmountMinimum = computed(() => numberValue(amountSizing.value?.minimum, 1))
   const orderAmountIncrement = computed(() => numberValue(amountSizing.value?.increment, 1))
@@ -710,7 +710,7 @@ export const useTradingSession = (
   )
   const loadPortfolioOverview = async () => {
     portfolioOverviewLoading.value = true
-    portfolioOverviewNotice.value = ''
+    portfolioOrderHistoryNotice.value = ''
     try {
       const overview = await getPortfolioOverview()
       portfolioOverview.value = overview
@@ -747,14 +747,14 @@ export const useTradingSession = (
             : []
         }),
       )
-      if (overview.errors.length) {
-        portfolioOverviewNotice.value = overview.errors
+      const orderHistoryErrors = overview.errors.filter(
+        (item) => item.operation === 'investments.orders.list',
+      )
+      if (orderHistoryErrors.length) {
+        portfolioOrderHistoryNotice.value = orderHistoryErrors
           .map((item) => `${item.providerId} (${item.operation}): ${item.message}`)
           .join('; ')
       }
-    } catch (cause) {
-      portfolioOverviewNotice.value = errorMessage(cause, '資産概要の取得に失敗しました')
-      throw cause
     } finally {
       portfolioOverviewLoading.value = false
     }
@@ -986,9 +986,12 @@ export const useTradingSession = (
           assetHistory.value = [...backwardPoints, ...forwardPoints].sort((a, b) =>
             a.at.localeCompare(b.at),
           )
-          if (history.errors.length) {
+          const unexpectedErrors = history.errors.filter(
+            (item) => item.reason !== 'INTERACTION_REQUIRED',
+          )
+          if (unexpectedErrors.length) {
             reportDataError(
-              history.errors.map((item) => `${item.providerId}: ${item.message}`).join('; '),
+              unexpectedErrors.map((item) => `${item.providerId}: ${item.message}`).join('; '),
             )
           }
         })
@@ -1338,9 +1341,37 @@ export const useTradingSession = (
     }
   }
 
+  const loadSelectedStockDetail = async () => {
+    const stock = selectedStock.value
+    if (!stock.code || !providerOperations.value.has('investments.instruments.get')) {
+      quoteLoading.value = false
+      return
+    }
+    const requestId = ++instrumentDetailRequestId
+    quoteLoading.value = true
+    try {
+      const detail = await rpcCall<unknown>('investments.instruments.get', {
+        instrumentId: stock.code,
+      })
+      if (requestId !== instrumentDetailRequestId) return
+      const merged = mergeInvestmentInstrument(stock, detail)
+      mergeStocks([merged])
+      selectStock(merged)
+    } catch (cause) {
+      reportDataError(errorMessage(cause, '現在価格を取得できませんでした'), cause)
+    } finally {
+      if (requestId === instrumentDetailRequestId) quoteLoading.value = false
+    }
+  }
+
   const loadOrderHistoryFromSdk = async () => {
     orderHistoryLoaded.value = false
     orderHistoryNotice.value = ''
+    if (!providerOperations.value.has('investments.orders.list')) {
+      orders.value = []
+      orderHistoryLoaded.value = true
+      return
+    }
     const orderList = await rpcCallOptional<RecordLike>('investments.orders.list')
     const nextOrders = asArray(orderList.items)
       .map(orderFromApi)
@@ -1416,28 +1447,40 @@ export const useTradingSession = (
     try {
       const [accountsResult, assetsResult, positionsResult, balancesResult, indexesResult] =
         await Promise.allSettled([
-          rpcCallOptional<RecordLike>('accounts.list', undefined, 15_000),
-          rpcCallOptional<RecordLike>('assets.valuation.get', undefined, 20_000),
-          rpcCallOptional<RecordLike>('investments.positions.list', undefined, 15_000),
-          rpcCallOptional<unknown[]>('balances.list', undefined, 15_000),
-          rpcCallOptional<unknown[]>('market.index.major', undefined, 15_000),
+          providerOperations.value.has('accounts.list')
+            ? rpcCallOptional<RecordLike>('accounts.list', undefined, 15_000)
+            : Promise.resolve(undefined),
+          providerOperations.value.has('assets.valuation.get')
+            ? rpcCallOptional<RecordLike>('assets.valuation.get', undefined, 20_000)
+            : Promise.resolve(undefined),
+          providerOperations.value.has('investments.positions.list')
+            ? rpcCallOptional<RecordLike>('investments.positions.list', undefined, 15_000)
+            : Promise.resolve(undefined),
+          providerOperations.value.has('balances.list')
+            ? rpcCallOptional<unknown[]>('balances.list', undefined, 15_000)
+            : Promise.resolve(undefined),
+          providerOperations.value.has('market.index.major')
+            ? rpcCallOptional<unknown[]>('market.index.major', undefined, 15_000)
+            : Promise.resolve(undefined),
         ])
-      if (accountsResult.status === 'fulfilled') {
+      if (accountsResult.status === 'fulfilled' && accountsResult.value) {
         providerAccountId.value = textValue(asRecord(asArray(accountsResult.value.items)[0]).id)
       }
       marketIndexes.value =
-        indexesResult.status === 'fulfilled'
+        indexesResult.status === 'fulfilled' && indexesResult.value
           ? indexesResult.value
               .map(marketIndexFromApi)
               .filter((index): index is MarketIndex => Boolean(index))
           : []
-      const positionList = positionsResult.status === 'fulfilled' ? positionsResult.value : {}
+      const positionList =
+        positionsResult.status === 'fulfilled' && positionsResult.value ? positionsResult.value : {}
       const nextPositions = asArray(positionList.items)
         .map(positionFromApi)
         .filter((position): position is Position => Boolean(position))
       positions.value = nextPositions
       mergeStocks(nextPositions.map(stockFromPosition))
       await enrichPositionStocks(nextPositions)
+      await loadSelectedStockDetail()
       const summedHoldingsMarketValue = nextPositions.reduce(
         (sum, position) => sum + position.marketValue,
         0,
@@ -1453,10 +1496,13 @@ export const useTradingSession = (
       totalProfitLossRate.value =
         nextPositions.length > 0 && summedCostBasis ? (summedProfitLoss / summedCostBasis) * 100 : 0
 
-      const hasAccountAssets = assetsResult.status === 'fulfilled'
+      const hasAccountAssets = assetsResult.status === 'fulfilled' && Boolean(assetsResult.value)
       if (hasAccountAssets) {
-        applyAccountAssets(assetsResult.value)
-      } else {
+        applyAccountAssets(assetsResult.value!)
+      } else if (
+        providerOperations.value.has('assets.valuation.get') &&
+        assetsResult.status === 'rejected'
+      ) {
         reportDataError(
           errorMessage(assetsResult.reason, 'My資産の取得に失敗しました'),
           assetsResult.reason,
@@ -1466,7 +1512,7 @@ export const useTradingSession = (
       const orderHistoryResult = await Promise.allSettled([loadOrderHistoryFromSdk()])
       const powerResult = balancesResult
 
-      if (!hasAccountAssets && powerResult.status === 'fulfilled') {
+      if (!hasAccountAssets && powerResult.status === 'fulfilled' && powerResult.value) {
         const balance = asArray(powerResult.value)
           .map(asRecord)
           .find((item) => item.type === 'buying-power' || item.type === 'withdrawable')
@@ -1515,6 +1561,12 @@ export const useTradingSession = (
     ) {
       return
     }
+    if (
+      connectingProfileId === selectedProfile.id &&
+      (ws.value?.readyState === WebSocket.CONNECTING || ws.value?.readyState === WebSocket.OPEN)
+    ) {
+      return
+    }
 
     const previousSocket = ws.value
     rejectPendingRpc(new Error('RPC socket reconnecting'))
@@ -1550,6 +1602,7 @@ export const useTradingSession = (
     smbcQrUrl.value = ''
     smbcBalance.value = null
     dataLoading.value = true
+    connectingProfileId = selectedProfile.id
     const socket = createRpcSocket()
     socket.addEventListener('open', async () => {
       try {
@@ -1580,6 +1633,7 @@ export const useTradingSession = (
         reportDataError(errorMessage(cause, '接続に失敗しました'), cause)
         socket.close()
       } finally {
+        if (connectingProfileId === selectedProfile.id) connectingProfileId = ''
         dataLoading.value = false
       }
     })
@@ -1601,6 +1655,7 @@ export const useTradingSession = (
       connectedProfileId.value = ''
       providerOperations.value = new Set()
       providerOrderRules.value = {}
+      if (connectingProfileId === selectedProfile.id) connectingProfileId = ''
       dataLoading.value = false
     })
     ws.value = socket
@@ -1630,8 +1685,10 @@ export const useTradingSession = (
       }
       smbcQrUrl.value = ''
       profileInteractionId = ''
+      return true
     } catch (cause) {
       reportDataError(errorMessage(cause, 'SMBC Direct の認証に失敗しました'), cause)
+      return false
     } finally {
       dataLoading.value = false
     }
@@ -1819,25 +1876,7 @@ export const useTradingSession = (
 
   const selectTradeStock = async (stock: Stock) => {
     selectStock(stock)
-    if (!providerOperations.value.has('investments.instruments.get')) {
-      quoteLoading.value = false
-      return
-    }
-    const requestId = ++instrumentDetailRequestId
-    quoteLoading.value = true
-    try {
-      const detail = await rpcCall<unknown>('investments.instruments.get', {
-        instrumentId: stock.code,
-      })
-      if (requestId !== instrumentDetailRequestId) return
-      const merged = mergeInvestmentInstrument(stock, detail)
-      mergeStocks([merged])
-      selectStock(merged)
-    } catch (cause) {
-      reportDataError(errorMessage(cause, '現在価格を取得できませんでした'), cause)
-    } finally {
-      if (requestId === instrumentDetailRequestId) quoteLoading.value = false
-    }
+    await loadSelectedStockDetail()
   }
 
   const estimateCashOrder = async () => {
@@ -2477,7 +2516,7 @@ export const useTradingSession = (
     providerHoldingsBreakdown,
     portfolioOtherAssetBreakdown,
     portfolioOverviewLoading,
-    portfolioOverviewNotice,
+    portfolioOrderHistoryNotice,
     assetHistory,
     assetHistoryLoading,
     hasQuote,
