@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vite-plus/test'
+import { describe, expect, test } from 'bun:test'
 import { createDb } from './db'
 import { syncHistorySinceLastCoverage } from './history'
 import type { ProviderRegistry } from './providers/registry'
