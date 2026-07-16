@@ -246,6 +246,12 @@ export const createProvider = (
   return {
     descriptor: { id: 'paypay-sec', name: 'PayPay Securities' },
     accountId: account.id,
+    transactionObservationPolicy: {
+      accountKind: 'brokerage',
+      institutionId: 'paypay-sec',
+      timePrecision: 'instant',
+      identity: { kind: 'stable-provider-id' },
+    },
     capabilities: () => [
       'accounts:read',
       'balances:read',

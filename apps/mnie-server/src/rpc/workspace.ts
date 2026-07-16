@@ -1,15 +1,37 @@
-import type { HistoryListRequest } from '@mnie/types'
+import type { EventsListRequest, HistoryListRequest } from '@mnie/types'
 import { fetchAssetValuation } from '../assets'
 import type { Db } from '../db'
 import { listHistory } from '../history'
+import { listTransactionObservations } from '../observations'
 import { loadPortfolioOverview, type OverviewProfile } from '../portfolio-overview'
 import type { ProviderRegistry } from '../providers/registry'
+import {
+  confirmReconciliationProposal,
+  deleteAccountLink,
+  getEconomicEvent,
+  listAccountLinks,
+  listFinancialAccounts,
+  listEconomicEvents,
+  listReconciliationProposals,
+  rejectReconciliationProposal,
+  upsertAccountLink,
+} from '../reconciliation'
 
 export const WORKSPACE_OPERATIONS = [
   'profiles.list',
   'portfolio.valuation.get',
   'portfolio.overview.get',
   'history.list',
+  'transaction-observations.list',
+  'financial-accounts.list',
+  'events.list',
+  'events.get',
+  'reconciliation.proposals.list',
+  'reconciliation.confirm',
+  'reconciliation.reject',
+  'account-links.list',
+  'account-links.upsert',
+  'account-links.delete',
 ] as const
 
 export const invokeWorkspace = async (
@@ -36,6 +58,30 @@ export const invokeWorkspace = async (
 
   if (operation === 'history.list') {
     return listHistory(db, providers, input as HistoryListRequest & { profileIds?: string[] })
+  }
+
+  if (operation === 'transaction-observations.list') return listTransactionObservations(db)
+
+  if (operation === 'events.list') return listEconomicEvents(db, input as EventsListRequest)
+  if (operation === 'financial-accounts.list') return listFinancialAccounts(db)
+  if (operation === 'events.get') return getEconomicEvent(db, String(input.eventId ?? ''))
+  if (operation === 'reconciliation.proposals.list') return listReconciliationProposals(db, input)
+  if (operation === 'reconciliation.confirm') {
+    return confirmReconciliationProposal(db, String(input.proposalId ?? ''))
+  }
+  if (operation === 'reconciliation.reject') {
+    await rejectReconciliationProposal(
+      db,
+      String(input.proposalId ?? ''),
+      typeof input.reason === 'string' ? input.reason : undefined,
+    )
+    return undefined
+  }
+  if (operation === 'account-links.list') return listAccountLinks(db)
+  if (operation === 'account-links.upsert') return upsertAccountLink(db, input as never)
+  if (operation === 'account-links.delete') {
+    await deleteAccountLink(db, String(input.id ?? ''))
+    return undefined
   }
 
   if (operation === 'portfolio.valuation.get') {

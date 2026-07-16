@@ -2,7 +2,7 @@ import type { AccountProfile } from '../api'
 
 export const defaultProviderColors: Record<string, string> = {
   'smbc-direct': '#005b47',
-  mobilesuica: '#2F8E3C',
+  'mobile-suica': '#2F8E3C',
   'paypay-bank': '#f5bac4',
   'paypay-sec': '#ff003c',
   sbisec: '#0a3e86',

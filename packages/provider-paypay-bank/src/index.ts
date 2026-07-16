@@ -620,6 +620,12 @@ export const createProvider = (profile: PayPayBankProfile): FinancialProvider<Co
   return {
     descriptor: { id: 'paypay-bank', name: 'PayPay Bank' },
     accountId: account.id,
+    transactionObservationPolicy: {
+      accountKind: 'bank',
+      institutionId: 'paypay-bank',
+      timePrecision: 'day',
+      identity: { kind: 'stable-provider-id' },
+    },
     capabilities: () => ['accounts:read', 'balances:read', 'transactions:read'],
     operations: () => ['accounts.list', 'balances.list', 'transactions.list', 'history.list'],
     checkAvailability: async () => {

@@ -177,6 +177,57 @@ export interface HistoryListError {
   profileId: string
   providerId: string
   message: string
+  reason?: 'INTERACTION_REQUIRED'
+}
+
+export interface ReconciliationProposal {
+  id: string
+  score: number
+  event: {
+    id: string
+    kind: string
+    state: string
+    completeness: string
+    occurredAt: { from: string; to: string }
+    metadata?: { rail?: string; description?: string }
+  }
+  observations: Array<{
+    id: string
+    description: string
+    direction: 'credit' | 'debit' | 'neutral'
+    amount: { kind: 'money'; money: { currency: string; value: string } } | null
+    occurredAt: string
+  }>
+  bindings: Array<{
+    id: string
+    observationId: string
+    evidence: Array<{ kind: string; count?: number }>
+  }>
+}
+
+export interface FinancialAccount {
+  id: string
+  connectorTypeId: string
+  providerAccountId: string
+  kind: string
+}
+
+export interface TransactionObservation {
+  id: string
+  accountId: string
+  source: { connectorTypeId: string; providerAccountId: string }
+  transaction: {
+    id: string
+    kind: string
+    direction: 'credit' | 'debit' | 'neutral'
+    status: 'pending' | 'posted' | 'reversed' | 'failed'
+    amount:
+      | { kind: 'money'; money: { currency: string; value: string } }
+      | { kind: 'points'; unit: string; value: string }
+      | null
+    description: string
+  }
+  timestamps: { occurredAt: string; precision: 'instant' | 'minute' | 'day' }
 }
 
 export type ProfileAvailability =
@@ -389,6 +440,24 @@ export const deleteSbiPasskey = (id: string) =>
 export const listAccountProfiles = () =>
   adminRequest<{ profiles: AccountProfile[] }>('profiles.list')
 
+export const syncAllAccountHistory = (profileId: string) =>
+  adminRequest<{
+    profileId: string
+    from: string
+    to: string
+    synced: number
+    errors: HistoryListError[]
+  }>('history.sync', { profileId, from: new Date(0).toISOString(), to: new Date().toISOString() })
+
+export const syncAccountHistorySinceLast = (profileId: string) =>
+  adminRequest<{
+    profileId: string
+    from: string
+    to: string
+    synced: number
+    errors: HistoryListError[]
+  }>('history.sync.since-last', { profileId })
+
 export const listProviderDefinitions = () =>
   adminRequest<{ providers: ProviderDefinition[] }>('providers.list')
 
@@ -407,6 +476,28 @@ export const listHistory = (
     limit?: number
   } = {},
 ) => workspaceRequest<{ items: HistoryItem[]; errors: HistoryListError[] }>('history.list', input)
+
+export const listReconciliationProposals = (
+  states: Array<'proposed' | 'rejected' | 'confirmed'> = ['proposed'],
+) =>
+  workspaceRequest<{ items: ReconciliationProposal[] }>('reconciliation.proposals.list', { states })
+
+export const listFinancialAccounts = () =>
+  workspaceRequest<FinancialAccount[]>('financial-accounts.list')
+
+export const listTransactionObservations = () =>
+  workspaceRequest<TransactionObservation[]>('transaction-observations.list')
+
+export const listAccountLinks = () => workspaceRequest<unknown[]>('account-links.list')
+
+export const saveAccountLink = (input: Record<string, unknown>) =>
+  workspaceRequest('account-links.upsert', input)
+
+export const confirmReconciliationProposal = (proposalId: string) =>
+  workspaceRequest('reconciliation.confirm', { proposalId })
+
+export const rejectReconciliationProposal = (proposalId: string, reason?: string) =>
+  workspaceRequest('reconciliation.reject', { proposalId, ...(reason ? { reason } : {}) })
 
 export const checkAccountProfileAvailability = () =>
   adminRequest<{ availability: Record<string, ProfileAvailability> }>(

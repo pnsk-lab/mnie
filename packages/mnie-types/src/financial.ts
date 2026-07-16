@@ -203,6 +203,19 @@ export type Transaction =
   | FeeTransaction
   | OtherTransaction
 
+export interface TransactionObservationPolicy {
+  accountKind: AccountKind
+  institutionId: string
+  timePrecision: 'instant' | 'minute' | 'day'
+  identity:
+    | { kind: 'stable-provider-id' }
+    | {
+        kind: 'ordered-snapshot'
+        fingerprintVersion: string
+        fingerprint(transaction: Transaction): string
+      }
+}
+
 export interface PageRequest {
   cursor?: string
   limit?: number
@@ -607,7 +620,7 @@ export type WorkspaceOperations = {
     PortfolioValuation
   >
   'portfolio.overview.get': OperationDefinition<{}, PortfolioOverview>
-}
+} & ReconciliationOperations
 
 export type OperationName<Operations> = Extract<keyof Operations, string>
 export type OperationRequest<Operations, Name extends OperationName<Operations>> =
@@ -664,6 +677,7 @@ export interface ProviderAvailability {
 export interface FinancialProvider<Operations = CommonOperations> {
   readonly descriptor: ProviderDescriptor
   readonly accountId: string
+  readonly transactionObservationPolicy?: TransactionObservationPolicy
   capabilities(): readonly Capability[]
   operations(): readonly OperationName<Operations>[]
   /**
@@ -697,3 +711,4 @@ export interface FinancialWorkspace<
   ): Promise<OperationResponse<Operations, Name>>
   close(): void | Promise<void>
 }
+import type { ReconciliationOperations } from './reconciliation'

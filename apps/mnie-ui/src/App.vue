@@ -13,6 +13,7 @@ import OAuthApprovalPanel from './features/oauth/OAuthApprovalPanel.vue'
 import { useOAuthApproval } from './features/oauth/useOAuthApproval'
 import OrderDialogs from './features/orders/OrderDialogs.vue'
 import PortfolioView from './features/portfolio/PortfolioView.vue'
+import ReconciliationView from './features/reconciliation/ReconciliationView.vue'
 import SettingsView from './features/settings/SettingsView.vue'
 import TradeView from './features/trade/TradeView.vue'
 import { useTradingSession } from './features/trading/useTradingSession'
@@ -211,7 +212,7 @@ const {
   otherAssetBreakdown,
   portfolioOtherAssetBreakdown,
   portfolioOverviewLoading,
-  portfolioOverviewNotice,
+  portfolioOrderHistoryNotice,
   assetHistory,
   assetHistoryLoading,
   hasQuote,
@@ -250,8 +251,11 @@ const selectBrokerageProfile = (id: string) => {
 }
 
 const finishSmbc2faAndRefreshAvailability = async () => {
-  await finishSmbc2fa()
+  const connected = await finishSmbc2fa()
+  if (!connected) return
   if (selectedProfileId.value) await forceProfileAvailability(selectedProfileId.value)
+  await loadStoredAssetValuations()
+  await loadPortfolioOverview()
 }
 
 const { oauthApproval, oauthSettings, loadOAuthApproval, approveOAuth } = useOAuthApproval()
@@ -385,7 +389,7 @@ onUnmounted(() => {
           :data-loading="portfolioOverviewLoading"
           :connected="true"
           :order-history-loaded="!portfolioOverviewLoading"
-          :order-history-notice="portfolioOverviewNotice"
+          :order-history-notice="portfolioOrderHistoryNotice"
           @connect="refreshPortfolio"
           @open-position="openPortfolioPosition"
         />
@@ -460,6 +464,8 @@ onUnmounted(() => {
           @estimate="estimateCashOrder"
           @confirm-order="askPlaceOrder"
         />
+
+        <ReconciliationView v-if="activeTab === 'history'" />
 
         <HistoryView
           v-if="activeTab === 'history'"

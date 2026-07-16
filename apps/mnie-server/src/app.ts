@@ -56,7 +56,7 @@ export const createServerApp = (
       baseUrl: new URL(config.origin),
       resourceServerUrl: new URL('/api/ws', config.origin),
       resourceName: 'Mnie finance management',
-      scopesSupported: ['read', 'trade'],
+      scopesSupported: ['read', 'trade', 'reconcile'],
       provider: oauthProvider,
       authorizationOptions: { rateLimit: false },
       tokenOptions: { rateLimit: false },
