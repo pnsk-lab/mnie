@@ -13,6 +13,7 @@ COPY packages/provider-paypay/package.json packages/provider-paypay/package.json
 COPY packages/provider-paypay-sec/package.json packages/provider-paypay-sec/package.json
 COPY packages/provider-paypay-bank/package.json packages/provider-paypay-bank/package.json
 COPY packages/provider-smbc-direct/package.json packages/provider-smbc-direct/package.json
+COPY packages/starbucks-jp/package.json packages/starbucks-jp/package.json
 COPY packages/mnie-types/package.json packages/mnie-types/package.json
 COPY packages/mnie-sdk/package.json packages/mnie-sdk/package.json
 COPY packages/mnie-cli/package.json packages/mnie-cli/package.json
