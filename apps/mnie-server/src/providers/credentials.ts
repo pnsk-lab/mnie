@@ -1,4 +1,5 @@
 import type { MobileSuicaSession } from '@mnie/provider-mobile-suica'
+import type { StarbucksJpSessionData } from '@mnie/starbucks-jp'
 import type { PlaintextStoredWebAuthnCredential } from '@mnie/provider-sbi-sec'
 import type {
   PayPaySecSession,
@@ -52,6 +53,12 @@ export interface StoredMobileSuicaSecret {
   password?: string
 }
 
+export interface StoredStarbucksSecret {
+  username: string
+  password: string
+  session?: StarbucksJpSessionData
+}
+
 export interface StoredBitwardenAuthManagerSecret {
   dataPath?: string
 }
@@ -62,3 +69,4 @@ export type StoredProfileSecret =
   | StoredPayPayBankSecret
   | StoredPayPaySecSecret
   | StoredMobileSuicaSecret
+  | StoredStarbucksSecret

@@ -16,6 +16,11 @@
     "clean": "rm -rf dist",
     "typecheck": "tsc"
   },
+  "dependencies": {
+    "@mnie/types": "workspace:*",
+    "acorn": "^8.17.0",
+    "quickjs-emscripten": "^0.32.0"
+  },
   "devDependencies": {
     "@repo/tsconfig": "workspace:*",
     "@types/bun": "latest"

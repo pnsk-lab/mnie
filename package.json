@@ -1,7 +1,23 @@
 {
   "name": "@repo/csbi",
+  "version": "1.0.0",
   "private": true,
+  "description": "<img width=\"1672\" height=\"941\" alt=\"Your money. Your machine\" src=\"https://github.com/user-attachments/assets/9ac413e9-161f-451c-9afc-1847308aedbc\" />",
+  "keywords": [],
+  "homepage": "https://github.com/pnsk-lab/mnie#readme",
+  "bugs": {
+    "url": "https://github.com/pnsk-lab/mnie/issues"
+  },
   "license": "MIT",
+  "author": "",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pnsk-lab/mnie.git"
+  },
+  "directories": {
+    "doc": "docs",
+    "example": "example"
+  },
   "workspaces": [
     "apps/*",
     "packages/*",
@@ -9,6 +25,7 @@
     "docs/"
   ],
   "type": "module",
+  "main": "index.js",
   "module": "index.ts",
   "scripts": {
     "postinstall": "bun scripts/download-capsolve-model.ts",

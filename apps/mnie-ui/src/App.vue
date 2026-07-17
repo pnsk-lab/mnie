@@ -95,6 +95,9 @@ const {
   payPaySecLabel,
   payPaySecCredentialJson,
   payPaySecTradePassword,
+  starbucksLabel,
+  starbucksUsername,
+  starbucksPassword,
   refresh,
   forceProfileAvailability,
   addApiKey,
@@ -108,6 +111,7 @@ const {
   addSmbcDirectProfile,
   addPayPayBankProfile,
   addPayPaySecProfile,
+  addStarbucksProfile,
   removeSbiPasskey,
   updateProfile,
 } = useAuthAdmin()
@@ -282,6 +286,12 @@ const addPayPaySecProfileAndConnect = async () => {
   await addPayPaySecProfile()
   tradeProfileId.value = selectedProfileId.value
   connect()
+}
+
+const addStarbucksProfileAndRefresh = async () => {
+  await addStarbucksProfile()
+  await loadStoredAssetValuations()
+  await loadPortfolioOverview()
 }
 
 const revokeAndRefresh = async (id: string) => {
@@ -508,6 +518,9 @@ onUnmounted(() => {
           v-model:pay-pay-sec-label="payPaySecLabel"
           v-model:pay-pay-sec-credential-json="payPaySecCredentialJson"
           v-model:pay-pay-sec-trade-password="payPaySecTradePassword"
+          v-model:starbucks-label="starbucksLabel"
+          v-model:starbucks-username="starbucksUsername"
+          v-model:starbucks-password="starbucksPassword"
           :api-keys="apiKeys"
           :sbi-passkeys="sbiPasskeys"
           :auth-managers="authManagers"
@@ -530,6 +543,7 @@ onUnmounted(() => {
           @add-smbc-direct-profile="addSmbcDirectProfile"
           @add-pay-pay-bank-profile="addPayPayBankProfile"
           @add-pay-pay-sec-profile="addPayPaySecProfileAndConnect"
+          @add-starbucks-profile="addStarbucksProfileAndRefresh"
           @finish-smbc-2fa="finishSmbc2faAndRefreshAvailability"
           @force-profile-availability="forceProfileAvailability"
           @connect="connect"
