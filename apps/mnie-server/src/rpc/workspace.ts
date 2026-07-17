@@ -4,6 +4,7 @@ import type { Db } from '../db'
 import { listHistory } from '../history'
 import { loadPortfolioOverview, type OverviewProfile } from '../portfolio-overview'
 import type { ProviderRegistry } from '../providers/registry'
+import { listTransactionObservations } from '../observations'
 import {
   confirmReconciliationProposal,
   deleteAccountLink,
@@ -21,6 +22,7 @@ export const WORKSPACE_OPERATIONS = [
   'portfolio.valuation.get',
   'portfolio.overview.get',
   'history.list',
+  'transaction-observations.list',
   'financial-accounts.list',
   'events.list',
   'events.get',
@@ -56,6 +58,10 @@ export const invokeWorkspace = async (
 
   if (operation === 'history.list') {
     return listHistory(db, providers, input as HistoryListRequest & { profileIds?: string[] })
+  }
+
+  if (operation === 'transaction-observations.list') {
+    return listTransactionObservations(db)
   }
 
   if (operation === 'events.list') return listEconomicEvents(db, input as EventsListRequest)

@@ -21,6 +21,7 @@ import {
   saveSmbcDirectProfile,
   savePayPayBankProfile,
   savePayPaySecProfile,
+  saveStarbucksProfile,
   updateApiKeySettings,
   updateAccountProfile,
   verifyLogin,
@@ -73,6 +74,9 @@ export const useAuthAdmin = () => {
   const payPaySecLabel = ref('PayPay証券')
   const payPaySecCredentialJson = ref('')
   const payPaySecTradePassword = ref('')
+  const starbucksLabel = ref('スターバックス')
+  const starbucksUsername = ref('')
+  const starbucksPassword = ref('')
 
   watch(payPayBankBranchNo, (value) => {
     const match = /^(\d{3})-(\d{1,7})$/.exec(value)
@@ -266,6 +270,11 @@ export const useAuthAdmin = () => {
     if (provider === 'paypay-bank') {
       payPayBankBranchNo.value = credential.username ?? ''
       payPayBankPassword.value = credential.password ?? ''
+      return
+    }
+    if (provider === 'starbucks-jp') {
+      starbucksUsername.value = credential.username ?? ''
+      starbucksPassword.value = credential.password ?? ''
     }
   }
 
@@ -326,6 +335,17 @@ export const useAuthAdmin = () => {
     await refresh()
   }
 
+  const addStarbucksProfile = async () => {
+    const { profile } = await saveStarbucksProfile({
+      label: starbucksLabel.value,
+      username: starbucksUsername.value,
+      password: starbucksPassword.value,
+    })
+    selectedProfileId.value = profile.id
+    starbucksPassword.value = ''
+    await refresh()
+  }
+
   return {
     status,
     apiKeys,
@@ -362,6 +382,9 @@ export const useAuthAdmin = () => {
     payPaySecLabel,
     payPaySecCredentialJson,
     payPaySecTradePassword,
+    starbucksLabel,
+    starbucksUsername,
+    starbucksPassword,
     refresh,
     forceProfileAvailability,
     addApiKey,
@@ -375,6 +398,7 @@ export const useAuthAdmin = () => {
     addSmbcDirectProfile,
     addPayPayBankProfile,
     addPayPaySecProfile,
+    addStarbucksProfile,
     removeSbiPasskey,
     updateProfile,
   }

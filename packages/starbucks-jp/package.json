@@ -1,0 +1,31 @@
+{
+  "name": "@mnie/starbucks-jp",
+  "license": "MIT",
+  "type": "module",
+  "module": "./dist/index.mjs",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "scripts": {
+    "build": "cd ../.. && cd packages/starbucks-jp && vp pack",
+    "dev": "vp pack --watch",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@mnie/types": "workspace:*",
+    "acorn": "^8.17.0",
+    "quickjs-emscripten": "^0.32.0"
+  },
+  "devDependencies": {
+    "@repo/tsconfig": "workspace:*",
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

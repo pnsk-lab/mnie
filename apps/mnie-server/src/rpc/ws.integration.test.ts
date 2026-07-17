@@ -55,6 +55,7 @@ describe('WebSocket RPC boundaries', () => {
 
   test('invokes workspace operations through WebSocket', async () => {
     await expect(workspace.invoke('profiles.list', {})).resolves.toEqual([])
+    await expect(workspace.invoke('transaction-observations.list', {})).resolves.toEqual([])
   })
 
   test('does not expose owner admin operations to API keys', async () => {

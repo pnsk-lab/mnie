@@ -21,6 +21,7 @@
     "@mnie/provider-paypay-sec": "workspace:*",
     "@mnie/provider-sbi-sec": "workspace:*",
     "@mnie/provider-smbc-direct": "workspace:*",
+    "@mnie/starbucks-jp": "workspace:*",
     "@mnie/types": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@napi-rs/keyring": "^1.2.0",

@@ -21,6 +21,12 @@ import {
   type SmbcDirectLoginChallenge,
   type SmbcDirectSession,
 } from '@mnie/provider-smbc-direct'
+import {
+  createStarbucksIoBlackboxRuntimeFromLogin,
+  createStarbucksJpClient,
+  createStarbucksProvider,
+  type StarbucksJpSessionData,
+} from '@mnie/starbucks-jp'
 import type {
   FinancialProvider,
   OperationAvailability,
@@ -44,6 +50,7 @@ import type {
   StoredPayPayBankSecret,
   StoredPayPaySecSecret,
   StoredSbiPasskeySecret,
+  StoredStarbucksSecret,
   StoredSmbcDirectSecret,
 } from './credentials'
 import { openPayPaySec } from './paypay-sec'
@@ -210,6 +217,17 @@ export class ProviderRegistry {
           { name: 'password', kind: 'password', required: true, secret: true },
         ],
       },
+      {
+        id: 'starbucks-jp',
+        name: 'スターバックス',
+        kind: 'other',
+        authentication: 'credentials',
+        defaultColor: '#00704a',
+        credentialFields: [
+          { name: 'username', kind: 'text', required: true, secret: true },
+          { name: 'password', kind: 'password', required: true, secret: true },
+        ],
+      },
     ] as const
   }
 
@@ -243,9 +261,11 @@ export class ProviderRegistry {
             ? this.config.mobileSuicaBaseUrl
             : providerId === 'paypay-bank'
               ? this.config.payPayBankBaseUrl
-              : providerId === 'paypay-sec'
-                ? this.config.payPaySecPasskeyOrigin
-                : undefined
+              : providerId === 'starbucks-jp'
+                ? this.config.starbucksLoginOrigin
+                : providerId === 'paypay-sec'
+                  ? this.config.payPaySecPasskeyOrigin
+                  : undefined
     if (!configured) throw new Error(`provider origin is not configured: ${providerId}`)
     return new URL(configured).origin
   }
@@ -318,6 +338,11 @@ export class ProviderRegistry {
         accountNo,
         password,
       } satisfies StoredPayPayBankSecret)
+    } else if (providerId === 'starbucks-jp') {
+      await saveSecret(keyringAccount, {
+        username: requiredCredential(credentials, 'username'),
+        password: requiredCredential(credentials, 'password'),
+      } satisfies StoredStarbucksSecret)
     } else {
       throw new Error(`provider profile creation is not registered: ${providerId}`)
     }
@@ -335,7 +360,7 @@ export class ProviderRegistry {
       await deleteSecret(keyringAccount)
       throw cause
     }
-    if (providerId === 'sbisec' || providerId === 'paypay-sec') {
+    if (providerId === 'sbisec' || providerId === 'paypay-sec' || providerId === 'starbucks-jp') {
       try {
         await syncInitialHistory(this.db, this, id)
       } catch (cause) {
@@ -423,6 +448,49 @@ export class ProviderRegistry {
             session: exportPayPayBankSession(imported),
           } satisfies StoredPayPayBankSecret),
         release: async () => {},
+      }
+    }
+
+    if (profile.provider === 'starbucks-jp') {
+      const secret = await readSecret<StoredStarbucksSecret>(profile.keyringAccount)
+      const apiOrigin = this.config.starbucksApiOrigin
+      const loginOrigin = this.config.starbucksLoginOrigin
+      const appOrigin = this.config.starbucksAppOrigin
+      if (!apiOrigin || !loginOrigin || !appOrigin) {
+        throw new Error(
+          'STARBUCKS_API_ORIGIN, STARBUCKS_LOGIN_ORIGIN, and STARBUCKS_APP_ORIGIN are required',
+        )
+      }
+      const ioRuntime = await createStarbucksIoBlackboxRuntimeFromLogin(`${loginOrigin}/login`)
+      try {
+        const client = createStarbucksJpClient({
+          apiOrigin,
+          loginOrigin,
+          appOrigin,
+          ioBlackboxRuntime: ioRuntime,
+          timeoutMs: 30_000,
+        })
+        const session =
+          !options.forceLogin && secret.session
+            ? client.importSession(secret.session)
+            : await client.loginWithCredentials({
+                username: secret.username,
+                password: secret.password,
+              })
+        const provider = asProvider(createStarbucksProvider(session))
+        return {
+          profile,
+          provider,
+          persist: async () =>
+            saveSecret(profile.keyringAccount, {
+              ...secret,
+              session: session.session.export() as StarbucksJpSessionData,
+            } satisfies StoredStarbucksSecret),
+          release: async () => ioRuntime.close(),
+        }
+      } catch (cause) {
+        ioRuntime.close()
+        throw cause
       }
     }
 
@@ -524,7 +592,10 @@ export class ProviderRegistry {
     let open: OpenProvider | undefined = await this.open(profile)
     try {
       let availability = await this.availabilityForProvider(open.provider)
-      if (!availability.connection.ok && profile.provider === 'paypay-bank') {
+      if (
+        !availability.connection.ok &&
+        (profile.provider === 'paypay-bank' || profile.provider === 'starbucks-jp')
+      ) {
         const expired = open
         open = undefined
         try {
@@ -715,7 +786,10 @@ export class ProviderRegistry {
           forceLogin,
         })
       const initial = await check()
-      if (!initial.connection.ok && profile.provider === 'paypay-bank') {
+      if (
+        !initial.connection.ok &&
+        (profile.provider === 'paypay-bank' || profile.provider === 'starbucks-jp')
+      ) {
         return check(true)
       }
       return initial
@@ -760,7 +834,9 @@ export class ProviderRegistry {
   }
 
   assetRefreshIntervalMs(profile: AccountProfile) {
-    return profile.provider === 'sbisec' ? 5 * 60_000 : 60 * 60_000
+    return profile.provider === 'sbisec' || profile.provider === 'starbucks-jp'
+      ? 5 * 60_000
+      : 60 * 60_000
   }
 
   sessionRefreshIntervalMs(profile: AccountProfile) {
@@ -777,6 +853,9 @@ export class ProviderRegistry {
       return { from: dashedDate(from), to: dashedDate(to), kinds: ['transaction'] as const }
     }
     if (profile.provider === 'mobile-suica') {
+      return { from: from.toISOString(), to: to.toISOString(), kinds: ['transaction'] as const }
+    }
+    if (profile.provider === 'starbucks-jp') {
       return { from: from.toISOString(), to: to.toISOString(), kinds: ['transaction'] as const }
     }
     return { kinds: ['transaction'] as const }

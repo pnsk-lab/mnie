@@ -2,6 +2,7 @@
 import {
   Ban,
   Building2,
+  Coffee,
   ChevronRight,
   ChevronLeft,
   Import,
@@ -79,6 +80,9 @@ const payPayBankPassword = defineModel<string>('payPayBankPassword', { required:
 const payPaySecLabel = defineModel<string>('payPaySecLabel', { required: true })
 const payPaySecCredentialJson = defineModel<string>('payPaySecCredentialJson', { required: true })
 const payPaySecTradePassword = defineModel<string>('payPaySecTradePassword', { required: true })
+const starbucksLabel = defineModel<string>('starbucksLabel', { required: true })
+const starbucksUsername = defineModel<string>('starbucksUsername', { required: true })
+const starbucksPassword = defineModel<string>('starbucksPassword', { required: true })
 const editedLabel = ref('')
 const editedColor = ref('')
 const editedTradePassword = ref('')
@@ -102,6 +106,7 @@ const emit = defineEmits<{
   addSmbcDirectProfile: []
   addPayPayBankProfile: []
   addPayPaySecProfile: []
+  addStarbucksProfile: []
   finishSmbc2fa: []
   forceProfileAvailability: [profileId: string]
   connect: []
@@ -163,6 +168,7 @@ const providerPresentation = (provider: ProviderDefinition) => {
   if (provider.kind === 'brokerage') return { icon: Landmark, description: '証券口座・取引' }
   if (provider.kind === 'bank') return { icon: Building2, description: '銀行口座・残高' }
   if (provider.kind === 'transit-card') return { icon: TrainFront, description: '利用履歴' }
+  if (provider.id === 'starbucks-jp') return { icon: Coffee, description: 'カード残高・利用履歴' }
   return { icon: WalletCards, description: provider.kind }
 }
 
@@ -786,6 +792,36 @@ const saveEditingApiKey = () => {
                   :class="ui.primaryButton"
                   type="button"
                   @click="emit('addPayPayBankProfile')"
+                >
+                  <Save class="h-4 w-4" aria-hidden="true" /> 保存
+                </button>
+              </div>
+            </template>
+            <template v-else-if="selectedProvider === 'starbucks-jp'">
+              <label :class="ui.label">
+                名前<input v-model="starbucksLabel" :class="ui.input" placeholder="例: Starbucks" />
+              </label>
+              <label :class="ui.label">
+                メールアドレス<input
+                  v-model="starbucksUsername"
+                  :class="ui.input"
+                  type="email"
+                  autocomplete="username"
+                />
+              </label>
+              <label :class="ui.label">
+                ログインパスワード<input
+                  v-model="starbucksPassword"
+                  :class="ui.input"
+                  type="password"
+                  autocomplete="current-password"
+                />
+              </label>
+              <div class="flex justify-end">
+                <button
+                  :class="ui.primaryButton"
+                  type="button"
+                  @click="emit('addStarbucksProfile')"
                 >
                   <Save class="h-4 w-4" aria-hidden="true" /> 保存
                 </button>

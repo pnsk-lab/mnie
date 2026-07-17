@@ -162,6 +162,10 @@ export interface EnrichmentProvider {
 }
 
 export type ReconciliationOperations = {
+  'transaction-observations.list': {
+    request: Record<string, never>
+    response: TransactionObservation[]
+  }
   'financial-accounts.list': { request: Record<string, never>; response: FinancialAccount[] }
   'events.list': { request: EventsListRequest; response: Page<EconomicEventView> }
   'events.get': { request: { eventId: string }; response: EconomicEventView }

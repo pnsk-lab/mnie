@@ -44,6 +44,7 @@ export default defineConfig({
           '@mnie/provider-paypay-bank#build',
           '@repo/client-mnie#build',
           '@mnie/provider-smbc-direct#build',
+          '@mnie/starbucks-jp#build',
           '@mnie/cli#build',
         ],
         command: 'echo "SDK build complete"',

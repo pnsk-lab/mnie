@@ -5,6 +5,7 @@ export const defaultProviderColors: Record<string, string> = {
   'mobile-suica': '#2F8E3C',
   'paypay-bank': '#f5bac4',
   'paypay-sec': '#ff003c',
+  'starbucks-jp': '#00704a',
   sbisec: '#0a3e86',
 }
 

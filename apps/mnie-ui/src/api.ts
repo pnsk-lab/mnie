@@ -542,6 +542,20 @@ export const savePayPayBankProfile = (payload: {
     credentials: payload,
   })
 
+export const saveStarbucksProfile = (payload: {
+  label: string
+  username: string
+  password: string
+}) =>
+  adminRequest<{ profile: AccountProfile }>('profiles.create', {
+    providerId: 'starbucks-jp',
+    label: payload.label,
+    credentials: {
+      username: payload.username,
+      password: payload.password,
+    },
+  })
+
 export const savePayPaySecProfile = (payload: {
   label: string
   credential: unknown
