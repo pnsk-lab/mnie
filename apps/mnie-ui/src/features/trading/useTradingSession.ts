@@ -249,6 +249,7 @@ export const useTradingSession = (
   const profileConnected = ref(false)
   const connectedProfileId = ref('')
   const smbcQrUrl = ref('')
+  const smbcUrl = ref('')
   const smbcBalance = ref<{ amount: number; displayValue: string } | null>(null)
   const dataLoading = ref(false)
   const searchLoading = ref(false)
@@ -1600,6 +1601,7 @@ export const useTradingSession = (
     profileConnected.value = false
     connectedProfileId.value = ''
     smbcQrUrl.value = ''
+    smbcUrl.value = ''
     smbcBalance.value = null
     dataLoading.value = true
     connectingProfileId = selectedProfile.id
@@ -1610,7 +1612,7 @@ export const useTradingSession = (
           profileId: selectedProfile.id,
         })) as {
           status: 'connected' | 'interaction-required'
-          interaction?: { id: string; kind: string; qrUrl?: string }
+          interaction?: { id: string; kind: string; url?: string; qrUrl?: string }
         }
         if (connection.status === 'interaction-required') {
           if (connection.interaction?.kind !== 'qr' || !connection.interaction.qrUrl) {
@@ -1618,6 +1620,7 @@ export const useTradingSession = (
           }
           profileInteractionId = connection.interaction.id
           smbcQrUrl.value = connection.interaction.qrUrl
+          smbcUrl.value = connection.interaction.url ?? ''
           return
         }
         providerOperations.value = new Set(
@@ -1684,6 +1687,7 @@ export const useTradingSession = (
         displayValue: textValue(asRecord(asRecord(asRecord(balance).amount).money).value),
       }
       smbcQrUrl.value = ''
+      smbcUrl.value = ''
       profileInteractionId = ''
       return true
     } catch (cause) {
@@ -2419,6 +2423,7 @@ export const useTradingSession = (
 
   return {
     smbcQrUrl,
+    smbcUrl,
     smbcBalance,
     finishSmbc2fa,
     selectedStockCode,

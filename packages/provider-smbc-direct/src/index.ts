@@ -1,4 +1,5 @@
 import iconv from 'iconv-lite'
+import { renderSVG } from 'uqr'
 
 /** Options shared by the SMBC direct client implementation. */
 export interface SmbcDirectClientOptions {
@@ -220,6 +221,24 @@ export interface SmbcDirectLoginChallenge {
   /** SMBC app deep link encoded by the QR image. */
   url: string
 }
+
+const smbcAppScheme = 'smbcdirectapp:'
+
+/** Applies the same pageDlink decoding used by SMBC's QR landing page. */
+export const smbcDirectAppUrl = (qrUrl: string): string => {
+  const landingPage = new URL(qrUrl)
+  const pageDlink = landingPage.searchParams.get('pageDlink')
+  if (!pageDlink) throw new Error('SMBC Direct QR URL does not contain pageDlink')
+
+  const appUrl = new URL(pageDlink)
+  if (appUrl.protocol !== smbcAppScheme || appUrl.pathname !== '/biometrics/ADBA') {
+    throw new Error('SMBC Direct QR URL contains an unsupported app link')
+  }
+  return appUrl.toString()
+}
+
+const qrDataUrl = (value: string): string =>
+  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(renderSVG(value, { border: 4 }))}`
 
 interface Credentials {
   branchNo: string
@@ -796,18 +815,20 @@ export const loginWithPasskey = async (
   context.confirmationForm = formFields(confirmationHtml, 'BCATBCA')
   context.confirmationUrl = confirmation.url
 
-  const qrCode = inlineVariable(confirmationHtml, 'qrCode')
-  const appUrl = new URL('smbcdirectapp:///biometrics/ADBA')
-  appUrl.searchParams.set('userId', inlineVariable(confirmationHtml, 'userId'))
-  appUrl.searchParams.set(
+  const pageDlink = new URL('smbcdirectapp:///biometrics/ADBA')
+  pageDlink.searchParams.set('userId', inlineVariable(confirmationHtml, 'userId'))
+  pageDlink.searchParams.set(
     'confirmationNumber',
     inlineVariable(confirmationHtml, 'confirmationNumber'),
   )
-  appUrl.searchParams.set('createdTime', inlineVariable(confirmationHtml, 'createdTime'))
+  pageDlink.searchParams.set('createdTime', inlineVariable(confirmationHtml, 'createdTime'))
+  const qrLandingPage = new URL('/kojin/cmn/dl/smbcapp_02.html', loginURL)
+  qrLandingPage.searchParams.set('pageDlink', pageDlink.toString())
+  const appUrl = smbcDirectAppUrl(qrLandingPage.toString())
 
   return {
-    qrurl: `data:image/png;base64,${qrCode}`,
-    url: appUrl.toString(),
+    qrurl: qrDataUrl(appUrl),
+    url: appUrl,
     async finished2fa() {
       const sessionBefore = context.jar.get('JSESSIONID')
       const response = await fetchWithCookies(

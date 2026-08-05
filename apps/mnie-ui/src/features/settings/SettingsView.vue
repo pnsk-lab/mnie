@@ -50,6 +50,7 @@ const props = defineProps<{
   profileAvailabilityLoading: Record<string, boolean>
   cronJobs: CronJob[]
   smbcQrUrl: string
+  smbcUrl: string
   smbcBalance: { amount: number; displayValue: string } | null
 }>()
 
@@ -558,6 +559,7 @@ const saveEditingApiKey = () => {
                     alt="SMBC Direct 生体認証 QR コード"
                     class="h-56 w-56 rounded-lg bg-white p-2"
                   />
+                  <a v-if="smbcUrl" :class="ui.ghostButton" :href="smbcUrl">直接開く</a>
                   <button :class="ui.primaryButton" type="button" @click="emit('finishSmbc2fa')">
                     承認完了
                   </button>
@@ -711,6 +713,7 @@ const saveEditingApiKey = () => {
                     alt="SMBC Direct 生体認証 QR コード"
                     class="h-56 w-56 rounded-lg bg-white p-2"
                   />
+                  <a v-if="smbcUrl" :class="ui.ghostButton" :href="smbcUrl">直接開く</a>
                   <button :class="ui.primaryButton" type="button" @click="emit('finishSmbc2fa')">
                     承認完了
                   </button>

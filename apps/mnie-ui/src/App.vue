@@ -236,6 +236,7 @@ const {
   placeOrderCorrection,
   downloadCsv,
   smbcQrUrl,
+  smbcUrl,
   smbcBalance,
   finishSmbc2fa,
 } = useTradingSession(tradeProfileId, profiles, providerDefinitions)
@@ -531,6 +532,7 @@ onUnmounted(() => {
           :profile-availability-loading="profileAvailabilityLoading"
           :cron-jobs="cronJobs"
           :smbc-qr-url="smbcQrUrl"
+          :smbc-url="smbcUrl"
           :smbc-balance="smbcBalance"
           @add-api-key="addApiKey"
           @refresh="refresh"
