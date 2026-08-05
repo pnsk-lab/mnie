@@ -264,8 +264,8 @@ onUnmounted(() => {
     </div>
     <div v-if="observations.length" class="max-h-[32rem] overflow-auto">
       <table class="w-full min-w-[58rem] border-collapse text-sm">
-        <thead class="sticky top-0 z-10 bg-[#1b1f24] text-left text-xs text-[#8f949d]">
-          <tr class="border-b border-[#33383f]">
+        <thead class="sticky top-0 z-10 bg-surface text-left text-xs text-fg-faint">
+          <tr class="border-b border-border-subtle">
             <th class="px-3 py-3 font-extrabold">日時</th>
             <th class="px-3 py-3 font-extrabold">口座</th>
             <th class="px-3 py-3 font-extrabold">内容</th>
@@ -280,10 +280,10 @@ onUnmounted(() => {
             v-for="observation in observations"
             :id="rowAnchor(observation.id)"
             :key="observation.id"
-            class="border-b border-[#2a2f35] transition-[background-color,box-shadow] duration-700 last:border-b-0"
+            class="border-b border-border-subtle transition-[background-color,box-shadow] duration-700 last:border-b-0"
             :class="
               highlightedObservationId === observation.id
-                ? 'bg-[#344a68] shadow-[inset_4px_0_0_#a8c7fa]'
+                ? 'bg-primary-surface-strong shadow-[inset_4px_0_0_var(--color-primary)]'
                 : ''
             "
             tabindex="-1"
@@ -304,7 +304,7 @@ onUnmounted(() => {
               <button
                 v-if="confirmedByObservationId.get(observation.id)"
                 type="button"
-                class="max-w-48 truncate rounded-full bg-[#244534] px-2.5 py-1 text-xs font-semibold text-[#8ee6b7] transition hover:bg-[#315c46] focus-visible:outline-2 focus-visible:outline-[#a8c7fa]"
+                class="max-w-48 truncate rounded-full bg-positive-container px-2.5 py-1 text-xs font-semibold text-positive transition hover:bg-positive-container-hover focus-visible:outline-2 focus-visible:outline-primary"
                 @click="
                   scrollToCounterpart(confirmedByObservationId.get(observation.id)!, observation.id)
                 "
@@ -316,7 +316,7 @@ onUnmounted(() => {
               <button
                 v-else-if="proposalsByObservationId.get(observation.id)?.length"
                 type="button"
-                class="rounded-full bg-[#263141] px-2.5 py-1 text-xs font-semibold text-[#d3e3fd] transition hover:bg-[#34445b] focus-visible:outline-2 focus-visible:outline-[#a8c7fa]"
+                class="rounded-full bg-primary-container px-2.5 py-1 text-xs font-semibold text-primary-soft transition hover:bg-primary-container-hover focus-visible:outline-2 focus-visible:outline-primary"
                 @click="selectedObservation = observation"
               >
                 候補 {{ proposalsByObservationId.get(observation.id)?.length }}件
@@ -340,7 +340,7 @@ onUnmounted(() => {
       <article
         v-for="profile in profiles"
         :key="profile.id"
-        class="grid gap-3 rounded-2xl bg-[#111418] p-4"
+        class="grid gap-3 rounded-2xl border border-border bg-transparent p-4"
       >
         <div class="flex items-start gap-3">
           <span
@@ -403,7 +403,7 @@ onUnmounted(() => {
         <article
           v-for="proposal in selectedProposals"
           :key="proposal.id"
-          class="grid gap-3 rounded-2xl bg-[#111418] p-4"
+          class="grid gap-3 rounded-2xl border border-border bg-transparent p-4"
         >
           <strong>
             {{ counterpartLabel(proposal, selectedObservation.id) }} と関連させますか？

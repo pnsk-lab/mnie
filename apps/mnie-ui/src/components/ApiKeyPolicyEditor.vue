@@ -62,18 +62,18 @@ const ui = {
   root: 'grid gap-3',
   limitGrid: 'grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3',
   limitGridCompact: 'xl:grid-cols-5',
-  label: 'grid gap-2 text-xs font-extrabold text-[#9aa0a9]',
+  label: 'grid gap-2 text-xs font-extrabold text-fg-muted',
   input:
-    'min-h-12 w-full rounded-[16px] border border-[#4a5058] bg-[#111418] px-4 text-[#e3e3e9] outline-none transition focus:border-[#a8c7fa]',
-  permissions: 'border-t border-[#33383f] pt-3',
+    'min-h-12 w-full rounded-[16px] border border-border-strong bg-inset px-4 text-fg outline-none transition focus:border-primary',
+  permissions: 'border-t border-border-subtle pt-3',
   scopeGrid: 'grid grid-cols-2 gap-2 md:grid-cols-4',
-  summary: 'cursor-pointer font-black text-[#e3e3e9]',
+  summary: 'cursor-pointer font-black text-fg',
   actions: 'mt-3 flex flex-wrap gap-2',
   button:
-    'min-h-9 rounded-full bg-[#263141] px-4 text-sm font-extrabold text-[#d3e3fd] transition hover:bg-[#303b4d]',
+    'min-h-9 rounded-full bg-primary-container px-4 text-sm font-extrabold text-primary-soft transition hover:bg-primary-container-hover',
   methodGrid: 'mt-3 grid grid-cols-1 gap-2 xl:grid-cols-2',
   methodToggle:
-    'flex min-h-10 min-w-0 items-center gap-2 rounded-[16px] bg-[#111418] p-3 text-xs text-[#c3c7cf]',
+    'flex min-h-10 min-w-0 items-center gap-2 rounded-[16px] bg-inset p-3 text-xs text-fg-secondary',
   checkbox: 'h-4 min-h-4 w-4',
   methodName: 'min-w-0 break-all',
 }

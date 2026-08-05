@@ -44,11 +44,11 @@ const emit = defineEmits<{
 }>()
 
 const controlClass =
-  'min-h-12 w-full rounded-[16px] border border-[#4a5058] bg-[#111418] px-4 text-[#e3e3e9] outline-none transition placeholder:text-[#747982] focus:border-[#a8c7fa] disabled:cursor-not-allowed disabled:opacity-60'
+  'min-h-12 w-full rounded-[16px] border border-border-strong bg-inset px-4 text-fg outline-none transition placeholder:text-fg-placeholder focus:border-primary disabled:cursor-not-allowed disabled:opacity-60'
 </script>
 
 <template>
-  <label class="grid gap-2 text-xs font-extrabold text-[#9aa0a9]">
+  <label class="grid gap-2 text-xs font-extrabold text-fg-muted">
     <span v-if="label">{{ label }}</span>
     <textarea
       v-if="as === 'textarea'"

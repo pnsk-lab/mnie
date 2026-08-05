@@ -1,5 +1,143 @@
 @import 'tailwindcss';
 
+@theme {
+  --color-primary: var(--primary);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-muted: var(--primary-muted);
+  --color-on-primary: var(--on-primary);
+  --color-primary-container: var(--primary-container);
+  --color-primary-container-hover: var(--primary-container-hover);
+  --color-primary-surface: var(--primary-surface);
+  --color-primary-surface-strong: var(--primary-surface-strong);
+  --color-primary-focus: var(--primary-focus);
+  --color-primary-outline: var(--primary-outline);
+
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-inset: var(--inset);
+  --color-raised: var(--raised);
+  --color-hover: var(--hover);
+  --color-active: var(--active);
+  --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-secondary: var(--fg-secondary);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-faint: var(--fg-faint);
+  --color-fg-placeholder: var(--fg-placeholder);
+  --color-positive: var(--positive);
+  --color-on-positive: var(--on-positive);
+  --color-positive-container: var(--positive-container);
+  --color-positive-container-hover: var(--positive-container-hover);
+  --color-negative: var(--negative);
+  --color-danger: var(--danger);
+  --color-on-danger: var(--on-danger);
+  --color-danger-hover: var(--danger-hover);
+  --color-danger-active: var(--danger-active);
+  --color-pending: var(--pending);
+  --color-on-pending: var(--on-pending);
+  --color-overlay: var(--overlay);
+  --color-chart-grid: var(--chart-grid);
+  --color-chart-axis: var(--chart-axis);
+  --color-warning: var(--warning);
+  --color-median: var(--median);
+}
+
+:root,
+html.dark {
+  color-scheme: dark;
+
+  --primary: #d0bcff;
+  --primary-soft: #eaddff;
+  --primary-muted: #b69df8;
+  --on-primary: #381e72;
+  --primary-container: #3a2f4d;
+  --primary-container-hover: #4a3d61;
+  --primary-surface: #1e1628;
+  --primary-surface-strong: #3d3050;
+  --primary-focus: #b69df8;
+  --primary-outline: #6b5f7a;
+
+  --canvas: #101418;
+  --surface: #1b1f24;
+  --inset: #111418;
+  --raised: #191c20;
+  --hover: #22272e;
+  --active: #242930;
+  --border: #30343a;
+  --border-subtle: #33383f;
+  --border-strong: #4a5058;
+  --fg: #e3e3e9;
+  --fg-secondary: #c3c7cf;
+  --fg-muted: #9aa0a9;
+  --fg-faint: #8f949d;
+  --fg-placeholder: #747982;
+  --positive: #40dba2;
+  --on-positive: #003824;
+  --positive-container: #244534;
+  --positive-container-hover: #315c46;
+  --negative: #ffb4ab;
+  --danger: #ffb4ab;
+  --on-danger: #690005;
+  --danger-hover: #ffd8d3;
+  --danger-active: #ffc9c2;
+  --pending: #4a3720;
+  --on-pending: #ffddb3;
+  --overlay: rgb(16 20 24 / 0.75);
+  --chart-grid: #33383f;
+  --chart-axis: #59616c;
+  --warning: #ffcf6e;
+  --median: #fdd663;
+}
+
+html.light {
+  color-scheme: light;
+
+  --primary: #6750a4;
+  /* Accent text / chips: keep strong on light surfaces (dark-mode soft is bright). */
+  --primary-soft: #4f378b;
+  --primary-muted: #7f67be;
+  --on-primary: #ffffff;
+  --primary-container: #e9ddff;
+  --primary-container-hover: #d0bcff;
+  --primary-surface: #f6edff;
+  --primary-surface-strong: #e9ddff;
+  --primary-focus: #6750a4;
+  --primary-outline: #7a7289;
+
+  --canvas: #f0f2f5;
+  --surface: #ffffff;
+  --inset: #e4e7ec;
+  --raised: #ffffff;
+  --hover: #e4e7ec;
+  --active: #d8dce3;
+  --border: #9aa1ab;
+  --border-subtle: #b4bac4;
+  --border-strong: #6f7681;
+  --fg: #1a1c1e;
+  --fg-secondary: #3c4047;
+  --fg-muted: #4a4e55;
+  --fg-faint: #5c6169;
+  --fg-placeholder: #747880;
+  --positive: #0a7a55;
+  --on-positive: #ffffff;
+  --positive-container: #c8f5e0;
+  --positive-container-hover: #a9ecd0;
+  --negative: #b3261e;
+  --danger: #b3261e;
+  --on-danger: #ffffff;
+  --danger-hover: #8c1d18;
+  --danger-active: #7a1915;
+  --pending: #fef3e2;
+  --on-pending: #6d4700;
+  --overlay: rgb(15 18 22 / 0.45);
+  --chart-grid: #a8aeb8;
+  --chart-axis: #4b5563;
+  --warning: #9a6200;
+  --median: #8a6a0a;
+}
+
 html,
 body,
 #app {
@@ -10,5 +148,6 @@ body {
   margin: 0;
   min-width: 320px;
   overflow: hidden;
-  background: #101418;
+  background: var(--canvas);
+  color: var(--fg);
 }

@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { arc, area, extent, pie, scaleLinear, scaleTime } from 'd3'
 import { AnimatePresence, motion } from 'motion-v'
-import { ArrowLeft, Ban, FileText, Plug } from 'lucide-vue-next'
+import { ArrowLeft, Ban, FileText } from 'lucide-vue-next'
 import Spinner from '../../components/ui/Spinner.vue'
 import UiButton from '../../components/ui/UiButton.vue'
 import UiModal from '../../components/ui/UiModal.vue'
@@ -59,14 +59,12 @@ const props = defineProps<{
   recentOrders: OrderRow[]
   cancelingOrderKey: string
   dataLoading: boolean
-  connected: boolean
   orderHistoryLoaded: boolean
   orderHistoryNotice: string
   loadPositionDetail?: (position: Position) => Promise<Position>
 }>()
 
 const emit = defineEmits<{
-  connect: []
   openPosition: [position: Position]
   cancelOrder: [order: OrderRow]
 }>()
@@ -564,11 +562,11 @@ const confirmCancel = () => {
 <template>
   <section :class="ui.dashboardGrid">
     <article :class="ui.assetOverviewPanel">
-      <div :class="[ui.assetBreakdownPanel, 'h-full max-h-[24rem] sm:col-span-1']">
-        <div class="relative mx-auto aspect-square w-full max-w-[24rem]">
+      <div :class="[ui.assetBreakdownPanel, 'h-60 w-full sm:col-span-1 sm:h-96']">
+        <div class="relative mx-auto aspect-square h-full max-w-full">
           <svg
             viewBox="0 0 300 300"
-            class="h-full w-full overflow-visible"
+            class="size-full overflow-visible"
             role="img"
             aria-label="資産構成の円グラフ"
             @mouseleave="clearAssetDetail"
@@ -611,7 +609,7 @@ const confirmCancel = () => {
             class="pointer-events-none absolute inset-0 grid place-content-center justify-items-center gap-1 text-center"
           >
             <span :class="ui.metricLabel">{{ hoveredAsset?.label ?? '総資産' }}</span>
-            <strong class="text-xl font-black text-[#e3e3e9] sm:text-2xl">
+            <strong class="text-xl font-black text-fg sm:text-2xl">
               <template v-if="!showPortfolioSpinner">{{
                 currency(hoveredAsset?.value ?? totalAssetValue)
               }}</template>
@@ -629,12 +627,12 @@ const confirmCancel = () => {
           </div>
         </div>
       </div>
-      <div :class="[ui.assetBreakdownPanel, 'h-full max-h-[24rem] w-full sm:col-span-2']">
-        <div v-if="historyChart.points.length" class="relative h-full min-h-48 w-full">
+      <div :class="[ui.assetBreakdownPanel, 'h-60 w-full sm:col-span-2 sm:h-96']">
+        <div v-if="historyChart.points.length" class="relative size-full min-w-0 overflow-hidden">
           <svg
             ref="historySvg"
             :viewBox="`0 0 ${historyViewWidth} ${historyViewHeight}`"
-            class="h-full max-h-[24rem] min-h-48 w-full cursor-grab touch-none select-none overflow-visible active:cursor-grabbing"
+            class="block size-full cursor-grab touch-none select-none overflow-hidden active:cursor-grabbing"
             role="img"
             aria-label="総資産推移"
             tabindex="0"
@@ -663,13 +661,13 @@ const confirmCancel = () => {
                 :y1="tick.y"
                 :x2="historyViewWidth - 12"
                 :y2="tick.y"
-                stroke="#33383f"
+                stroke="var(--chart-grid)"
                 stroke-dasharray="3 4"
               />
               <text
                 x="60"
                 :y="tick.y"
-                fill="#8f949d"
+                fill="var(--fg-faint)"
                 class="text-sm"
                 font-weight="600"
                 text-anchor="end"
@@ -678,13 +676,13 @@ const confirmCancel = () => {
                 {{ currency(tick.value) }}
               </text>
             </g>
-            <line x1="68" y1="12" x2="68" :y2="historyChartBottom" stroke="#59616c" />
+            <line x1="68" y1="12" x2="68" :y2="historyChartBottom" stroke="var(--chart-axis)" />
             <line
               x1="68"
               :y1="historyChartBottom"
               :x2="historyViewWidth - 12"
               :y2="historyChartBottom"
-              stroke="#59616c"
+              stroke="var(--chart-axis)"
             />
             <g v-for="tick in historyChart.xTicks" :key="tick.value.getTime()">
               <line
@@ -692,7 +690,7 @@ const confirmCancel = () => {
                 y1="12"
                 :x2="tick.x"
                 :y2="historyChartBottom"
-                stroke="#33383f"
+                stroke="var(--chart-grid)"
                 stroke-dasharray="3 4"
               />
               <line
@@ -700,12 +698,12 @@ const confirmCancel = () => {
                 :y1="historyChartBottom"
                 :x2="tick.x"
                 :y2="historyChartBottom + 4"
-                stroke="#59616c"
+                stroke="var(--chart-axis)"
               />
               <text
                 :x="tick.x"
                 :y="historyViewHeight - 4"
-                fill="#8f949d"
+                fill="var(--fg-faint)"
                 class="text-sm"
                 font-weight="600"
                 text-anchor="middle"
@@ -728,15 +726,15 @@ const confirmCancel = () => {
                   y1="12"
                   :x2="hoveredHistoryPoint.x"
                   :y2="historyChartBottom"
-                  stroke="#59616c"
+                  stroke="var(--chart-axis)"
                   stroke-dasharray="4 4"
                 />
                 <circle
                   :cx="hoveredHistoryPoint.x"
                   :cy="hoveredHistoryPoint.y"
                   r="5"
-                  fill="#a8c7fa"
-                  stroke="#1b1f24"
+                  fill="var(--primary)"
+                  stroke="var(--surface)"
                   stroke-width="3"
                 />
               </g>
@@ -746,7 +744,7 @@ const confirmCancel = () => {
             <motion.div
               v-if="hoveredHistoryPoint"
               key="asset-history-tooltip"
-              class="pointer-events-none absolute rounded-xl border border-[#3b424b] bg-[#111418]/95 px-3 py-2 shadow-xl"
+              class="pointer-events-none absolute rounded-xl border border-border bg-inset/95 px-3 py-2 shadow-xl"
               :style="{
                 left: `${Math.min(
                   Math.max((hoveredHistoryPoint.x / historyViewWidth) * 100, 18),
@@ -759,10 +757,10 @@ const confirmCancel = () => {
               :exit="{ opacity: 0, x: '-50%', y: 4, scale: 0.97 }"
               :transition="{ duration: 0.16, ease: 'easeOut' }"
             >
-              <strong class="block whitespace-nowrap text-sm text-[#e3e3e9]">{{
+              <strong class="block whitespace-nowrap text-sm text-fg">{{
                 currency(hoveredHistoryPoint.value)
               }}</strong>
-              <small class="block whitespace-nowrap text-[#9aa0a9]">{{
+              <small class="block whitespace-nowrap text-fg-muted">{{
                 historyDate(hoveredHistoryPoint.date)
               }}</small>
               <span
@@ -770,7 +768,7 @@ const confirmCancel = () => {
                 :key="item.profileId"
                 class="mt-1 flex min-w-36 items-center justify-between gap-4 text-xs"
               >
-                <span class="inline-flex items-center gap-2 text-[#c3c7cf]">
+                <span class="inline-flex items-center gap-2 text-fg-secondary">
                   <i
                     class="size-2 shrink-0 rounded-full"
                     :style="{ backgroundColor: item.color }"
@@ -778,7 +776,7 @@ const confirmCancel = () => {
                   ></i>
                   {{ item.label }}
                 </span>
-                <strong class="text-[#e3e3e9]">{{ currency(item.value) }}</strong>
+                <strong class="text-fg">{{ currency(item.value) }}</strong>
               </span>
             </motion.div>
           </AnimatePresence>
@@ -790,132 +788,135 @@ const confirmCancel = () => {
       </div>
     </article>
 
-    <article :class="ui.holdingsPanel">
-      <div :class="ui.panelHead">
-        <h2>保有銘柄</h2>
-        <button
-          :class="ui.ghostButton"
-          type="button"
-          :disabled="dataLoading"
-          @click="emit('connect')"
-        >
-          <Plug class="h-4 w-4" aria-hidden="true" />
-          {{ connected ? '再取得' : '接続' }}
-        </button>
-      </div>
-      <div :class="ui.holdingsBody">
-        <div :class="ui.holdingsHead">
-          <span>プロファイル</span>
-          <span>銘柄</span>
-          <span>タイプ</span>
-          <span>数量</span>
-          <span>評価額</span>
-          <span>評価損益</span>
-          <span>操作</span>
-        </div>
-        <div v-if="positions.length" :class="ui.holdingsRows">
-          <div v-for="position in positions" :key="positionKey(position)" :class="ui.holdingRow">
-            <span class="col-span-2 truncate text-sm font-semibold text-[#c3c7cf] md:col-span-1">
-              {{ position.profileLabel ?? '-' }}
-            </span>
-            <button
-              class="grid gap-1 text-left text-[#e3e3e9]"
-              type="button"
-              @click="emit('openPosition', position)"
-            >
-              <strong>{{ position.name }}</strong>
-              <small>{{ position.code }}</small>
-            </button>
-            <b :class="ui.typePill">{{ position.type ?? '現物' }}</b>
-            <span>{{ position.quantity }}</span>
-            <span :class="ui.muted">{{
-              currencyForMarket(position.marketValue, position.market)
-            }}</span>
-            <span
-              class="grid justify-items-end gap-0.5"
-              :class="position.profitLoss >= 0 ? ui.positive : ui.negative"
-            >
-              <strong>{{ signedCurrencyForMarket(position.profitLoss, position.market) }}</strong>
-              <small>{{ signedPercent(position.profitLossRate) }}</small>
-            </span>
-            <span :class="ui.rowActions">
-              <button
-                v-if="canLoadPositionDetail(position)"
-                :class="ui.ghostButton"
-                class="min-h-8 px-3 text-xs"
-                type="button"
-                :disabled="Boolean(positionDetailLoadingKey)"
-                @click="showPositionDetail(position)"
-              >
-                <Spinner v-if="positionDetailLoadingKey === positionKey(position)" size="sm" />
-                <FileText v-else class="h-3.5 w-3.5" aria-hidden="true" />
-                詳細
-              </button>
-            </span>
-          </div>
-        </div>
-        <div v-else-if="dataLoading" :class="[ui.muted, ui.emptyState]">
-          <Spinner />
-        </div>
-        <p v-else :class="[ui.muted, ui.emptyState]">保有銘柄はありません</p>
-        <p v-if="positionDetailError" :class="ui.dialogNote">{{ positionDetailError }}</p>
-      </div>
-    </article>
+    <hr :class="ui.dashboardRule" />
 
-    <article :class="ui.portfolioHistory">
-      <h2>取引履歴</h2>
-      <div :class="ui.historyList">
-        <div v-if="recentOrders.length" :class="ui.historyRows">
-          <div
-            v-for="order in recentOrders"
-            :key="`${order.profileId ?? ''}:${order.id}`"
-            :class="ui.miniOrder"
-          >
-            <span class="grid gap-1">
-              <strong>{{ order.stock }}</strong>
-              <small
-                >{{ order.side === 'buy' ? '買付' : '売却' }} ・
-                {{ orderQuantityText(order) }}</small
-              >
-              <small v-if="order.profileLabel" class="text-[#a8c7fa]">
-                {{ order.providerName }} / {{ order.profileLabel }}
-              </small>
-              <small :class="[ui.statusBadge, order.status === '注文中' && ui.pendingBadge]">
-                {{ order.status }}
-              </small>
-            </span>
-            <span class="grid justify-items-end gap-1">
-              <small>{{ order.date.slice(5, 10) }}</small>
-              <strong>{{ orderAmountText(order) }}</strong>
-              <button
-                v-if="canCancel(order)"
-                :class="ui.ghostButton"
-                class="min-h-8 px-3 text-xs"
-                type="button"
-                :disabled="Boolean(cancelingOrderKey)"
-                @click="askCancel(order)"
-              >
-                <Spinner v-if="isCanceling(order, cancelingOrderKey)" size="sm" />
-                <Ban v-else class="h-3.5 w-3.5" aria-hidden="true" />
-                {{ isCanceling(order, cancelingOrderKey) ? '取消中' : '取消' }}
-              </button>
-            </span>
+    <div :class="ui.dashboardMidRow">
+      <article :class="ui.holdingsPanel">
+        <div :class="ui.panelHead">
+          <h2>保有銘柄</h2>
+        </div>
+        <div :class="ui.holdingsBody">
+          <div :class="ui.holdingsHead">
+            <span>プロファイル</span>
+            <span>銘柄</span>
+            <span>タイプ</span>
+            <span>数量</span>
+            <span>評価額</span>
+            <span>評価損益</span>
+            <span>操作</span>
           </div>
+          <div v-if="positions.length" :class="ui.holdingsRows">
+            <div v-for="position in positions" :key="positionKey(position)" :class="ui.holdingRow">
+              <span
+                class="col-span-2 truncate text-sm font-semibold text-fg-secondary md:col-span-1"
+              >
+                {{ position.profileLabel ?? '-' }}
+              </span>
+              <button
+                class="grid gap-1 text-left text-fg"
+                type="button"
+                @click="emit('openPosition', position)"
+              >
+                <strong>{{ position.name }}</strong>
+                <small>{{ position.code }}</small>
+              </button>
+              <b :class="ui.typePill">{{ position.type ?? '現物' }}</b>
+              <span>{{ position.quantity }}</span>
+              <span :class="ui.muted">{{
+                currencyForMarket(position.marketValue, position.market)
+              }}</span>
+              <span
+                class="grid justify-items-end gap-0.5"
+                :class="position.profitLoss >= 0 ? ui.positive : ui.negative"
+              >
+                <strong>{{ signedCurrencyForMarket(position.profitLoss, position.market) }}</strong>
+                <small>{{ signedPercent(position.profitLossRate) }}</small>
+              </span>
+              <span :class="ui.rowActions">
+                <button
+                  v-if="canLoadPositionDetail(position)"
+                  :class="ui.ghostButton"
+                  class="min-h-8 px-3 text-xs"
+                  type="button"
+                  :disabled="Boolean(positionDetailLoadingKey)"
+                  @click="showPositionDetail(position)"
+                >
+                  <Spinner v-if="positionDetailLoadingKey === positionKey(position)" size="sm" />
+                  <FileText v-else class="h-3.5 w-3.5" aria-hidden="true" />
+                  詳細
+                </button>
+              </span>
+            </div>
+          </div>
+          <div v-else-if="dataLoading" :class="[ui.muted, ui.emptyState]">
+            <Spinner />
+          </div>
+          <p v-else :class="[ui.muted, ui.emptyState]">保有銘柄はありません</p>
+          <p v-if="positionDetailError" :class="ui.dialogNote">{{ positionDetailError }}</p>
         </div>
-        <div v-else-if="dataLoading" :class="[ui.muted, ui.emptyState]">
-          <Spinner />
-        </div>
-        <p v-else :class="[ui.muted, ui.emptyState]">
-          {{
-            orderHistoryLoaded
-              ? orderHistoryNotice
-                ? `一部の口座を取得できませんでした (${orderHistoryNotice})`
-                : '該当する取引履歴はありません'
-              : '取引履歴はまだ取得されていません'
-          }}
-        </p>
+      </article>
+
+      <div :class="ui.dashboardMidDivider" aria-hidden="true">
+        <div :class="ui.dashboardMidDividerLine"></div>
       </div>
-    </article>
+
+      <article :class="ui.portfolioHistory">
+        <h2>取引履歴</h2>
+        <div :class="ui.historyList">
+          <div v-if="recentOrders.length" :class="ui.historyRows">
+            <div
+              v-for="order in recentOrders"
+              :key="`${order.profileId ?? ''}:${order.id}`"
+              :class="ui.miniOrder"
+            >
+              <span class="grid gap-1">
+                <strong>{{ order.stock }}</strong>
+                <small
+                  >{{ order.side === 'buy' ? '買付' : '売却' }} ・
+                  {{ orderQuantityText(order) }}</small
+                >
+                <small v-if="order.profileLabel" class="text-primary">
+                  {{ order.providerName }} / {{ order.profileLabel }}
+                </small>
+                <small :class="[ui.statusBadge, order.status === '注文中' && ui.pendingBadge]">
+                  {{ order.status }}
+                </small>
+              </span>
+              <span class="grid justify-items-end gap-1">
+                <small>{{ order.date.slice(5, 10) }}</small>
+                <strong>{{ orderAmountText(order) }}</strong>
+                <button
+                  v-if="canCancel(order)"
+                  :class="ui.ghostButton"
+                  class="min-h-8 px-3 text-xs"
+                  type="button"
+                  :disabled="Boolean(cancelingOrderKey)"
+                  @click="askCancel(order)"
+                >
+                  <Spinner v-if="isCanceling(order, cancelingOrderKey)" size="sm" />
+                  <Ban v-else class="h-3.5 w-3.5" aria-hidden="true" />
+                  {{ isCanceling(order, cancelingOrderKey) ? '取消中' : '取消' }}
+                </button>
+              </span>
+            </div>
+          </div>
+          <div v-else-if="dataLoading" :class="[ui.muted, ui.emptyState]">
+            <Spinner />
+          </div>
+          <p v-else :class="[ui.muted, ui.emptyState]">
+            {{
+              orderHistoryLoaded
+                ? orderHistoryNotice
+                  ? `一部の口座を取得できませんでした (${orderHistoryNotice})`
+                  : '該当する取引履歴はありません'
+                : '取引履歴はまだ取得されていません'
+            }}
+          </p>
+        </div>
+      </article>
+    </div>
+
+    <hr :class="ui.dashboardRule" />
 
     <article :class="ui.marketIndexPanel">
       <div :class="ui.panelHead">

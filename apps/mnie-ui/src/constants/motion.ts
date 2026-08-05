@@ -34,6 +34,9 @@ export const uiMotion = {
     sheetOpenExpressive: motionProfiles.expressive.spatial.fast,
     openExpressiveSpatial: motionProfiles.expressive.spatial.fast,
   },
+  nav: {
+    indicator: motionProfiles.expressive.spatial.fast,
+  },
   trade: {
     tabIndicator: motionProfiles.standard.spatial.default,
     segmentedIndicator: motionProfiles.expressive.spatial.fast,

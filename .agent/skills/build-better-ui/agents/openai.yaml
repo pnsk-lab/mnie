@@ -1,0 +1,5 @@
+interface:
+  display_name: 'Build Better UI'
+  short_description: 'Build distinctive, precise, pink-led product interfaces'
+  brand_color: '#EA3F8B'
+  default_prompt: 'Use $build-better-ui to design a polished product interface with the pink-led system.'
