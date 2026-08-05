@@ -172,14 +172,14 @@ const emit = defineEmits<{
     <div :class="ui.centerStack">
       <article :class="ui.stockMetadataPanel">
         <div class="flex flex-wrap items-center justify-between gap-3">
-          <span class="text-[0.65rem] font-black tracking-[0.14em] text-[#8f949d] uppercase">
+          <span class="text-[0.65rem] font-black tracking-[0.14em] text-fg-faint uppercase">
             取引口座
           </span>
           <label class="relative block min-w-0">
             <span class="sr-only">取引口座を選択</span>
             <select
               :value="selectedProfileId"
-              class="h-9 max-w-full cursor-pointer appearance-none rounded-full border border-[#333a44] bg-[#111418] py-1 pr-9 pl-4 text-xs font-bold text-[#d3e3fd] outline-none transition hover:border-[#596270] focus:border-[#8ab4f8] focus:ring-2 focus:ring-[#8ab4f8]/20 sm:min-w-64"
+              class="h-9 max-w-full cursor-pointer appearance-none rounded-full border border-border bg-inset py-1 pr-9 pl-4 text-xs font-bold text-primary-soft outline-none transition hover:border-border-strong focus:border-primary-focus focus:ring-2 focus:ring-primary-focus/20 sm:min-w-64"
               @change="emit('selectProfile', ($event.target as HTMLSelectElement).value)"
             >
               <option v-for="profile in brokerageProfiles" :key="profile.id" :value="profile.id">
@@ -187,7 +187,7 @@ const emit = defineEmits<{
               </option>
             </select>
             <ChevronDown
-              class="pointer-events-none absolute top-1/2 right-3 h-3.5 w-3.5 -translate-y-1/2 text-[#8f949d]"
+              class="pointer-events-none absolute top-1/2 right-3 h-3.5 w-3.5 -translate-y-1/2 text-fg-faint"
               aria-hidden="true"
             />
           </label>
@@ -196,7 +196,7 @@ const emit = defineEmits<{
           <div>
             <p :class="ui.eyebrow">{{ selectedStock.symbol }}</p>
             <h2>{{ selectedStock.name }}</h2>
-            <p v-if="orderInputMode === 'amount'" class="mt-1 text-xs text-[#a8c7fa]">
+            <p v-if="orderInputMode === 'amount'" class="mt-1 text-xs text-primary">
               取引口座: {{ profileName }}
             </p>
           </div>
@@ -259,7 +259,7 @@ const emit = defineEmits<{
               </div>
               <div class="flex items-center gap-1">
                 <button
-                  class="grid h-8 w-8 place-items-center rounded-md border border-[#2d3440] text-[#d3e3fd] transition hover:bg-[#1d232b] disabled:opacity-40"
+                  class="grid h-8 w-8 place-items-center rounded-md border border-border text-primary-soft transition hover:bg-hover disabled:opacity-40"
                   type="button"
                   aria-label="縮小"
                   :disabled="
@@ -270,7 +270,7 @@ const emit = defineEmits<{
                   <Minus class="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
                 <button
-                  class="grid h-8 w-8 place-items-center rounded-md border border-[#2d3440] text-[#d3e3fd] transition hover:bg-[#1d232b] disabled:opacity-40"
+                  class="grid h-8 w-8 place-items-center rounded-md border border-border text-primary-soft transition hover:bg-hover disabled:opacity-40"
                   type="button"
                   aria-label="拡大"
                   :disabled="
@@ -281,7 +281,7 @@ const emit = defineEmits<{
                   <Plus class="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
                 <button
-                  class="grid h-8 w-8 place-items-center rounded-md border border-[#2d3440] text-[#8f949d] transition hover:bg-[#1d232b] hover:text-[#d3e3fd] disabled:opacity-40"
+                  class="grid h-8 w-8 place-items-center rounded-md border border-border text-fg-faint transition hover:bg-hover hover:text-primary-soft disabled:opacity-40"
                   type="button"
                   aria-label="縮尺を戻す"
                   :disabled="
@@ -317,21 +317,21 @@ const emit = defineEmits<{
             />
             <span
               v-else-if="orderInputMode === 'amount' && !chartAvailable"
-              class="grid h-full place-items-center text-[#8f949d]"
+              class="grid h-full place-items-center text-fg-faint"
             >
               データなし（この口座では価格チャートを取得できません）
             </span>
-            <span v-else class="grid h-full place-items-center text-[#8f949d]">
+            <span v-else class="grid h-full place-items-center text-fg-faint">
               <Spinner />
             </span>
 
             <div
               v-if="chartNotice"
-              class="mt-2 flex items-start gap-1.5 px-3 pb-2 text-xs text-[#8f949d]"
+              class="mt-2 flex items-start gap-1.5 px-3 pb-2 text-xs text-fg-faint"
             >
-              <TriangleAlert class="mt-0.5 h-4 w-4 shrink-0 text-[#6f7783]" />
+              <TriangleAlert class="mt-0.5 h-4 w-4 shrink-0 text-fg-faint" />
               <span>
-                <span class="font-medium text-[#9aa0a9]">{{ chartNotice.title }}</span>
+                <span class="font-medium text-fg-muted">{{ chartNotice.title }}</span>
                 <span v-if="chartNotice.detail" class="ml-1">{{ chartNotice.detail }}</span>
               </span>
             </div>
@@ -397,19 +397,19 @@ const emit = defineEmits<{
                   :transition="tabContentTransition"
                 >
                   <div :class="ui.detailItem">
-                    <dt class="text-xs text-[#9aa0a9]">国</dt>
+                    <dt class="text-xs text-fg-muted">国</dt>
                     <dd class="font-bold">{{ selectedStock.country || 'データなし' }}</dd>
                   </div>
                   <div :class="ui.detailItem">
-                    <dt class="text-xs text-[#9aa0a9]">市場</dt>
+                    <dt class="text-xs text-fg-muted">市場</dt>
                     <dd class="font-bold">{{ selectedStock.market || 'データなし' }}</dd>
                   </div>
                   <div :class="ui.detailItem">
-                    <dt class="text-xs text-[#9aa0a9]">業種</dt>
+                    <dt class="text-xs text-fg-muted">業種</dt>
                     <dd class="font-bold">{{ selectedStock.sector || 'データなし' }}</dd>
                   </div>
                   <div :class="ui.detailItem">
-                    <dt class="text-xs text-[#9aa0a9]">始値</dt>
+                    <dt class="text-xs text-fg-muted">始値</dt>
                     <dd class="font-bold">
                       <template v-if="selectedStock.open > 0">{{
                         currencyForMarket(selectedStock.open, selectedStock.market)
@@ -418,7 +418,7 @@ const emit = defineEmits<{
                     </dd>
                   </div>
                   <div :class="ui.detailItem">
-                    <dt class="text-xs text-[#9aa0a9]">高値</dt>
+                    <dt class="text-xs text-fg-muted">高値</dt>
                     <dd class="font-bold">
                       <template v-if="selectedStock.high > 0">{{
                         currencyForMarket(selectedStock.high, selectedStock.market)
@@ -427,7 +427,7 @@ const emit = defineEmits<{
                     </dd>
                   </div>
                   <div :class="ui.detailItem">
-                    <dt class="text-xs text-[#9aa0a9]">安値</dt>
+                    <dt class="text-xs text-fg-muted">安値</dt>
                     <dd class="font-bold">
                       <template v-if="selectedStock.low > 0">{{
                         currencyForMarket(selectedStock.low, selectedStock.market)
@@ -450,7 +450,7 @@ const emit = defineEmits<{
                     <div
                       v-for="position in providerPositions"
                       :key="`${position.profileId}:${position.code}:${position.market}`"
-                      class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 rounded-2xl bg-[#22272e] px-4 py-3"
+                      class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 rounded-2xl bg-hover px-4 py-3"
                     >
                       <span class="flex min-w-0 items-center gap-2.5">
                         <i
@@ -460,11 +460,11 @@ const emit = defineEmits<{
                         ></i>
                         <span class="grid min-w-0">
                           <strong class="truncate text-sm">{{ position.providerName }}</strong>
-                          <small class="truncate text-[#8f949d]">{{ position.profileLabel }}</small>
+                          <small class="truncate text-fg-faint">{{ position.profileLabel }}</small>
                         </span>
                       </span>
                       <strong class="text-right text-sm">{{ position.quantity }}株</strong>
-                      <small class="pl-5 text-[#9aa0a9]">
+                      <small class="pl-5 text-fg-muted">
                         評価額 {{ currencyForMarket(position.marketValue, position.market) }}
                       </small>
                       <small
@@ -498,7 +498,7 @@ const emit = defineEmits<{
             v-model="orderKind"
             :options="orderKindOptions"
           />
-          <div v-else class="rounded-lg border border-[#30343a] p-3 text-sm text-[#9aa0a9]">
+          <div v-else class="rounded-lg border border-border p-3 text-sm text-fg-muted">
             注文種別: 通常（金額指定）
           </div>
           <div :class="ui.ticketBox">
@@ -597,7 +597,7 @@ const emit = defineEmits<{
                   </LayoutGroup>
                   <div
                     v-if="orderInputMode === 'amount'"
-                    class="rounded-lg border border-[#30343a] bg-[#15181d] p-3 text-sm text-[#8f949d]"
+                    class="rounded-lg border border-border bg-inset p-3 text-sm text-fg-faint"
                   >
                     注文市場・執行条件・有効期限・特殊注文はこの口座では未対応です。
                   </div>

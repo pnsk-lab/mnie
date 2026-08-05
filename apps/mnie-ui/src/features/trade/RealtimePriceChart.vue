@@ -3,8 +3,11 @@ import * as d3 from 'd3'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Spinner from '../../components/ui/Spinner.vue'
 import { marketTimeZones } from '../../constants/market'
+import { themeColor, useTheme } from '../theme/useTheme'
 import type { ChartMode, ChartNotice, ChartRange, RealtimePricePoint } from '../../types/trading'
 import { currencyForMarket } from '../../utils/format'
+
+const { theme } = useTheme()
 
 const props = defineProps<{
   points: RealtimePricePoint[]
@@ -386,8 +389,8 @@ const renderChart = () => {
         enter
           .append('circle')
           .attr('r', 2.5)
-          .attr('fill', '#d3e3fd')
-          .attr('stroke', '#40dba2')
+          .attr('fill', themeColor('--primary-soft', '#eaddff'))
+          .attr('stroke', themeColor('--positive', '#40dba2'))
           .attr('stroke-width', 1.6),
       (update) => update,
       (exit) => exit.remove(),
@@ -439,7 +442,9 @@ const renderChart = () => {
     const yHigh = yScale(ohlc.high)
     const yLow = yScale(ohlc.low)
     const rising = ohlc.close >= ohlc.open
-    const color = rising ? '#40dba2' : '#ffb4ab'
+    const risingColor = themeColor('--positive', '#40dba2')
+    const fallingColor = themeColor('--negative', '#ffb4ab')
+    const color = rising ? risingColor : fallingColor
     const bodyY = Math.min(yOpen, yClose)
     const bodyHeight = Math.max(2, Math.abs(yClose - yOpen))
 
@@ -457,11 +462,14 @@ const renderChart = () => {
       .attr('y', bodyY)
       .attr('width', candleWidth)
       .attr('height', bodyHeight)
-      .attr('fill', rising ? 'rgba(64, 219, 162, 0.28)' : 'rgba(255, 180, 171, 0.28)')
+      .attr('fill', color)
+      .attr('fill-opacity', 0.28)
       .attr('stroke', color)
       .attr('stroke-width', 1.4)
   })
 
+  const axisFill = themeColor('--fg-faint', '#8f949d')
+  const gridStroke = themeColor('--fg-faint', '#8f949d')
   const yGridAxis = d3
     .axisLeft(yScale)
     .ticks(5)
@@ -472,7 +480,7 @@ const renderChart = () => {
     .call(yGridAxis)
     .call((selection) => {
       selection.select('.domain').remove()
-      selection.selectAll('line').attr('stroke', 'rgba(143, 148, 157, 0.12)')
+      selection.selectAll('line').attr('stroke', gridStroke).attr('stroke-opacity', 0.12)
     })
 
   const yAxis = d3
@@ -486,7 +494,7 @@ const renderChart = () => {
     .call(yAxis)
     .call((selection) => {
       selection.select('.domain').remove()
-      selection.selectAll('text').attr('fill', '#8f949d').attr('font-size', 12)
+      selection.selectAll('text').attr('fill', axisFill).attr('font-size', 12)
     })
 
   const tickDates = visibleTickIndexes()
@@ -509,7 +517,7 @@ const renderChart = () => {
     .call(xAxis)
     .call((selection) => {
       selection.select('.domain').remove()
-      selection.selectAll('text').attr('fill', '#8f949d').attr('font-size', 12)
+      selection.selectAll('text').attr('fill', axisFill).attr('font-size', 12)
     })
 
   if (tooltip.value.visible) {
@@ -682,7 +690,7 @@ watch(
 )
 
 watch(
-  () => [props.mode, props.range, props.previousClose],
+  () => [props.mode, props.range, props.previousClose, theme.value],
   () => {
     hideHover()
     renderChart()
@@ -714,19 +722,24 @@ onBeforeUnmount(() => {
       <g ref="gridLayer"></g>
       <g ref="yAxisLayer"></g>
       <g ref="xAxisLayer"></g>
-      <path :clip-path="`url(#${clipId})`" ref="areaPath" fill="rgba(64, 219, 162, 0.14)"></path>
+      <path
+        :clip-path="`url(#${clipId})`"
+        ref="areaPath"
+        fill="var(--positive)"
+        fill-opacity="0.14"
+      ></path>
       <path
         :clip-path="`url(#${clipId})`"
         ref="linePath"
         fill="none"
-        stroke="#40dba2"
+        stroke="var(--positive)"
         stroke-linecap="round"
         stroke-linejoin="round"
         stroke-width="2.2"
       ></path>
       <line
         ref="previousCloseLine"
-        stroke="#ffcf6e"
+        stroke="var(--warning)"
         stroke-dasharray="5 5"
         stroke-linecap="round"
         stroke-width="1.2"
@@ -736,32 +749,39 @@ onBeforeUnmount(() => {
       <g ref="hoverLayer" :clip-path="`url(#${clipId})`" class="pointer-events-none" opacity="0">
         <line
           ref="hoverLine"
-          stroke="rgba(211, 227, 253, 0.42)"
+          stroke="var(--primary-soft)"
+          stroke-opacity="0.42"
           stroke-dasharray="4 4"
           stroke-width="1"
         ></line>
-        <circle ref="hoverDot" fill="#111418" r="0" stroke="#40dba2" stroke-width="2"></circle>
+        <circle
+          ref="hoverDot"
+          fill="var(--inset)"
+          r="0"
+          stroke="var(--positive)"
+          stroke-width="2"
+        ></circle>
       </g>
     </svg>
 
     <span
       v-if="active && !points.length"
-      class="absolute inset-0 grid place-items-center text-[#8f949d]"
+      class="absolute inset-0 grid place-items-center text-fg-faint"
     >
       <Spinner />
     </span>
 
     <div
-      class="pointer-events-none absolute w-[220px] translate-y-1 rounded-md border border-[#2d3440] bg-[#111418]/95 px-3 py-2 text-xs text-[#d3e3fd] opacity-0 shadow-lg shadow-black/30 transition-all duration-150 ease-out"
+      class="pointer-events-none absolute w-[220px] translate-y-1 rounded-md border border-border bg-inset/95 px-3 py-2 text-xs text-primary-soft opacity-0 shadow-lg shadow-black/30 transition-all duration-150 ease-out"
       :class="tooltip.visible && 'translate-y-0 opacity-100'"
       :style="tooltipStyle"
     >
-      <div class="font-black text-[#40dba2]">{{ tooltip.price }}</div>
-      <div class="mt-1 grid gap-0.5 text-[#8f949d]">
+      <div class="font-black text-positive">{{ tooltip.price }}</div>
+      <div class="mt-1 grid gap-0.5 text-fg-faint">
         <div>JST {{ tooltip.jstDate }}</div>
         <div>現地 {{ tooltip.localDate }}</div>
       </div>
-      <div v-if="tooltip.detail" class="mt-1 leading-relaxed text-[#8f949d]">
+      <div v-if="tooltip.detail" class="mt-1 leading-relaxed text-fg-faint">
         {{ tooltip.detail }}
       </div>
     </div>

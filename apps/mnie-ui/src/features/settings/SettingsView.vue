@@ -264,8 +264,8 @@ const availabilityLabel = (availability: ProfileAvailability | undefined) => {
 }
 
 const availabilityClass = (availability: ProfileAvailability | undefined) => {
-  if (!availability) return 'text-[#9aa0a9]'
-  return availability.ok ? 'text-[#8ee6b0]' : 'text-[#ffb4ab]'
+  if (!availability) return 'text-fg-muted'
+  return availability.ok ? 'text-positive' : 'text-negative'
 }
 
 const availabilityMessage = (availability: ProfileAvailability | undefined) => {
@@ -344,19 +344,19 @@ const saveEditingApiKey = () => {
 <template>
   <section class="grid min-h-[calc(100dvh-9rem)] min-w-0 max-w-full gap-0 lg:block">
     <aside
-      class="min-w-0 border-b border-[#30343a] pb-4 lg:fixed lg:top-8 lg:left-[9rem] lg:z-10 lg:h-fit lg:max-h-[calc(100dvh-4rem)] lg:w-72 lg:overflow-y-auto lg:border-r lg:border-b-0 lg:pr-5 lg:pb-0"
+      class="min-w-0 border-b border-border pb-4 lg:fixed lg:top-8 lg:left-[9rem] lg:z-10 lg:h-fit lg:max-h-[calc(100dvh-4rem)] lg:w-72 lg:overflow-y-auto lg:border-r lg:border-b-0 lg:pr-5 lg:pb-0"
       aria-label="Settings"
     >
       <div class="grid gap-5">
         <nav class="grid gap-5">
           <section v-for="group in settingsGroups" :key="group.label" class="grid gap-2">
-            <p class="px-2 text-xs font-black text-[#747982]">{{ group.label }}</p>
+            <p class="px-2 text-xs font-black text-fg-placeholder">{{ group.label }}</p>
             <button
               v-for="item in group.items"
               :key="item.id"
               :class="[
-                'grid min-h-16 grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 rounded-[18px] px-3 text-left transition hover:bg-[#22272e] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d3e3fd]',
-                activeSection === item.id ? 'bg-[#263141] text-[#d3e3fd]' : 'text-[#e3e3e9]',
+                'grid min-h-16 grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 rounded-[18px] px-3 text-left transition hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-soft',
+                activeSection === item.id ? 'bg-primary-container text-primary-soft' : 'text-fg',
               ]"
               type="button"
               @click="openSection(item.id)"
@@ -365,8 +365,8 @@ const saveEditingApiKey = () => {
                 :class="[
                   'grid h-10 w-10 place-items-center rounded-full',
                   activeSection === item.id
-                    ? 'bg-[#a8c7fa] text-[#102033]'
-                    : 'bg-[#111418] text-[#c3c7cf]',
+                    ? 'bg-primary text-on-primary'
+                    : 'bg-inset text-fg-secondary',
                 ]"
                 aria-hidden="true"
               >
@@ -374,11 +374,11 @@ const saveEditingApiKey = () => {
               </span>
               <span class="grid min-w-0 gap-0.5">
                 <strong class="truncate text-sm font-black">{{ item.label }}</strong>
-                <small class="truncate text-xs font-semibold text-[#9aa0a9]">
+                <small class="truncate text-xs font-semibold text-fg-muted">
                   {{ item.description }}
                 </small>
               </span>
-              <ChevronRight class="h-4 w-4 text-[#8f949d]" aria-hidden="true" />
+              <ChevronRight class="h-4 w-4 text-fg-faint" aria-hidden="true" />
             </button>
           </section>
         </nav>
@@ -391,17 +391,15 @@ const saveEditingApiKey = () => {
     >
       <button
         v-if="isProviderSetup"
-        class="inline-flex min-h-8 w-fit items-center gap-1.5 self-start rounded-md bg-transparent px-0 text-sm font-bold text-[#9aa0a9] transition hover:text-[#e3e3e9] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d3e3fd]"
+        class="inline-flex min-h-8 w-fit items-center gap-1.5 self-start rounded-md bg-transparent px-0 text-sm font-bold text-fg-muted transition hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-soft"
         type="button"
         @click="backFromProviderSetup"
       >
         <ChevronLeft class="h-3.5 w-3.5" aria-hidden="true" /> 戻る
       </button>
-      <header
-        class="flex flex-wrap items-center justify-between gap-3 border-b border-[#30343a] pb-5"
-      >
+      <header class="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-5">
         <div class="grid gap-1">
-          <h2 class="text-2xl font-black text-[#e3e3e9]">{{ sectionTitle }}</h2>
+          <h2 class="text-2xl font-black text-fg">{{ sectionTitle }}</h2>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <button
@@ -420,7 +418,7 @@ const saveEditingApiKey = () => {
             </button>
             <button
               v-if="activeSection === 'api-keys'"
-              class="inline-grid h-10 w-10 place-items-center rounded-full bg-[#a8c7fa] text-[#102033] shadow-sm shadow-black/20 transition hover:bg-[#d3e3fd] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d3e3fd]"
+              class="inline-grid h-10 w-10 place-items-center rounded-full bg-primary text-on-primary transition hover:bg-primary-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-soft"
               type="button"
               title="API Key 発行"
               @click="openNewApiKey"
@@ -452,35 +450,33 @@ const saveEditingApiKey = () => {
       <template v-else-if="activeSection === 'api-keys'">
         <article class="grid min-w-0 content-start gap-4 overflow-hidden bg-transparent">
           <div v-if="apiKeys.length" :class="ui.list">
-            <div v-for="key in apiKeys" :key="key.id" :class="ui.keyRow">
-              <div :class="ui.row">
-                <span class="min-w-0 truncate font-bold text-slate-100">{{ key.label }}</span>
-                <div class="flex flex-wrap gap-2">
-                  <button
-                    :class="ui.ghostButton"
-                    type="button"
-                    title="Edit settings"
-                    @click="openApiKeyEditor(key)"
-                  >
-                    <Pencil class="h-4 w-4" aria-hidden="true" />
-                    編集
-                  </button>
-                  <button
-                    :class="ui.dangerButton"
-                    type="button"
-                    title="Revoke"
-                    @click="emit('revokeApiKey', key.id)"
-                  >
-                    <Ban class="h-4 w-4" aria-hidden="true" />
-                    失効
-                  </button>
-                </div>
+            <div v-for="key in apiKeys" :key="key.id" :class="ui.row">
+              <span class="min-w-0 truncate font-bold text-fg">{{ key.label }}</span>
+              <div class="flex flex-wrap gap-2">
+                <button
+                  :class="ui.ghostButton"
+                  type="button"
+                  title="Edit settings"
+                  @click="openApiKeyEditor(key)"
+                >
+                  <Pencil class="h-4 w-4" aria-hidden="true" />
+                  編集
+                </button>
+                <button
+                  :class="ui.dangerButton"
+                  type="button"
+                  title="Revoke"
+                  @click="emit('revokeApiKey', key.id)"
+                >
+                  <Ban class="h-4 w-4" aria-hidden="true" />
+                  失効
+                </button>
               </div>
             </div>
           </div>
           <div
             v-else
-            class="rounded-[18px] border border-[#30343a] bg-[#111418] p-5 text-sm font-semibold text-[#9aa0a9]"
+            class="rounded-2xl border border-border bg-transparent p-5 text-sm font-semibold text-fg-muted"
           >
             発行済みの API キーはありません。
           </div>
@@ -494,17 +490,17 @@ const saveEditingApiKey = () => {
               <button
                 v-for="provider in providerCards"
                 :key="provider.id"
-                class="grid min-h-40 content-between rounded-2xl border border-[#30343a] bg-[#111418] p-5 text-left transition hover:border-[#a8c7fa] hover:bg-[#182331] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d3e3fd]"
+                class="grid min-h-40 content-between rounded-2xl border border-border bg-transparent p-5 text-left transition hover:border-primary hover:bg-primary-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-soft"
                 type="button"
                 @click="openProviderSetup(provider.id)"
               >
                 <span
-                  class="grid h-11 w-11 place-items-center rounded-xl bg-[#263141] text-[#a8c7fa]"
+                  class="grid h-11 w-11 place-items-center rounded-xl bg-primary-container text-primary"
                   ><component :is="provider.icon" class="h-5 w-5" aria-hidden="true"
                 /></span>
                 <span class="grid gap-1"
-                  ><strong class="text-base font-black text-[#f0f4f9]">{{ provider.label }}</strong
-                  ><small class="font-semibold text-[#9aa0a9]">{{
+                  ><strong class="text-base font-black text-fg">{{ provider.label }}</strong
+                  ><small class="font-semibold text-fg-muted">{{
                     provider.description
                   }}</small></span
                 >
@@ -551,7 +547,7 @@ const saveEditingApiKey = () => {
                 </div>
                 <div
                   v-if="selectedProvider === 'smbc-direct' && smbcQrUrl"
-                  class="grid gap-3 rounded-[18px] border border-[#4c5b72] bg-[#182331] p-4"
+                  class="grid gap-3 rounded-[18px] border border-primary-outline bg-primary-surface p-4"
                 >
                   <h4 class="font-black">生体認証を承認してください</h4>
                   <img
@@ -591,11 +587,11 @@ const saveEditingApiKey = () => {
                   v-if="selectedProvider === 'smbc-direct' || selectedProvider === 'mobile-suica'"
                   v-for="job in cronJobs.filter((value) => value.id === 'provider-sessions')"
                   :key="job.id"
-                  class="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-slate-800 p-4 text-sm"
+                  class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-transparent p-4 text-sm"
                 >
                   <div>
-                    <h4 class="font-black text-slate-100">{{ job.label }}</h4>
-                    <p class="mt-1 text-slate-300">
+                    <h4 class="font-black text-fg">{{ job.label }}</h4>
+                    <p class="mt-1 text-fg-secondary">
                       {{
                         selectedProvider === 'mobile-suica'
                           ? '5 分ごとに利用履歴を取得して接続を維持します。'
@@ -603,12 +599,14 @@ const saveEditingApiKey = () => {
                       }}
                     </p>
                   </div>
-                  <span :class="job.lastError ? 'text-red-300' : 'text-emerald-300'">
+                  <span :class="job.lastError ? 'text-negative' : 'text-positive'">
                     {{ job.lastError ? job.lastError : job.running ? '実行中' : '有効' }}
                   </span>
                 </div>
               </template>
-              <p v-else class="text-sm text-red-300" role="alert">プロファイルが見つかりません。</p>
+              <p v-else class="text-sm text-negative" role="alert">
+                プロファイルが見つかりません。
+              </p>
             </template>
             <template v-else-if="selectedProvider === 'sbisec'">
               <label :class="ui.label"
@@ -616,7 +614,7 @@ const saveEditingApiKey = () => {
               /></label>
               <div class="grid gap-2">
                 <div class="flex items-center justify-between gap-3">
-                  <span class="text-sm font-bold text-[#d3e3fd]">パスキー JSON</span>
+                  <span class="text-sm font-bold text-primary-soft">パスキー JSON</span>
                   <button
                     :class="ui.ghostButton"
                     class="!h-9 !w-9 !p-0"
@@ -663,7 +661,7 @@ const saveEditingApiKey = () => {
               /></label>
               <div class="grid gap-2">
                 <div class="flex items-center justify-between gap-3">
-                  <span class="text-sm font-bold text-[#d3e3fd]">パスキー JSON</span>
+                  <span class="text-sm font-bold text-primary-soft">パスキー JSON</span>
                   <button
                     :class="ui.ghostButton"
                     class="!h-9 !w-9 !p-0"
@@ -703,9 +701,11 @@ const saveEditingApiKey = () => {
 
             <template v-else-if="selectedProvider === 'smbc-direct'">
               <template v-if="smbcQrUrl">
-                <div class="grid gap-3 rounded-[18px] border border-[#4c5b72] bg-[#182331] p-4">
+                <div
+                  class="grid gap-3 rounded-[18px] border border-primary-outline bg-primary-surface p-4"
+                >
                   <h4 class="font-black">生体認証を承認してください</h4>
-                  <p class="text-sm text-[#b9c3d0]">
+                  <p class="text-sm text-fg-secondary">
                     SMBC アプリで QR コードを読み取り、認証後に続行します。
                   </p>
                   <img
@@ -721,10 +721,10 @@ const saveEditingApiKey = () => {
               </template>
               <p
                 v-else-if="smbcBalance"
-                class="rounded-[18px] bg-[#182331] p-4 text-sm text-[#b9c3d0]"
+                class="rounded-[18px] bg-primary-surface p-4 text-sm text-fg-secondary"
               >
                 取得済み残高
-                <strong class="ml-2 text-xl text-[#f0f4f9]">{{ smbcBalance.displayValue }}</strong>
+                <strong class="ml-2 text-xl text-fg">{{ smbcBalance.displayValue }}</strong>
               </p>
               <label :class="ui.label"
                 >名前<input v-model="smbcLabel" :class="ui.input" placeholder="例: 生活費口座"
@@ -830,7 +830,7 @@ const saveEditingApiKey = () => {
                 </button>
               </div>
             </template>
-            <p v-else class="text-sm text-red-300" role="alert">
+            <p v-else class="text-sm text-negative" role="alert">
               このプロバイダーの認証フォームはまだ実装されていません。登録層に認証処理を追加してください。
             </p>
           </article>
@@ -841,22 +841,23 @@ const saveEditingApiKey = () => {
             <article
               v-for="profile in props.profiles"
               :key="profile.id"
-              class="grid min-h-20 grid-cols-[2.75rem_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl border border-[#30343a] bg-[#111418] px-4 py-3"
+              class="grid min-h-20 grid-cols-[2.75rem_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl border border-border bg-transparent px-4 py-3"
             >
-              <span class="grid h-11 w-11 place-items-center rounded-xl bg-[#263141] text-[#a8c7fa]"
+              <span
+                class="grid h-11 w-11 place-items-center rounded-xl bg-primary-container text-primary"
                 ><component
                   :is="providerCards.find((provider) => provider.id === profile.provider)?.icon"
                   class="h-5 w-5"
                   aria-hidden="true"
               /></span>
               <span class="grid min-w-0 gap-1"
-                ><strong class="truncate text-[#f0f4f9]">{{ profile.label }}</strong
-                ><small class="truncate font-semibold text-[#9aa0a9]"
+                ><strong class="truncate text-fg">{{ profile.label }}</strong
+                ><small class="truncate font-semibold text-fg-muted"
                   >{{ providerCards.find((provider) => provider.id === profile.provider)?.label }} ·
                   {{ new Date(profile.createdAt).toLocaleDateString() }} に追加 ·
                   <span
                     v-if="props.profileAvailabilityLoading[profile.id]"
-                    class="inline-flex items-center gap-1 text-[#9aa0a9]"
+                    class="inline-flex items-center gap-1 text-fg-muted"
                   >
                     <LoaderCircle class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
                     <span class="sr-only">確認中</span>
@@ -898,11 +899,11 @@ const saveEditingApiKey = () => {
               ></span>
             </article>
             <button
-              class="grid min-h-20 grid-cols-[2.75rem_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl border border-dashed border-[#59616d] px-4 py-3 text-left text-[#d3e3fd] transition hover:border-[#a8c7fa] hover:bg-[#182331]"
+              class="grid min-h-20 grid-cols-[2.75rem_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl border border-dashed border-border-strong px-4 py-3 text-left text-primary-soft transition hover:border-primary hover:bg-primary-surface"
               type="button"
               @click="openProviderSetup()"
             >
-              <span class="grid h-11 w-11 place-items-center rounded-xl bg-[#263141]"
+              <span class="grid h-11 w-11 place-items-center rounded-xl bg-primary-container"
                 ><Plus class="h-5 w-5" aria-hidden="true" /></span
               ><span class="font-black">プロバイダーを追加</span
               ><ChevronRight class="h-5 w-5" aria-hidden="true" />
@@ -912,10 +913,10 @@ const saveEditingApiKey = () => {
       </template>
       <template v-else>
         <div class="grid gap-5">
-          <article class="grid gap-4 rounded-2xl border border-[#30343a] bg-[#111418] p-5">
+          <article class="grid gap-4 rounded-2xl border border-border bg-transparent p-5">
             <div>
-              <h3 class="font-black text-[#f0f4f9]">Bitwarden</h3>
-              <p class="mt-1 text-sm text-[#9aa0a9]">
+              <h3 class="font-black text-fg">Bitwarden</h3>
+              <p class="mt-1 text-sm text-fg-muted">
                 Bitwarden Desktop の保管庫から認証情報を取得します。
               </p>
             </div>
@@ -938,11 +939,11 @@ const saveEditingApiKey = () => {
           <article
             v-for="manager in authManagers"
             :key="manager.id"
-            class="flex items-center justify-between gap-4 rounded-2xl border border-[#30343a] bg-[#111418] p-4"
+            class="flex items-center justify-between gap-4 rounded-2xl border border-border bg-transparent p-4"
           >
             <span class="grid gap-1">
-              <strong class="text-[#f0f4f9]">{{ manager.label }}</strong>
-              <small class="text-[#9aa0a9]">Bitwarden</small>
+              <strong class="text-fg">{{ manager.label }}</strong>
+              <small class="text-fg-muted">Bitwarden</small>
             </span>
             <button
               :class="ui.dangerButton"
@@ -975,12 +976,12 @@ const saveEditingApiKey = () => {
       >
         <dl class="grid gap-4 text-sm">
           <div class="grid gap-1">
-            <dt class="font-bold text-[#9aa0a9]">最終確認</dt>
-            <dd class="text-[#e3e3e9]">{{ availabilityCheckedDate(unavailableProfile.id) }}</dd>
+            <dt class="font-bold text-fg-muted">最終確認</dt>
+            <dd class="text-fg">{{ availabilityCheckedDate(unavailableProfile.id) }}</dd>
           </div>
           <div class="grid gap-1">
-            <dt class="font-bold text-[#9aa0a9]">詳細</dt>
-            <dd class="whitespace-pre-wrap break-words rounded-xl bg-[#111418] p-4 text-[#ffb4ab]">
+            <dt class="font-bold text-fg-muted">詳細</dt>
+            <dd class="whitespace-pre-wrap break-words rounded-xl bg-inset p-4 text-negative">
               {{ availabilityMessage(props.profileAvailability[unavailableProfile.id]) }}
             </dd>
           </div>
@@ -1014,7 +1015,7 @@ const saveEditingApiKey = () => {
         title="接続を削除しますか？"
         @close="profileToDelete = null"
       >
-        <p class="text-sm leading-6 text-[#c3c7cf]">
+        <p class="text-sm leading-6 text-fg-secondary">
           {{ profileToDelete.label }}
           を削除すると、この接続の認証情報も削除されます。この操作は元に戻せません。
         </p>

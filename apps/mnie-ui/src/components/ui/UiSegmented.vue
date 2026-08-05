@@ -18,16 +18,16 @@ const emit = defineEmits<{
 }>()
 
 const toneClass = (tone?: 'buy' | 'sell') => {
-  if (tone === 'buy') return 'text-[#003824]'
-  if (tone === 'sell') return 'text-[#690005]'
-  return 'text-[#d3e3fd]'
+  if (tone === 'buy') return 'text-on-positive'
+  if (tone === 'sell') return 'text-on-danger'
+  return 'text-primary-soft'
 }
 </script>
 
 <template>
   <LayoutGroup :id="groupId">
     <div
-      class="relative grid min-h-12 overflow-hidden rounded-full bg-[#111418] p-1 outline outline-1 outline-[#33383f]"
+      class="relative grid min-h-12 overflow-hidden rounded-full bg-inset p-1 outline outline-1 outline-border-subtle"
       :style="{ gridTemplateColumns: `repeat(${props.options.length}, minmax(0, 1fr))` }"
     >
       <button
@@ -35,8 +35,8 @@ const toneClass = (tone?: 'buy' | 'sell') => {
         :key="option.value"
         type="button"
         :class="[
-          'relative min-h-10 rounded-full text-sm font-bold transition hover:bg-[#22272e]',
-          'text-[#9aa0a9]',
+          'relative min-h-10 rounded-full text-sm font-bold transition hover:bg-hover',
+          'text-fg-muted',
           props.modelValue === option.value && toneClass(option.tone),
         ]"
         @click="emit('update:modelValue', option.value)"
@@ -49,9 +49,9 @@ const toneClass = (tone?: 'buy' | 'sell') => {
           :transition="uiMotion.trade.segmentedIndicator"
           class="pointer-events-none absolute inset-0 rounded-full"
           :class="[
-            option.tone === 'buy' && 'bg-[#40dba2]',
-            option.tone === 'sell' && 'bg-[#ffb4ab]',
-            !option.tone && 'bg-[#263141]',
+            option.tone === 'buy' && 'bg-positive',
+            option.tone === 'sell' && 'bg-danger',
+            !option.tone && 'bg-primary-container',
           ]"
         />
         <span class="relative z-10">{{ option.label }}</span>

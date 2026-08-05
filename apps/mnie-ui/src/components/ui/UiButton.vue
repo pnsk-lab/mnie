@@ -13,13 +13,11 @@ withDefaults(
 )
 
 const variantClass = {
-  primary:
-    'bg-[#a8c7fa] text-[#102033] shadow-sm shadow-black/20 hover:bg-[#d3e3fd] active:bg-[#c2d7f4]',
-  danger:
-    'bg-[#ffb4ab] text-[#690005] shadow-sm shadow-black/20 hover:bg-[#ffd8d3] active:bg-[#ffc9c2]',
+  primary: 'bg-primary text-on-primary hover:bg-primary-soft active:bg-primary-muted',
+  danger: 'bg-danger text-on-danger hover:bg-danger-hover active:bg-danger-active',
   ghost:
-    'border border-[#4a5058] bg-transparent text-[#d3e3fd] hover:bg-[#263141] active:bg-[#303b4d]',
-  plain: 'bg-transparent text-[#c3c7cf] hover:bg-[#22272e] hover:text-[#e3e3e9]',
+    'border border-border-strong bg-transparent text-primary-soft hover:bg-primary-container active:bg-primary-container-hover',
+  plain: 'bg-transparent text-fg-secondary hover:bg-hover hover:text-fg',
 }
 
 const sizeClass = {

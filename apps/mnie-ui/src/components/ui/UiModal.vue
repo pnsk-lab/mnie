@@ -26,7 +26,7 @@ const overlayTransition = uiMotion.modal.openExpressiveSpatial
 const sheetTransition = uiMotion.modal.sheetOpenExpressive
 
 const sheetClass = computed(() => [
-  'grid max-h-[calc(100dvh-2rem)] w-full gap-5 overflow-y-auto rounded-[28px] border border-[#30343a] bg-[#1b1f24] p-6 shadow-2xl shadow-black/35 outline-none',
+  'grid max-h-[calc(100dvh-2rem)] w-full gap-5 overflow-y-auto rounded-[28px] border border-border bg-surface p-6 shadow-2xl shadow-black/35 outline-none',
   props.size === 'lg' ? 'max-w-5xl' : 'max-w-[28rem]',
 ])
 
@@ -44,7 +44,7 @@ onUnmounted(() => window.removeEventListener('keydown', closeFromEscape))
 
 <template>
   <motion.div
-    class="fixed inset-0 z-30 grid place-items-center overflow-y-auto bg-[#101418]/75 p-4 backdrop-blur-sm"
+    class="fixed inset-0 z-30 grid place-items-center overflow-y-auto bg-overlay p-4 backdrop-blur-sm"
     :initial="{ opacity: 0 }"
     :animate="{ opacity: 1 }"
     :exit="{ opacity: 0 }"
@@ -63,11 +63,11 @@ onUnmounted(() => window.removeEventListener('keydown', closeFromEscape))
     >
       <header
         v-if="title || eyebrow || $slots.actions"
-        class="flex flex-wrap items-center justify-between gap-3 border-b border-[#33383f] pb-4"
+        class="flex flex-wrap items-center justify-between gap-3 border-b border-border-subtle pb-4"
       >
         <div class="grid min-w-0 gap-1">
-          <p v-if="eyebrow" class="text-xs font-black uppercase text-[#9aa0a9]">{{ eyebrow }}</p>
-          <h2 class="truncate text-xl font-black text-[#e3e3e9]">{{ title }}</h2>
+          <p v-if="eyebrow" class="text-xs font-black uppercase text-fg-muted">{{ eyebrow }}</p>
+          <h2 class="truncate text-xl font-black text-fg">{{ title }}</h2>
         </div>
         <div v-if="$slots.actions" class="flex flex-wrap gap-2">
           <slot name="actions" />

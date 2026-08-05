@@ -15,13 +15,13 @@ const meta = computed(() => pageMeta[props.activeTab])
   <header :class="[ui.topbar, activeTab === 'trade' && ui.tradeTopbar]">
     <div class="flex items-center gap-3">
       <span
-        class="grid h-11 w-11 place-items-center rounded-2xl bg-[#263141] text-[#d3e3fd]"
+        class="grid h-11 w-11 place-items-center rounded-2xl bg-primary-container text-primary"
         aria-hidden="true"
       >
         <component :is="meta.icon" class="h-5 w-5" :stroke-width="2.4" />
       </span>
       <div>
-        <h1 class="text-3xl font-black tracking-normal text-[#e3e3e9]">
+        <h1 class="text-3xl font-black tracking-normal text-fg">
           {{ meta.title }}
         </h1>
       </div>

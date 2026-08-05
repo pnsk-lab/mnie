@@ -272,11 +272,6 @@ const refreshAndMaybeConnect = async () => {
   await loadPortfolioOverview().catch(() => {})
 }
 
-const refreshPortfolio = async () => {
-  await loadStoredAssetValuations().catch(() => {})
-  await loadPortfolioOverview().catch(() => {})
-}
-
 const addSbiPasskeyAndConnect = async () => {
   await addSbiPasskey()
   tradeProfileId.value = selectedProfileId.value
@@ -398,16 +393,14 @@ onUnmounted(() => {
           :recent-orders="portfolioRecentOrders"
           :canceling-order-key="cancelingOrderKey"
           :data-loading="portfolioOverviewLoading"
-          :connected="true"
           :order-history-loaded="!portfolioOverviewLoading"
           :order-history-notice="portfolioOrderHistoryNotice"
-          @connect="refreshPortfolio"
           @open-position="openPortfolioPosition"
         />
 
         <div
           v-if="activeTab === 'trade' && !selectedProfile"
-          class="m-5 grid min-h-64 place-items-center rounded-2xl border border-[#30343a] bg-[#111418] p-8 text-[#9aa0a9]"
+          class="m-5 grid min-h-64 place-items-center rounded-2xl border border-border bg-transparent p-8 text-fg-muted"
         >
           取引口座を選択してください
         </div>
