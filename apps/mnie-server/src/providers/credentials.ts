@@ -5,6 +5,7 @@ import type {
   PayPaySecSession,
   PlaintextStoredWebAuthnCredential as PayPaySecPasskeyCredential,
 } from '@mnie/provider-paypay-sec'
+import type { VpassSession } from '@mnie/provider-vpass'
 
 export type SbiPasskeySource =
   | { kind: 'json'; credential: PlaintextStoredWebAuthnCredential }
@@ -59,6 +60,18 @@ export interface StoredStarbucksSecret {
   session?: StarbucksJpSessionData
 }
 
+export interface StoredVpassSecret {
+  loginId: string
+  password: string
+  idKind?: 'vpass' | 'fa'
+  /**
+   * Generated on first login and reused afterwards. It is part of the signed
+   * auth payload, so a fresh one on every login looks like a new device.
+   */
+  deviceId?: string
+  session?: VpassSession
+}
+
 export interface StoredBitwardenAuthManagerSecret {
   dataPath?: string
 }
@@ -70,3 +83,4 @@ export type StoredProfileSecret =
   | StoredPayPaySecSecret
   | StoredMobileSuicaSecret
   | StoredStarbucksSecret
+  | StoredVpassSecret

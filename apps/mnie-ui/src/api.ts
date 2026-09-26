@@ -542,6 +542,22 @@ export const savePayPayBankProfile = (payload: {
     credentials: payload,
   })
 
+export const saveVpassProfile = (payload: {
+  label: string
+  loginId: string
+  password: string
+  idKind?: 'vpass' | 'fa'
+}) =>
+  adminRequest<{ profile: AccountProfile }>('profiles.create', {
+    providerId: 'vpass',
+    label: payload.label,
+    credentials: {
+      loginId: payload.loginId,
+      password: payload.password,
+      idKind: payload.idKind ?? 'vpass',
+    },
+  })
+
 export const saveStarbucksProfile = (payload: {
   label: string
   username: string

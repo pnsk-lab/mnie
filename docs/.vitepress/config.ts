@@ -68,6 +68,10 @@ export default defineConfig({
               text: 'Nissay 401k',
               link: '/docs/providers/nissay-401k',
             },
+            {
+              text: 'VPass',
+              link: '/docs/providers/vpass',
+            },
           ],
         },
       ],

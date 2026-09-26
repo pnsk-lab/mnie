@@ -98,6 +98,11 @@ const {
   starbucksLabel,
   starbucksUsername,
   starbucksPassword,
+  vpassLabel,
+  vpassLoginId,
+  vpassPassword,
+  vpassIdKind,
+  addVpassProfile,
   refresh,
   forceProfileAvailability,
   addApiKey,
@@ -286,6 +291,12 @@ const addPayPaySecProfileAndConnect = async () => {
 
 const addStarbucksProfileAndRefresh = async () => {
   await addStarbucksProfile()
+  await loadStoredAssetValuations()
+  await loadPortfolioOverview()
+}
+
+const addVpassProfileAndRefresh = async () => {
+  await addVpassProfile()
   await loadStoredAssetValuations()
   await loadPortfolioOverview()
 }
@@ -515,6 +526,10 @@ onUnmounted(() => {
           v-model:starbucks-label="starbucksLabel"
           v-model:starbucks-username="starbucksUsername"
           v-model:starbucks-password="starbucksPassword"
+          v-model:vpass-label="vpassLabel"
+          v-model:vpass-login-id="vpassLoginId"
+          v-model:vpass-password="vpassPassword"
+          v-model:vpass-id-kind="vpassIdKind"
           :api-keys="apiKeys"
           :sbi-passkeys="sbiPasskeys"
           :auth-managers="authManagers"
@@ -539,6 +554,7 @@ onUnmounted(() => {
           @add-pay-pay-bank-profile="addPayPayBankProfile"
           @add-pay-pay-sec-profile="addPayPaySecProfileAndConnect"
           @add-starbucks-profile="addStarbucksProfileAndRefresh"
+          @add-vpass-profile="addVpassProfileAndRefresh"
           @finish-smbc-2fa="finishSmbc2faAndRefreshAvailability"
           @force-profile-availability="forceProfileAvailability"
           @connect="connect"

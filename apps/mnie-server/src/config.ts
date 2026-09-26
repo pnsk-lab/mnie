@@ -34,6 +34,11 @@ export interface ServerConfig {
   payPaySecBaseUrl?: string
   payPaySecPasskeyBffBaseUrl?: string
   payPaySecPasskeyOrigin?: string
+  vpassApiBaseUrl?: string
+  vpassWebBaseUrl?: string
+  vpassAppVersion?: string
+  vpassOsVersion?: string
+  vpassUserAgent?: string
 }
 
 const optionalUrl = (value: string | undefined) => {
@@ -82,5 +87,10 @@ export const loadConfig = (): ServerConfig => {
     payPaySecBaseUrl: optionalUrl(process.env.PAYPAY_SEC_BASE_URL),
     payPaySecPasskeyBffBaseUrl: optionalUrl(process.env.PAYPAY_SEC_PASSKEY_BFF_BASE_URL),
     payPaySecPasskeyOrigin: optionalUrl(process.env.PAYPAY_SEC_PASSKEY_ORIGIN),
+    vpassApiBaseUrl: optionalUrl(process.env.VPASS_API_BASE_URL),
+    vpassWebBaseUrl: optionalUrl(process.env.VPASS_WEB_BASE_URL),
+    vpassAppVersion: process.env.VPASS_APP_VERSION,
+    vpassOsVersion: process.env.VPASS_OS_VERSION,
+    vpassUserAgent: process.env.VPASS_USER_AGENT,
   }
 }

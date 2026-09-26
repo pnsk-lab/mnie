@@ -22,6 +22,13 @@ import {
   type SmbcDirectSession,
 } from '@mnie/provider-smbc-direct'
 import {
+  connect as connectVpass,
+  createProvider as createVpassProvider,
+  resume as resumeVpass,
+  VpassAuthError,
+  type VpassSession,
+} from '@mnie/provider-vpass'
+import {
   createStarbucksIoBlackboxRuntimeFromLogin,
   createStarbucksJpClient,
   createStarbucksProvider,
@@ -52,6 +59,7 @@ import type {
   StoredSbiPasskeySecret,
   StoredStarbucksSecret,
   StoredSmbcDirectSecret,
+  StoredVpassSecret,
 } from './credentials'
 import { openPayPaySec } from './paypay-sec'
 import { normalizePayPaySecCredential } from './paypay-sec-options'
@@ -218,6 +226,18 @@ export class ProviderRegistry {
         ],
       },
       {
+        id: 'vpass',
+        name: 'Vpass',
+        kind: 'other',
+        authentication: 'credentials',
+        defaultColor: '#00963c',
+        credentialFields: [
+          { name: 'loginId', kind: 'text', required: true, secret: true },
+          { name: 'password', kind: 'password', required: true, secret: true },
+          { name: 'idKind', kind: 'text', required: false, secret: false },
+        ],
+      },
+      {
         id: 'starbucks-jp',
         name: 'スターバックス',
         kind: 'other',
@@ -265,7 +285,9 @@ export class ProviderRegistry {
                 ? this.config.starbucksLoginOrigin
                 : providerId === 'paypay-sec'
                   ? this.config.payPaySecPasskeyOrigin
-                  : undefined
+                  : providerId === 'vpass'
+                    ? this.config.vpassWebBaseUrl
+                    : undefined
     if (!configured) throw new Error(`provider origin is not configured: ${providerId}`)
     return new URL(configured).origin
   }
@@ -343,6 +365,14 @@ export class ProviderRegistry {
         username: requiredCredential(credentials, 'username'),
         password: requiredCredential(credentials, 'password'),
       } satisfies StoredStarbucksSecret)
+    } else if (providerId === 'vpass') {
+      const idKind = optionalCredential(credentials.idKind) ?? 'vpass'
+      if (idKind !== 'vpass' && idKind !== 'fa') throw new Error('idKind must be vpass or fa')
+      await saveSecret(keyringAccount, {
+        loginId: requiredCredential(credentials, 'loginId'),
+        password: requiredCredential(credentials, 'password'),
+        idKind,
+      } satisfies StoredVpassSecret)
     } else {
       throw new Error(`provider profile creation is not registered: ${providerId}`)
     }
@@ -427,6 +457,70 @@ export class ProviderRegistry {
       }
     }
 
+    if (profile.provider === 'vpass') {
+      const secret = await readSecret<StoredVpassSecret>(profile.keyringAccount)
+      const apiBaseURL = this.config.vpassApiBaseUrl
+      const webBaseURL = this.config.vpassWebBaseUrl
+      const appVersion = this.config.vpassAppVersion
+      if (!apiBaseURL || !webBaseURL || !appVersion) {
+        throw new Error(
+          'VPASS_API_BASE_URL, VPASS_WEB_BASE_URL, and VPASS_APP_VERSION are required',
+        )
+      }
+      const savedDeviceId = secret.deviceId ?? secret.session?.deviceId
+      const base = {
+        apiBaseURL,
+        webBaseURL,
+        appVersion,
+        ...(this.config.vpassOsVersion ? { osVersion: this.config.vpassOsVersion } : {}),
+        ...(this.config.vpassUserAgent ? { userAgent: this.config.vpassUserAgent } : {}),
+        idKind: secret.idKind ?? ('vpass' as const),
+        // Spread rather than assigned: `resume` merges overrides last, so an
+        // explicit `deviceId: undefined` would discard the stored one and mint
+        // a new device on every login.
+        ...(savedDeviceId ? { deviceId: savedDeviceId } : {}),
+      }
+      const resumeOverrides = {
+        apiBaseURL,
+        webBaseURL,
+        appVersion,
+        ...(this.config.vpassOsVersion ? { osVersion: this.config.vpassOsVersion } : {}),
+        ...(this.config.vpassUserAgent ? { userAgent: this.config.vpassUserAgent } : {}),
+      }
+      // The saved token replaces the password, but it is minted fresh on every
+      // login, so a resume that fails has burned it and only the password can
+      // recover. Fall back rather than leaving the profile unusable.
+      const connected = await (async () => {
+        if (!options.forceLogin && secret.session?.token) {
+          try {
+            return await resumeVpass(secret.session as VpassSession, resumeOverrides)
+          } catch (cause) {
+            if (!(cause instanceof VpassAuthError)) throw cause
+          }
+        }
+        return connectVpass({ ...base, loginId: secret.loginId, password: secret.password })
+      })()
+      // Authentication rotates the token and may mint the first device UUID.
+      // Persist both before any later provider operation can fail.
+      await saveSecret(profile.keyringAccount, {
+        ...secret,
+        deviceId: connected.session.deviceId,
+        session: connected.session,
+      } satisfies StoredVpassSecret)
+      const vpassProvider = createVpassProvider(connected)
+      const provider = asProvider(vpassProvider)
+      return {
+        profile,
+        provider,
+        persist: async () =>
+          saveSecret(profile.keyringAccount, {
+            ...secret,
+            deviceId: connected.session.deviceId,
+            session: vpassProvider.exportSession() as VpassSession,
+          } satisfies StoredVpassSecret),
+        release: async () => {},
+      }
+    }
     if (profile.provider === 'paypay-bank') {
       const secret = await readSecret<StoredPayPayBankSecret>(profile.keyringAccount)
       const imported =
@@ -594,7 +688,9 @@ export class ProviderRegistry {
       let availability = await this.availabilityForProvider(open.provider)
       if (
         !availability.connection.ok &&
-        (profile.provider === 'paypay-bank' || profile.provider === 'starbucks-jp')
+        (profile.provider === 'paypay-bank' ||
+          profile.provider === 'starbucks-jp' ||
+          profile.provider === 'vpass')
       ) {
         const expired = open
         open = undefined
@@ -788,7 +884,9 @@ export class ProviderRegistry {
       const initial = await check()
       if (
         !initial.connection.ok &&
-        (profile.provider === 'paypay-bank' || profile.provider === 'starbucks-jp')
+        (profile.provider === 'paypay-bank' ||
+          profile.provider === 'starbucks-jp' ||
+          profile.provider === 'vpass')
       ) {
         return check(true)
       }
@@ -857,6 +955,9 @@ export class ProviderRegistry {
     }
     if (profile.provider === 'starbucks-jp') {
       return { from: from.toISOString(), to: to.toISOString(), kinds: ['transaction'] as const }
+    }
+    if (profile.provider === 'vpass') {
+      return { from: dashedDate(from), to: dashedDate(to), kinds: ['transaction'] as const }
     }
     return { kinds: ['transaction'] as const }
   }

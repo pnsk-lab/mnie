@@ -22,6 +22,7 @@ import {
   savePayPayBankProfile,
   savePayPaySecProfile,
   saveStarbucksProfile,
+  saveVpassProfile,
   updateApiKeySettings,
   updateAccountProfile,
   verifyLogin,
@@ -77,6 +78,10 @@ export const useAuthAdmin = () => {
   const starbucksLabel = ref('スターバックス')
   const starbucksUsername = ref('')
   const starbucksPassword = ref('')
+  const vpassLabel = ref('Vpass')
+  const vpassLoginId = ref('')
+  const vpassPassword = ref('')
+  const vpassIdKind = ref<'vpass' | 'fa'>('vpass')
 
   watch(payPayBankBranchNo, (value) => {
     const match = /^(\d{3})-(\d{1,7})$/.exec(value)
@@ -275,6 +280,11 @@ export const useAuthAdmin = () => {
     if (provider === 'starbucks-jp') {
       starbucksUsername.value = credential.username ?? ''
       starbucksPassword.value = credential.password ?? ''
+      return
+    }
+    if (provider === 'vpass') {
+      vpassLoginId.value = credential.username ?? ''
+      vpassPassword.value = credential.password ?? ''
     }
   }
 
@@ -346,6 +356,18 @@ export const useAuthAdmin = () => {
     await refresh()
   }
 
+  const addVpassProfile = async () => {
+    const { profile } = await saveVpassProfile({
+      label: vpassLabel.value,
+      loginId: vpassLoginId.value,
+      password: vpassPassword.value,
+      idKind: vpassIdKind.value,
+    })
+    selectedProfileId.value = profile.id
+    vpassPassword.value = ''
+    await refresh()
+  }
+
   return {
     status,
     apiKeys,
@@ -385,6 +407,11 @@ export const useAuthAdmin = () => {
     starbucksLabel,
     starbucksUsername,
     starbucksPassword,
+    vpassLabel,
+    vpassLoginId,
+    vpassPassword,
+    vpassIdKind,
+    addVpassProfile,
     refresh,
     forceProfileAvailability,
     addApiKey,
