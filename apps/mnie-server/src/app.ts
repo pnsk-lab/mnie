@@ -10,6 +10,7 @@ import { createOAuthServerProvider } from './security/oauth-provider'
 import { authenticateRequest } from './security/http-auth'
 import { createAuthRoutes } from './routes/auth'
 import { createOAuthRoutes } from './routes/oauth'
+import { createMcpRoutes } from './routes/mcp'
 import { createRpcWebSocket } from './rpc/ws'
 import { createProviderRegistry } from './providers/registry'
 import { AdminRpcService } from './rpc/admin'
@@ -65,6 +66,17 @@ export const createServerApp = (
     }),
   )
   app.get('/api/ws', rpcWebSocket.upgradeWebSocket)
+  for (const path of ['/api/mcp', '/mcp']) {
+    app.get(`/.well-known/oauth-protected-resource${path}`, (c) =>
+      c.json({
+        resource: new URL(path, config.origin).href,
+        authorization_servers: [new URL(config.origin).href],
+        scopes_supported: ['read', 'trade', 'reconcile'],
+        bearer_methods_supported: ['header'],
+      }),
+    )
+    app.route(path, createMcpRoutes(db, providers, adminRpc))
+  }
   app.route('/api/auth', createAuthRoutes())
   app.route('/api/oauth', createOAuthRoutes())
 

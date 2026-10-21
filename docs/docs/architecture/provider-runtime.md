@@ -18,8 +18,10 @@ describing its background refresh policy.
 - `profile.invoke` invokes one operation advertised by one profile.
 - `admin.invoke` manages local profiles, encrypted credentials, API keys, background jobs, and
   interactive authentication.
-- HTTP is limited to application authentication, OAuth endpoints, and the WebSocket upgrade.
-  Application data and administration do not have REST or MCP-over-HTTP endpoints.
+- HTTP exposes application authentication, OAuth endpoints, the WebSocket upgrade, and
+  stateless Streamable HTTP MCP at `/api/mcp` (also available at `/mcp`). MCP tools delegate
+  to the same RPC handler, including scopes and trade limits. Owner-only admin tools
+  are available only to owner sessions. There are no application REST endpoints.
 
 Credentials and resumable sessions are stored in the platform keyring. SQLite stores only profile
 metadata and the opaque keyring account identifier. The legacy `sbi_passkeys` table is read once by
