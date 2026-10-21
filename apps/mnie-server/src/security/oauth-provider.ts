@@ -50,13 +50,23 @@ export const createOAuthServerProvider = (db: Db, config: ServerConfig): OAuthSe
     return {
       getClient: async (clientId: string) => {
         const [row] = await db.select().from(oauthClients).where(eq(oauthClients.id, clientId))
-        return row?.client as OAuthClientInformationFull | undefined
+        const client = row?.client as OAuthClientInformationFull | undefined
+        if (!client || client.scope !== undefined) return client
+        // Apply the registration default to clients saved before scopes were recorded.
+        const registered = { ...client, scope: DEFAULT_SCOPES.join(' ') }
+        await db
+          .update(oauthClients)
+          .set({ client: registered as unknown as Record<string, unknown> })
+          .where(eq(oauthClients.id, clientId))
+        return registered
       },
       registerClient: async (
         client: Omit<OAuthClientInformationFull, 'client_id' | 'client_id_issued_at'>,
       ) => {
         const clientInfo = {
           ...client,
+          // Registration declares requestable scopes; owner consent grants access.
+          scope: client.scope === undefined ? DEFAULT_SCOPES.join(' ') : client.scope,
           client_id: randomToken(),
           client_id_issued_at: Math.floor(Date.now() / 1000),
         } satisfies OAuthClientInformationFull
