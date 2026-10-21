@@ -52,7 +52,7 @@ const server = Bun.serve({
     if (
       url.pathname.startsWith('/api/') ||
       url.pathname.startsWith('/.well-known/') ||
-      ['/authorize', '/token', '/register', '/revoke'].includes(url.pathname)
+      ['/mcp', '/authorize', '/token', '/register', '/revoke'].includes(url.pathname)
     ) {
       return app.fetch(request, { server })
     }
