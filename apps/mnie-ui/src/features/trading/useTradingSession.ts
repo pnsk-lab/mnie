@@ -1,3 +1,4 @@
+import { notify } from '../feedback/feedback'
 import { computed, onUnmounted, ref, watch, type Ref } from 'vue'
 import {
   createRpcSocket,
@@ -256,6 +257,7 @@ export const useTradingSession = (
   const storedTotalAssetValue = ref<number | null>(null)
   const storedBrokerageHoldingsValue = ref(0)
   const storedBrokerageCashValue = ref(0)
+  const chartLoading = ref(false)
   const quoteLoading = ref(false)
   const assetValuations = ref<AssetValuation[]>([])
   const assetHistory = ref<
@@ -327,6 +329,7 @@ export const useTradingSession = (
 
   const reportDataError = (message: string, cause?: unknown) => {
     if (isExpectedRpcInterruption(cause)) return
+    notify(message)
     if (cause) {
       console.error(`[mnie-ui] データ取得エラー: ${message}`, cause)
       return
@@ -591,7 +594,14 @@ export const useTradingSession = (
     orderInputMode.value === 'amount' ? amountOrderKey.value : cashOrderKey.value,
   )
   const canRequestCashEstimate = computed(() => {
-    if (!connected.value || !selectedStock.value.code || orderQuantity.value <= 0) return false
+    if (
+      !connected.value ||
+      dataLoading.value ||
+      !providerAccountId.value ||
+      !selectedStock.value.code ||
+      orderQuantity.value <= 0
+    )
+      return false
     if (!resolvedCashOrderMarket.value) return false
     if (cashOrderKind.value === 's' && selectedStockIsUs.value) return false
     if (!sKabuAvailable.value) return false
@@ -714,6 +724,10 @@ export const useTradingSession = (
     portfolioOrderHistoryNotice.value = ''
     try {
       const overview = await getPortfolioOverview()
+      if (overview.errors.length)
+        reportDataError(
+          overview.errors.map((item) => `${item.providerId}: ${item.message}`).join('; '),
+        )
       portfolioOverview.value = overview
       portfolioPositions.value = overview.components.flatMap((component) =>
         (component.positions ?? []).flatMap((item) => {
@@ -1250,8 +1264,10 @@ export const useTradingSession = (
       }
       rpcError.providerCode = response.error.data?.providerCode
       pending.reject(rpcError)
-    } else {
+    } else if ('result' in response) {
       pending.resolve(response.result)
+    } else {
+      pending.reject(new Error('サーバーからの応答が不正です'))
     }
   }
 
@@ -1278,9 +1294,23 @@ export const useTradingSession = (
     const id = call(method, params)
     if (!id) throw new Error('証券口座に接続されていません')
     return new Promise<T>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        rpcPending.delete(id)
+        reject(
+          new Error(
+            '応答がタイムアウトしました。操作が反映されているか確認してから再試行してください。',
+          ),
+        )
+      }, 60_000)
       rpcPending.set(id, {
-        resolve: (value) => resolve(value as T),
-        reject,
+        resolve: (value) => {
+          window.clearTimeout(timeout)
+          resolve(value as T)
+        },
+        reject: (cause) => {
+          window.clearTimeout(timeout)
+          reject(cause)
+        },
       })
     })
   }
@@ -1464,6 +1494,15 @@ export const useTradingSession = (
             ? rpcCallOptional<unknown[]>('market.index.major', undefined, 15_000)
             : Promise.resolve(undefined),
         ])
+      for (const [result, message] of [
+        [accountsResult, '口座情報の取得に失敗しました'],
+        [positionsResult, '保有銘柄の取得に失敗しました'],
+        [balancesResult, '残高の取得に失敗しました'],
+        [indexesResult, '市場指数の取得に失敗しました'],
+      ] as const) {
+        if (result.status === 'rejected')
+          reportDataError(errorMessage(result.reason, message), result.reason)
+      }
       if (accountsResult.status === 'fulfilled' && accountsResult.value) {
         providerAccountId.value = textValue(asRecord(asArray(accountsResult.value.items)[0]).id)
       }
@@ -1475,10 +1514,13 @@ export const useTradingSession = (
           : []
       const positionList =
         positionsResult.status === 'fulfilled' && positionsResult.value ? positionsResult.value : {}
-      const nextPositions = asArray(positionList.items)
-        .map(positionFromApi)
-        .filter((position): position is Position => Boolean(position))
-      positions.value = nextPositions
+      const nextPositions =
+        positionsResult.status === 'rejected'
+          ? positions.value
+          : asArray(positionList.items)
+              .map(positionFromApi)
+              .filter((position): position is Position => Boolean(position))
+      if (positionsResult.status === 'fulfilled') positions.value = nextPositions
       mergeStocks(nextPositions.map(stockFromPosition))
       await enrichPositionStocks(nextPositions)
       await loadSelectedStockDetail()
@@ -1520,6 +1562,11 @@ export const useTradingSession = (
         buyingPower.value = numberValue(asRecord(asRecord(balance?.amount).money).value)
       }
       if (orderHistoryResult[0]?.status === 'rejected') {
+        orderHistoryLoaded.value = true
+        orderHistoryNotice.value = errorMessage(
+          orderHistoryResult[0].reason,
+          '取引履歴の取得に失敗しました',
+        )
         reportDataError(
           errorMessage(orderHistoryResult[0].reason, '取引履歴の取得に失敗しました'),
           orderHistoryResult[0].reason,
@@ -1546,6 +1593,7 @@ export const useTradingSession = (
     providerOrderRules.value = asRecord(operation.orderRules)
   }
 
+  let connectionTask: Promise<void> | undefined
   const connect = () => {
     // Portfolio/history refresh spans every profile and may require unrelated
     // interactions such as SMBC 2FA. A trading connection must only touch the
@@ -1566,7 +1614,7 @@ export const useTradingSession = (
       connectingProfileId === selectedProfile.id &&
       (ws.value?.readyState === WebSocket.CONNECTING || ws.value?.readyState === WebSocket.OPEN)
     ) {
-      return
+      return connectionTask
     }
 
     const previousSocket = ws.value
@@ -1579,6 +1627,7 @@ export const useTradingSession = (
     countryFilter.value = 'all'
     marketFilter.value = 'all'
     showSearch.value = false
+    providerAccountId.value = ''
     positions.value = []
     orders.value = []
     quantityInput.value = ''
@@ -1605,8 +1654,19 @@ export const useTradingSession = (
     smbcBalance.value = null
     dataLoading.value = true
     connectingProfileId = selectedProfile.id
+    let completeConnection: () => void = () => {}
+    connectionTask = new Promise<void>((resolve) => {
+      completeConnection = resolve
+    })
     const socket = createRpcSocket()
+    const connectionTimeout = window.setTimeout(() => {
+      if (ws.value !== socket) return
+      reportDataError('接続がタイムアウトしました。再接続してください。')
+      socket.close()
+    }, 30_000)
     socket.addEventListener('open', async () => {
+      window.clearTimeout(connectionTimeout)
+      if (ws.value !== socket) return
       try {
         const connection = (await rpcCall('profile.connect', {
           profileId: selectedProfile.id,
@@ -1614,6 +1674,7 @@ export const useTradingSession = (
           status: 'connected' | 'interaction-required'
           interaction?: { id: string; kind: string; url?: string; qrUrl?: string }
         }
+        if (ws.value !== socket) return
         if (connection.status === 'interaction-required') {
           if (connection.interaction?.kind !== 'qr' || !connection.interaction.qrUrl) {
             throw new Error('未対応の接続操作が要求されました')
@@ -1631,11 +1692,14 @@ export const useTradingSession = (
         connectedProfileId.value = selectedProfile.id
         await loadTradingData()
       } catch (cause) {
+        if (ws.value !== socket) return
         profileConnected.value = false
         connectedProfileId.value = ''
         reportDataError(errorMessage(cause, '接続に失敗しました'), cause)
         socket.close()
       } finally {
+        completeConnection()
+        if (ws.value !== socket) return
         if (connectingProfileId === selectedProfile.id) connectingProfileId = ''
         dataLoading.value = false
       }
@@ -1646,11 +1710,15 @@ export const useTradingSession = (
       reportDataError('証券口座への接続に失敗しました')
     })
     socket.addEventListener('close', () => {
+      window.clearTimeout(connectionTimeout)
+      completeConnection()
       if (ws.value !== socket) return
+      reportDataError('口座との接続が切れました。口座を選び直して再接続してください。')
       rejectPendingRpc(new Error('RPC socket closed'))
       boardPollingSubscriptionId = ''
       chartHistoryRequestId += 1
       historicalPricePoints.value = []
+      chartLoading.value = false
       chartNotice.value = null
       realtimePricePoints.value = []
       pricePolling.value = false
@@ -1662,6 +1730,7 @@ export const useTradingSession = (
       dataLoading.value = false
     })
     ws.value = socket
+    return connectionTask
   }
 
   const finishSmbc2fa = async () => {
@@ -1750,6 +1819,8 @@ export const useTradingSession = (
   const loadSelectedStockChart = async () => {
     historicalPricePoints.value = []
     chartNotice.value = null
+    const requestId = ++chartHistoryRequestId
+    chartLoading.value = false
     const stock = selectedStock.value
     if (!connected.value || !stock.code) return
     if (!providerOperations.value.has('market.issue.chart')) {
@@ -1760,7 +1831,7 @@ export const useTradingSession = (
       return
     }
 
-    const requestId = ++chartHistoryRequestId
+    chartLoading.value = true
     try {
       if (!stock.market) {
         const domesticMarkets: CashOrderMarket[] = ['XTKS', 'XNGO', 'XFKA', 'XSAP']
@@ -1828,6 +1899,8 @@ export const useTradingSession = (
         chartNotice.value = { title: '価格履歴の取得に失敗しました', detail: message }
         reportDataError(message, cause)
       }
+    } finally {
+      if (requestId === chartHistoryRequestId) chartLoading.value = false
     }
   }
 
@@ -1841,6 +1914,7 @@ export const useTradingSession = (
       const resultStocks = asArray(result.items)
         .map(stockFromInvestmentInstrument)
         .filter((stock): stock is Stock => Boolean(stock))
+      if (query.trim() !== searchQuery.value.trim()) return
       mergeStocks(resultStocks)
       await enrichStocksWithInstrumentDetails(
         resultStocks,
@@ -1858,6 +1932,14 @@ export const useTradingSession = (
         rpcCall<RecordLike>('market.issue.suggest', { query, market, limit: 12 }),
       ),
     )
+    if (query.trim() !== searchQuery.value.trim()) return
+    const failures = results.filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    )
+    if (failures.length)
+      reportDataError(
+        failures.map((result) => errorMessage(result.reason, '銘柄検索に失敗しました')).join('; '),
+      )
     const issues = fulfilledValues(results)
       .flatMap((result) => asArray(result.issues))
       .map(issueFrom)
@@ -1871,6 +1953,11 @@ export const useTradingSession = (
         }).then((board) => stockFromBoard(board, issue)),
       ),
     )
+    if (query.trim() !== searchQuery.value.trim()) return
+    const boardFailures = boards.filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    )
+    if (boardFailures.length) reportDataError('検索結果の一部の価格を取得できませんでした')
     mergeStocks(
       boards
         .filter((result): result is PromiseFulfilledResult<Stock> => result.status === 'fulfilled')
@@ -1884,59 +1971,72 @@ export const useTradingSession = (
   }
 
   const estimateCashOrder = async () => {
-    if (!providerOperations.value.has('investments.orders.preview')) {
-      throw new Error('この provider は注文見積に未対応です')
-    }
-    if (!canRequestOrderEstimate.value) return
-    lastCashEstimate.value = null
-    lastCashEstimateKey.value = ''
-    pendingCashEstimateId.value = null
+    if (orderBusy.value) return
+    const requestKey = activeOrderKey.value
+    orderBusy.value = true
     orderError.value = ''
-    orderNotice.value = ''
-    if (orderInputMode.value === 'amount') {
-      const adapter = tradeAdapter.value
-      if (!adapter.buildPreviewRequest || !adapter.normalizePreview) {
-        throw new Error('この provider は金額指定注文の変換に未対応です')
+    try {
+      if (!providerOperations.value.has('investments.orders.preview')) {
+        throw new Error('この provider は注文見積に未対応です')
       }
-      orderBusy.value = true
-      try {
-        const draft = amountOrderDraft()
-        const preview = await rpcCall<unknown>(
-          'investments.orders.preview',
-          adapter.buildPreviewRequest(draft),
-        )
-        lastCashEstimate.value = adapter.normalizePreview(preview, draft)
+      if (!canRequestOrderEstimate.value) return
+      lastCashEstimate.value = null
+      lastCashEstimateKey.value = ''
+      pendingCashEstimateId.value = null
+      orderError.value = ''
+      orderNotice.value = ''
+      if (orderInputMode.value === 'amount') {
+        const adapter = tradeAdapter.value
+        if (!adapter.buildPreviewRequest || !adapter.normalizePreview) {
+          throw new Error('この provider は金額指定注文の変換に未対応です')
+        }
+        try {
+          const draft = amountOrderDraft()
+          const preview = await rpcCall<unknown>(
+            'investments.orders.preview',
+            adapter.buildPreviewRequest(draft),
+          )
+          if (requestKey !== activeOrderKey.value)
+            throw new Error('入力が変更されました。再度プレビューしてください。')
+          lastCashEstimate.value = adapter.normalizePreview(preview, draft)
+          lastCashEstimateKey.value = activeOrderKey.value
+          showEstimateDialog.value = true
+        } catch (cause) {
+          orderError.value = errorMessage(cause, '注文プレビューに失敗しました')
+          reportDataError(orderError.value, cause)
+        }
+        return
+      }
+      const preview = asRecord(
+        await rpcCall<unknown>('investments.orders.preview', commonCashOrderParams()),
+      )
+      if (requestKey !== activeOrderKey.value)
+        throw new Error('入力が変更されました。再度プレビューしてください。')
+      const normalizedPreview: OrderPreview = {
+        issue: { code: selectedStock.value.code, market: selectedStock.value.market },
+        side: tradeSide.value,
+        quantity: orderQuantity.value,
+        price: {
+          value: orderPrice.value || null,
+          text: orderPrice.value ? String(orderPrice.value) : '成行',
+          currency: selectedStockIsUs.value ? 'USD' : 'JPY',
+        },
+        warnings: asArray(preview.warnings)
+          .map((warning) => textValue(warning))
+          .filter(Boolean),
+        confirmationId: textValue(preview.confirmationToken) || undefined,
+      }
+      if (!isOrderPreview(normalizedPreview)) throw new Error('注文見積の応答が不正です')
+      if (isOrderPreview(normalizedPreview)) {
+        lastCashEstimate.value = normalizedPreview
         lastCashEstimateKey.value = activeOrderKey.value
         showEstimateDialog.value = true
-      } catch (cause) {
-        orderError.value = errorMessage(cause, '注文プレビューに失敗しました')
-        reportDataError(orderError.value, cause)
-      } finally {
-        orderBusy.value = false
       }
-      return
-    }
-    const preview = asRecord(
-      await rpcCall<unknown>('investments.orders.preview', commonCashOrderParams()),
-    )
-    const normalizedPreview: OrderPreview = {
-      issue: { code: selectedStock.value.code, market: selectedStock.value.market },
-      side: tradeSide.value,
-      quantity: orderQuantity.value,
-      price: {
-        value: orderPrice.value || null,
-        text: orderPrice.value ? String(orderPrice.value) : '成行',
-        currency: selectedStockIsUs.value ? 'USD' : 'JPY',
-      },
-      warnings: asArray(preview.warnings)
-        .map((warning) => textValue(warning))
-        .filter(Boolean),
-      confirmationId: textValue(preview.confirmationToken) || undefined,
-    }
-    if (isOrderPreview(normalizedPreview)) {
-      lastCashEstimate.value = normalizedPreview
-      lastCashEstimateKey.value = activeOrderKey.value
-      showEstimateDialog.value = true
+    } catch (cause) {
+      orderError.value = errorMessage(cause, '注文処理に失敗しました')
+      reportDataError(orderError.value, cause)
+    } finally {
+      orderBusy.value = false
     }
   }
 
@@ -2012,7 +2112,12 @@ export const useTradingSession = (
       return
     }
     const requestId = ++cashPreOrderRequestId
-    if (!connected.value || !selectedStock.value.code || !resolvedCashOrderMarket.value) {
+    if (
+      !connected.value ||
+      !selectedStock.value.code ||
+      !resolvedCashOrderMarket.value ||
+      (orderInputMode.value === 'quantity' && !providerAccountId.value)
+    ) {
       cashPreOrder.value = null
       return
     }
@@ -2067,78 +2172,91 @@ export const useTradingSession = (
   }
 
   const placeCashOrder = async () => {
-    if (!providerOperations.value.has('investments.orders.create')) {
-      throw new Error('この provider は注文実行に未対応です')
-    }
-    if (!canPlaceCashOrder.value || !lastCashEstimate.value) return
-    if (orderInputMode.value === 'amount') {
-      const adapter = tradeAdapter.value
-      const confirmationToken = lastCashEstimate.value.confirmationId
-      if (!confirmationToken || !adapter.buildCreateRequest) return
-      orderBusy.value = true
-      orderError.value = ''
-      orderNotice.value = ''
+    if (orderBusy.value || !canPlaceCashOrder.value || !lastCashEstimate.value) return
+    orderBusy.value = true
+    orderError.value = ''
+    try {
+      if (!providerOperations.value.has('investments.orders.create')) {
+        throw new Error('この provider は注文実行に未対応です')
+      }
+      if (orderInputMode.value === 'amount') {
+        const adapter = tradeAdapter.value
+        const confirmationToken = lastCashEstimate.value.confirmationId
+        if (!confirmationToken || !adapter.buildCreateRequest) return
+        orderError.value = ''
+        orderNotice.value = ''
+        lastCashEstimateKey.value = ''
+        showEstimateDialog.value = false
+        try {
+          const receipt = asRecord(
+            await rpcCall<unknown>(
+              'investments.orders.create',
+              adapter.buildCreateRequest(confirmationToken),
+            ),
+          )
+          orderNotice.value = textValue(receipt.message, '注文を受け付けました。')
+          showOrderDialog.value = false
+          lastCashEstimate.value = null
+          amountInput.value = ''
+          await loadTradingData()
+        } catch (cause) {
+          const providerCode = (cause as Error & { providerCode?: string })?.providerCode
+          orderError.value = adapter.errorMessage
+            ? adapter.errorMessage(providerCode, errorMessage(cause, '注文確定に失敗しました'))
+            : errorMessage(cause, '注文確定に失敗しました')
+          reportDataError(orderError.value, cause)
+          await loadTradingData().catch((cause) =>
+            reportDataError(errorMessage(cause, '取引情報の再取得に失敗しました'), cause),
+          )
+        }
+        return
+      }
+      const confirmationToken = lastCashEstimate.value!.confirmationId
+      lastCashEstimateKey.value = ''
+      const receipt = await rpcCall<RecordLike>('investments.orders.create', {
+        ...commonCashOrderParams(),
+        confirmationToken,
+        allowTransaction: true,
+      })
+      orders.value = [
+        {
+          id: textValue(receipt.id, `ord-${Date.now()}`),
+          code: selectedStock.value.code,
+          date: textValue(receipt.orderedAt, new Date().toLocaleString('ja-JP')),
+          stock: selectedStock.value.name,
+          market: selectedStock.value.market,
+          side: tradeSide.value,
+          kind: orderKind.value,
+          quantity: orderQuantity.value,
+          price: orderPrice.value,
+          status: '注文中',
+        },
+        ...orders.value,
+      ]
+      showOrderDialog.value = false
       lastCashEstimate.value = null
       lastCashEstimateKey.value = ''
-      showEstimateDialog.value = false
-      showOrderDialog.value = false
-      try {
-        const receipt = asRecord(
-          await rpcCall<unknown>(
-            'investments.orders.create',
-            adapter.buildCreateRequest(confirmationToken),
-          ),
-        )
-        orderNotice.value = textValue(receipt.message, '注文を受け付けました。')
-        amountInput.value = ''
-        await loadTradingData()
-      } catch (cause) {
-        const providerCode = (cause as Error & { providerCode?: string })?.providerCode
-        orderError.value = adapter.errorMessage
-          ? adapter.errorMessage(providerCode, errorMessage(cause, '注文確定に失敗しました'))
-          : errorMessage(cause, '注文確定に失敗しました')
-        reportDataError(orderError.value, cause)
-        await loadTradingData().catch(() => {})
-      } finally {
-        orderBusy.value = false
-      }
-      return
+      orderNotice.value = '注文を受け付けました。'
+      await loadTradingData()
+    } catch (cause) {
+      orderError.value = errorMessage(cause, '注文処理に失敗しました')
+      reportDataError(orderError.value, cause)
+    } finally {
+      orderBusy.value = false
     }
-    const receipt = await rpcCall<RecordLike>('investments.orders.create', {
-      ...commonCashOrderParams(),
-      confirmationToken: lastCashEstimate.value.confirmationId,
-      allowTransaction: true,
-    })
-    orders.value = [
-      {
-        id: textValue(receipt.id, `ord-${Date.now()}`),
-        code: selectedStock.value.code,
-        date: textValue(receipt.orderedAt, new Date().toLocaleString('ja-JP')),
-        stock: selectedStock.value.name,
-        market: selectedStock.value.market,
-        side: tradeSide.value,
-        kind: orderKind.value,
-        quantity: orderQuantity.value,
-        price: orderPrice.value,
-        status: '注文中',
-      },
-      ...orders.value,
-    ]
-    showOrderDialog.value = false
-    await loadTradingData()
   }
 
   const cancelOrder = async (order: OrderRow) => {
     if (!providerOperations.value.has('investments.orders.cancel')) {
       reportDataError('この provider は注文取消に未対応です')
-      return
+      return false
     }
     if (order.cancelable === false) {
       reportDataError('この注文は現在取り消せません')
-      return
+      return false
     }
     const key = orderHistoryKey(order)
-    if (cancelingOrderKey.value) return
+    if (cancelingOrderKey.value) return false
     cancelingOrderKey.value = key
     try {
       await rpcCall('investments.orders.cancel', {
@@ -2148,8 +2266,10 @@ export const useTradingSession = (
       })
       order.status = '取消済'
       await loadTradingData()
+      return true
     } catch (cause) {
       reportDataError(errorMessage(cause, '注文取消に失敗しました'), cause)
+      return false
     } finally {
       cancelingOrderKey.value = ''
     }
@@ -2380,6 +2500,7 @@ export const useTradingSession = (
       () => selectedStock.value.code,
       () => selectedStock.value.market,
       resolvedCashOrderMarket,
+      providerAccountId,
       tradeSide,
       orderKind,
       cashOrderAccountType,
@@ -2392,6 +2513,7 @@ export const useTradingSession = (
 
   watch(searchQuery, (query) => {
     clearTimeout(searchTimer)
+    const requestId = ++searchRequestId
     const trimmed = query.trim()
     if (trimmed.length < 2 || !connected.value) {
       searchLoading.value = false
@@ -2399,11 +2521,11 @@ export const useTradingSession = (
     }
     searchLoading.value = true
     searchTimer = setTimeout(async () => {
-      const requestId = ++searchRequestId
       try {
         await suggestIssues(query)
       } catch (cause) {
-        reportDataError(errorMessage(cause, '銘柄検索に失敗しました'), cause)
+        if (requestId === searchRequestId)
+          reportDataError(errorMessage(cause, '銘柄検索に失敗しました'), cause)
       } finally {
         if (requestId === searchRequestId) {
           searchLoading.value = false
@@ -2420,6 +2542,15 @@ export const useTradingSession = (
     },
     { immediate: true },
   )
+
+  onUnmounted(() => {
+    clearTimeout(searchTimer)
+    stopBoardPolling()
+    const socket = ws.value
+    ws.value = null
+    socket?.close()
+    rejectPendingRpc(new Error('RPC socket closed'))
+  })
 
   return {
     smbcQrUrl,
@@ -2462,6 +2593,7 @@ export const useTradingSession = (
     orderAmountIncrement,
     selectedHolding,
     chartAvailable,
+    chartLoading,
     quoteLoading,
     searchQuotesAvailable,
     previewExpired,

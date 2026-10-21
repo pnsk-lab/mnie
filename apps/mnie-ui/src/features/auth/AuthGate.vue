@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Spinner from '../../components/ui/Spinner.vue'
 import { LogIn, UserPlus } from 'lucide-vue-next'
 import type { AuthStatus } from '../../api'
 import { ui } from '../../styles/ui'
@@ -37,9 +38,11 @@ const emit = defineEmits<{
         :class="ui.primaryButton"
         type="button"
         :disabled="authBusy"
+        :aria-busy="authBusy"
         @click="emit('login')"
       >
-        <LogIn class="h-4 w-4" aria-hidden="true" />
+        <Spinner v-if="authBusy" size="sm" aria-hidden="true" />
+        <LogIn v-else class="h-4 w-4" aria-hidden="true" />
         ログイン
       </button>
       <button
@@ -47,9 +50,11 @@ const emit = defineEmits<{
         :class="ui.primaryButton"
         type="button"
         :disabled="authBusy"
+        :aria-busy="authBusy"
         @click="emit('setup')"
       >
-        <UserPlus class="h-4 w-4" aria-hidden="true" />
+        <Spinner v-if="authBusy" size="sm" aria-hidden="true" />
+        <UserPlus v-else class="h-4 w-4" aria-hidden="true" />
         登録
       </button>
     </article>

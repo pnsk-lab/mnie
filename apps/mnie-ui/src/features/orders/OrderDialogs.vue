@@ -19,6 +19,8 @@ import type {
 import { currencyForMarket } from '../../utils/format'
 
 defineProps<{
+  busy: boolean
+  error: string
   estimate: OrderPreview | null
   showEstimate: boolean
   showOrder: boolean
@@ -89,6 +91,7 @@ const accountTypeLabel = (type: CashOrderAccountType) =>
       key="estimate-dialog"
       eyebrow="見積"
       :title="stockName"
+      @close="emit('closeEstimate')"
     >
       <dl :class="ui.confirmList">
         <div v-if="orderInputMode === 'amount'" :class="ui.confirmRow">
@@ -184,12 +187,13 @@ const accountTypeLabel = (type: CashOrderAccountType) =>
       >
         有効期限が切れました。再度プレビューしてください。
       </p>
+      <p v-if="error" class="text-sm text-negative" role="alert">{{ error }}</p>
       <div :class="ui.actions">
         <UiButton variant="ghost" @click="emit('closeEstimate')">
           <ArrowLeft class="h-4 w-4" aria-hidden="true" />
           戻る
         </UiButton>
-        <UiButton :disabled="orderInputMode === 'amount' && !canConfirm" @click="emit('proceed')">
+        <UiButton :disabled="busy || !canConfirm" @click="emit('proceed')">
           <ShieldCheck class="h-4 w-4" aria-hidden="true" />
           注文確認へ
         </UiButton>
@@ -198,7 +202,15 @@ const accountTypeLabel = (type: CashOrderAccountType) =>
   </AnimatePresence>
 
   <AnimatePresence>
-    <UiModal v-if="showOrder" key="order-dialog" eyebrow="注文確認" :title="stockName">
+    <UiModal
+      v-if="showOrder"
+      key="order-dialog"
+      eyebrow="注文確認"
+      :title="stockName"
+      :close-on-backdrop="!busy"
+      :close-on-escape="!busy"
+      @close="emit('closeOrder')"
+    >
       <dl :class="ui.confirmList">
         <div v-if="orderInputMode === 'amount'" :class="ui.confirmRow">
           <dt>取引口座</dt>
@@ -271,14 +283,16 @@ const accountTypeLabel = (type: CashOrderAccountType) =>
           </dd>
         </div>
       </dl>
+      <p v-if="error" class="text-sm text-negative" role="alert">{{ error }}</p>
       <div :class="ui.actions">
-        <UiButton variant="ghost" @click="emit('closeOrder')">
+        <UiButton variant="ghost" :disabled="busy" @click="emit('closeOrder')">
           <ArrowLeft class="h-4 w-4" aria-hidden="true" />
           戻る
         </UiButton>
         <UiButton
           variant="danger"
-          :disabled="orderInputMode === 'amount' && !canConfirm"
+          :loading="busy"
+          :disabled="busy || !canConfirm"
           @click="emit('place')"
         >
           <Send class="h-4 w-4" aria-hidden="true" />

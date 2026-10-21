@@ -1,12 +1,16 @@
 <script setup lang="ts">
+import { ref } from 'vue'
+import AsyncButton from './ui/AsyncButton.vue'
 import type { AuthManagerConfig } from '../api'
 import UiModal from './ui/UiModal.vue'
 import { ui } from '../styles/ui'
 
 defineProps<{
+  fill: () => Promise<void>
   authManagers: AuthManagerConfig[]
 }>()
 
+const busy = ref(false)
 const selectedAuthManagerId = defineModel<string>('selectedAuthManagerId', { required: true })
 const authManagerMasterPassword = defineModel<string>('authManagerMasterPassword', {
   required: true,
@@ -14,12 +18,16 @@ const authManagerMasterPassword = defineModel<string>('authManagerMasterPassword
 
 const emit = defineEmits<{
   close: []
-  fill: []
 }>()
 </script>
 
 <template>
-  <UiModal title="" @close="emit('close')">
+  <UiModal
+    :close-on-backdrop="!busy"
+    :close-on-escape="!busy"
+    title="認証情報を読み込む"
+    @close="emit('close')"
+  >
     <div class="grid gap-3">
       <label :class="ui.label"
         >Auth Manager<select v-model="selectedAuthManagerId" :class="ui.input">
@@ -37,9 +45,9 @@ const emit = defineEmits<{
           autocomplete="off"
       /></label>
       <div class="flex justify-end">
-        <button :class="ui.ghostButton" type="button" @click="emit('fill')">
+        <AsyncButton :class="ui.primaryButton" :action="fill" @busy-change="busy = $event">
           Auth Manager から読み込む
-        </button>
+        </AsyncButton>
       </div>
     </div>
   </UiModal>

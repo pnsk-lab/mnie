@@ -81,9 +81,11 @@ defineProps<
     }>
     selectedProfileId: string
     profileName: string
+    chartLoading: boolean
     orderBusy: boolean
     orderNotice: string
     orderError: string
+    dataLoading: boolean
     connected: boolean
     orderQuantity: number
     orderAmount: number
@@ -158,6 +160,7 @@ const tabContentTransition = uiMotion.trade.tabContentFade
 const advancedTransition = uiMotion.trade.advancedOptions
 
 const emit = defineEmits<{
+  reconnect: []
   openSearch: []
   selectStock: [stock: Stock]
   selectProfile: [profileId: string]
@@ -168,6 +171,20 @@ const emit = defineEmits<{
 </script>
 
 <template>
+  <div
+    v-if="dataLoading || !connected"
+    class="mb-4 flex items-center justify-between gap-3 rounded-xl border border-border p-3 text-sm"
+    role="status"
+  >
+    <span class="inline-flex items-center gap-2"
+      ><Spinner v-if="dataLoading" size="sm" />{{
+        dataLoading ? '口座情報を読み込み中' : '口座に接続されていません'
+      }}</span
+    >
+    <UiButton v-if="!dataLoading" variant="ghost" size="sm" @click="emit('reconnect')"
+      >再接続</UiButton
+    >
+  </div>
   <section :class="ui.tradeLayout">
     <div :class="ui.centerStack">
       <article :class="ui.stockMetadataPanel">
@@ -179,6 +196,7 @@ const emit = defineEmits<{
             <span class="sr-only">取引口座を選択</span>
             <select
               :value="selectedProfileId"
+              :disabled="orderBusy"
               class="h-9 max-w-full cursor-pointer appearance-none rounded-full border border-border bg-inset py-1 pr-9 pl-4 text-xs font-bold text-primary-soft outline-none transition hover:border-border-strong focus:border-primary-focus focus:ring-2 focus:ring-primary-focus/20 sm:min-w-64"
               @change="emit('selectProfile', ($event.target as HTMLSelectElement).value)"
             >
@@ -205,9 +223,7 @@ const emit = defineEmits<{
               <template v-if="hasQuote(selectedStock)">{{
                 currencyForMarket(selectedStock.price, selectedStock.market)
               }}</template>
-              <template v-else-if="orderInputMode === 'amount' && !quoteLoading">
-                データなし
-              </template>
+              <template v-else-if="!quoteLoading && !dataLoading"> データなし </template>
               <Spinner v-else size="sm" />
             </strong>
             <small
@@ -216,7 +232,7 @@ const emit = defineEmits<{
             >
               {{ selectedStock.change >= 0 ? '+' : '' }}{{ selectedStock.change }}%
             </small>
-            <small v-else-if="orderInputMode === 'amount' && !quoteLoading" :class="ui.muted">
+            <small v-else-if="!quoteLoading && !dataLoading" :class="ui.muted">
               この口座では取得できません
             </small>
             <Spinner v-else size="sm" />
@@ -299,7 +315,14 @@ const emit = defineEmits<{
             </button>
           </div>
 
-          <div :class="[ui.chartBox, 'overflow-visible']">
+          <div :class="[ui.chartBox, 'overflow-visible']" :aria-busy="chartLoading">
+            <p
+              v-if="chartLoading"
+              class="flex items-center gap-2 p-2 text-xs text-fg-muted"
+              role="status"
+            >
+              <Spinner size="sm" />チャートを読み込み中
+            </p>
             <RealtimePriceChart
               v-if="
                 (hasQuote(selectedStock) || realtimePricePoints.length > 0 || chartNotice) &&
@@ -322,7 +345,8 @@ const emit = defineEmits<{
               データなし（この口座では価格チャートを取得できません）
             </span>
             <span v-else class="grid h-full place-items-center text-fg-faint">
-              <Spinner />
+              <Spinner v-if="dataLoading || quoteLoading" />
+              <span v-else>チャートデータがありません</span>
             </span>
 
             <div
@@ -487,7 +511,7 @@ const emit = defineEmits<{
 
     <div :class="ui.tradeSeparator" aria-hidden="true"></div>
 
-    <article :class="ui.ticketPanel">
+    <fieldset :class="[ui.ticketPanel, 'min-w-0']" :disabled="orderBusy">
       <div :class="ui.ticketTop">
         <UiSegmented v-model="tradeSide" :options="tradeSideOptions" />
       </div>
@@ -754,7 +778,8 @@ const emit = defineEmits<{
         <div :class="ui.actions">
           <UiButton
             type="button"
-            :disabled="!canRequestCashEstimate || (orderInputMode === 'amount' && orderBusy)"
+            :loading="orderBusy"
+            :disabled="!canRequestCashEstimate || orderBusy"
             @click="emit('estimate')"
           >
             <FileCheck2 class="h-4 w-4" aria-hidden="true" />
@@ -763,7 +788,7 @@ const emit = defineEmits<{
           <UiButton
             variant="danger"
             type="button"
-            :disabled="!canPlaceCashOrder || (orderInputMode === 'amount' && orderBusy)"
+            :disabled="!canPlaceCashOrder || orderBusy"
             @click="emit('confirmOrder')"
           >
             <ShieldCheck class="h-4 w-4" aria-hidden="true" />
@@ -771,19 +796,20 @@ const emit = defineEmits<{
           </UiButton>
         </div>
         <p
-          v-if="orderInputMode === 'amount' && orderNotice"
+          v-if="orderNotice"
           class="mt-3 rounded-lg bg-emerald-950/50 p-3 text-sm text-emerald-200"
         >
           {{ orderNotice }}
         </p>
         <p
-          v-if="orderInputMode === 'amount' && orderError"
+          v-if="orderError"
+          role="alert"
           class="mt-3 rounded-lg bg-red-950/50 p-3 text-sm text-red-200"
         >
           {{ orderError }}
         </p>
       </div>
-    </article>
+    </fieldset>
 
     <article :class="ui.watchlist">
       <button :class="ui.watchSearch" type="button" @click="emit('openSearch')">
@@ -807,17 +833,13 @@ const emit = defineEmits<{
             <template v-if="hasQuote(stock)">{{
               currencyForMarket(stock.price, stock.market)
             }}</template>
-            <template v-else-if="orderInputMode === 'amount' && !quoteLoading">
-              データなし
-            </template>
+            <template v-else-if="!quoteLoading && !dataLoading"> データなし </template>
             <Spinner v-else size="sm" />
           </strong>
           <small v-if="hasQuote(stock)" :class="stock.change >= 0 ? ui.positive : ui.negative">
             {{ stock.change >= 0 ? '+' : '' }}{{ stock.change }}%
           </small>
-          <small v-else-if="orderInputMode === 'amount' && !quoteLoading" :class="ui.muted">
-            データなし
-          </small>
+          <small v-else-if="!quoteLoading && !dataLoading" :class="ui.muted"> データなし </small>
           <Spinner v-else size="sm" />
         </span>
       </button>

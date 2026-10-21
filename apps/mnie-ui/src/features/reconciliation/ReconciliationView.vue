@@ -19,6 +19,7 @@ import {
 import Spinner from '../../components/ui/Spinner.vue'
 import UiButton from '../../components/ui/UiButton.vue'
 import UiModal from '../../components/ui/UiModal.vue'
+import { notifyError } from '../feedback/feedback'
 import { ui } from '../../styles/ui'
 
 const proposals = ref<ReconciliationProposal[]>([])
@@ -29,6 +30,7 @@ const accounts = ref<FinancialAccount[]>([])
 const observations = ref<TransactionObservation[]>([])
 const profiles = ref<AccountProfile[]>([])
 const syncingProfileId = ref('')
+const syncMode = ref<Record<string, 'all' | 'since-last'>>({})
 const selectedObservation = ref<TransactionObservation | null>(null)
 const highlightedObservationId = ref('')
 const syncResults = ref<Record<string, { kind: 'success' | 'error'; message: string }>>({})
@@ -155,6 +157,7 @@ const decide = async (proposal: ReconciliationProposal, decision: 'confirm' | 'r
     return true
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '照合判断を保存できませんでした'
+    notifyError(cause)
     return false
   } finally {
     changing.value = ''
@@ -352,26 +355,31 @@ onUnmounted(() => {
             <small :class="ui.muted">{{ profile.providerName }}</small>
           </span>
         </div>
-        <div class="grid gap-2 sm:grid-cols-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <label class="min-w-0 flex-1 text-xs text-fg-muted">
+            取得範囲
+            <select
+              :value="syncMode[profile.id] ?? 'since-last'"
+              :class="ui.input"
+              :disabled="Boolean(syncingProfileId)"
+              @change="
+                syncMode[profile.id] = ($event.target as HTMLSelectElement).value as
+                  | 'all'
+                  | 'since-last'
+              "
+            >
+              <option value="since-last">前回以降</option>
+              <option value="all">全期間</option>
+            </select>
+          </label>
           <UiButton
             size="sm"
-            variant="ghost"
             :disabled="Boolean(syncingProfileId)"
-            @click="syncHistory(profile, 'all')"
+            :loading="syncingProfileId === profile.id"
+            @click="syncHistory(profile, syncMode[profile.id] ?? 'since-last')"
           >
-            <Spinner v-if="syncingProfileId === profile.id" size="sm" />
-            <RefreshCw v-else class="h-4 w-4" aria-hidden="true" />
-            履歴を全取得
-          </UiButton>
-          <UiButton
-            size="sm"
-            variant="ghost"
-            :disabled="Boolean(syncingProfileId)"
-            @click="syncHistory(profile, 'since-last')"
-          >
-            <Spinner v-if="syncingProfileId === profile.id" size="sm" />
-            <RefreshCw v-else class="h-4 w-4" aria-hidden="true" />
-            前回以降を取得
+            <RefreshCw v-if="syncingProfileId !== profile.id" class="h-4 w-4" aria-hidden="true" />
+            履歴を取得
           </UiButton>
         </div>
         <small
@@ -387,7 +395,7 @@ onUnmounted(() => {
     </p>
   </section>
 
-  <p v-if="error" :class="ui.dialogNote">{{ error }}</p>
+  <p v-if="error" :class="ui.dialogNote" role="alert">{{ error }}</p>
 
   <AnimatePresence>
     <UiModal
@@ -396,6 +404,8 @@ onUnmounted(() => {
       eyebrow="照合候補"
       :title="`${selectedObservation.transaction.description}の候補`"
       size="lg"
+      :close-on-backdrop="!changing"
+      :close-on-escape="!changing"
       @close="selectedObservation = null"
     >
       <p :class="ui.muted">関連させる相手を選んでください。</p>
@@ -434,6 +444,7 @@ onUnmounted(() => {
             <UiButton
               size="sm"
               variant="ghost"
+              :loading="changing === proposal.id"
               :disabled="Boolean(changing)"
               @click="decideFromDialog(proposal, 'reject')"
             >

@@ -19,6 +19,10 @@ import TradeView from './features/trade/TradeView.vue'
 import { useTradingSession } from './features/trading/useTradingSession'
 import { stockIdFromTradeRouteId, tradeRouteIdFromStockId } from './constants/trade'
 import { routeNames, type RouteName } from './router'
+import AsyncButton from './components/ui/AsyncButton.vue'
+import UiSnackbar from './components/ui/UiSnackbar.vue'
+import Spinner from './components/ui/Spinner.vue'
+import { notifyError } from './features/feedback/feedback'
 import { ui } from './styles/ui'
 
 const route = useRoute()
@@ -60,6 +64,7 @@ const navigate = (name: RouteName) => {
 }
 
 const {
+  statusLoaded,
   status,
   apiKeys,
   sbiPasskeys,
@@ -162,6 +167,7 @@ const {
   orderAmountMinimum,
   orderAmountIncrement,
   chartAvailable,
+  chartLoading,
   quoteLoading,
   searchQuotesAvailable,
   previewExpired,
@@ -257,7 +263,7 @@ const selectBrokerageProfile = (id: string) => {
 
 const finishSmbc2faAndRefreshAvailability = async () => {
   const connected = await finishSmbc2fa()
-  if (!connected) return
+  if (!connected) throw new Error('認証を完了できませんでした。承認状態を確認してください。')
   if (selectedProfileId.value) await forceProfileAvailability(selectedProfileId.value)
   await loadStoredAssetValuations()
   await loadPortfolioOverview()
@@ -265,23 +271,26 @@ const finishSmbc2faAndRefreshAvailability = async () => {
 
 const { oauthApproval, oauthSettings, loadOAuthApproval, approveOAuth } = useOAuthApproval()
 
+const loadPortfolioData = async () => {
+  await loadStoredAssetValuations().catch(notifyError)
+  await loadPortfolioOverview().catch(notifyError)
+}
+
 const refreshAndMaybeConnect = async () => {
   await refresh()
-  if (!status.value.authenticated) return
-  await loadStoredAssetValuations().catch(() => {})
-  await loadPortfolioOverview().catch(() => {})
+  if (status.value.authenticated) await loadPortfolioData()
 }
 
 const addSbiPasskeyAndConnect = async () => {
   await addSbiPasskey()
   tradeProfileId.value = selectedProfileId.value
-  connect()
+  await connect()
 }
 
 const addPayPaySecProfileAndConnect = async () => {
   await addPayPaySecProfile()
   tradeProfileId.value = selectedProfileId.value
-  connect()
+  await connect()
 }
 
 const addStarbucksProfileAndRefresh = async () => {
@@ -326,20 +335,20 @@ watch(
 let availabilityPolling: number | undefined
 
 onMounted(async () => {
+  await loadOAuthApproval().catch(notifyError)
   try {
     await refreshAndMaybeConnect()
   } catch (cause) {
     // A failed profile availability check must not turn an already-authenticated
     // session into the login screen. The auth status is authoritative and was
     // fetched at the start of refresh().
-    console.error('Failed to initialize admin data', cause)
+    notifyError(cause)
   } finally {
     authReady.value = true
   }
-  await loadOAuthApproval()
   availabilityPolling = window.setInterval(
     () => {
-      if (status.value.authenticated) void refresh()
+      if (status.value.authenticated) void refresh().catch(notifyError)
     },
     10 * 60 * 1000,
   )
@@ -352,25 +361,35 @@ onUnmounted(() => {
 
 <template>
   <main :class="isOAuthRoute ? ui.oauthShell : ui.appShell">
+    <UiSnackbar />
     <AppSidebar v-if="!isOAuthRoute" :active-tab="activeTab" @navigate="navigate" />
 
     <section :class="isOAuthRoute ? ui.oauthWorkspace : ui.workspace">
       <AppHeader v-if="!isOAuthRoute && activeTab !== 'settings'" :active-tab="activeTab" />
 
+      <div v-if="!authReady" class="grid min-h-64 place-items-center" role="status">
+        <Spinner />読み込み中
+      </div>
+
+      <div v-else-if="!statusLoaded" class="grid min-h-64 place-content-center gap-4 text-center">
+        <p role="alert">ログイン状態を確認できませんでした。</p>
+        <AsyncButton :class="ui.primaryButton" :action="refreshAndMaybeConnect">再試行</AsyncButton>
+      </div>
+
       <OAuthApprovalPanel
-        v-if="oauthApproval.active && status.authenticated"
+        v-else-if="oauthApproval.active && status.authenticated"
         v-model:settings="oauthSettings"
         :approval="oauthApproval"
-        @approve="approveOAuth"
+        :approve="approveOAuth"
       />
 
       <AuthGate
-        v-else-if="authReady && showAuthGate && !status.authenticated"
+        v-else-if="showAuthGate && !status.authenticated"
         v-model:setup-password="setupPassword"
         :status="status"
         :auth-busy="authBusy"
-        @login="loginWithPasskey"
-        @setup="setupOwnerPasskey"
+        @login="loginWithPasskey().then(loadPortfolioData).catch(notifyError)"
+        @setup="setupOwnerPasskey().then(loadPortfolioData).catch(notifyError)"
       />
 
       <template v-else>
@@ -436,7 +455,9 @@ onUnmounted(() => {
           :profile-name="`${selectedProfile.providerName} / ${selectedProfile.label}`"
           :order-input-mode="orderInputMode"
           :chart-available="chartAvailable"
+          :chart-loading="chartLoading"
           :quote-loading="quoteLoading"
+          :data-loading="dataLoading"
           :order-busy="orderBusy"
           :order-notice="orderNotice"
           :order-error="orderError"
@@ -457,6 +478,7 @@ onUnmounted(() => {
           :chart-notice="chartNotice"
           :price-polling="pricePolling"
           :has-quote="hasQuote"
+          @reconnect="connect"
           @open-search="showSearch = true"
           @select-profile="selectBrokerageProfile"
           @select-stock="
@@ -479,12 +501,12 @@ onUnmounted(() => {
           :canceling-order-key="cancelingOrderKey"
           :order-history-loaded="orderHistoryLoaded"
           :order-history-notice="orderHistoryNotice"
+          :cancel-order="cancelOrder"
           :load-order-detail="loadOrderDetail"
           :load-trade-records="loadTradeRecords"
           :estimate-order-correction="estimateOrderCorrection"
           :place-order-correction="placeOrderCorrection"
           @refresh="loadTradingData"
-          @cancel="cancelOrder"
         />
 
         <SettingsView
@@ -527,23 +549,25 @@ onUnmounted(() => {
           :smbc-qr-url="smbcQrUrl"
           :smbc-url="smbcUrl"
           :smbc-balance="smbcBalance"
-          @add-api-key="addApiKey"
-          @refresh="refresh"
-          @save-api-key-settings="saveApiKeySettings"
-          @revoke-api-key="revokeAndRefresh"
-          @add-sbi-passkey="addSbiPasskeyAndConnect"
-          @add-auth-manager="addAuthManager"
-          @remove-auth-manager="removeAuthManager"
-          @fill-provider-credentials="fillProviderCredentials"
-          @add-smbc-direct-profile="addSmbcDirectProfile"
-          @add-pay-pay-bank-profile="addPayPayBankProfile"
-          @add-pay-pay-sec-profile="addPayPaySecProfileAndConnect"
-          @add-starbucks-profile="addStarbucksProfileAndRefresh"
-          @finish-smbc-2fa="finishSmbc2faAndRefreshAvailability"
-          @force-profile-availability="forceProfileAvailability"
-          @connect="connect"
-          @remove-sbi-passkey="removeSbiPasskey"
-          @update-profile="updateProfile"
+          :actions="{
+            addApiKey: addApiKey,
+            refresh: refresh,
+            saveApiKeySettings: saveApiKeySettings,
+            revokeApiKey: revokeAndRefresh,
+            addSbiPasskey: addSbiPasskeyAndConnect,
+            addAuthManager: addAuthManager,
+            removeAuthManager: removeAuthManager,
+            fillProviderCredentials: fillProviderCredentials,
+            addSmbcDirectProfile: addSmbcDirectProfile,
+            addPayPayBankProfile: addPayPayBankProfile,
+            addPayPaySecProfile: addPayPaySecProfileAndConnect,
+            addStarbucksProfile: addStarbucksProfileAndRefresh,
+            finishSmbc2fa: finishSmbc2faAndRefreshAvailability,
+            forceProfileAvailability: forceProfileAvailability,
+            connect: connect,
+            removeSbiPasskey: removeSbiPasskey,
+            updateProfile: updateProfile,
+          }"
         />
       </template>
     </section>
@@ -574,6 +598,8 @@ onUnmounted(() => {
 
     <OrderDialogs
       v-if="selectedProfile"
+      :busy="orderBusy"
+      :error="orderError"
       :estimate="lastCashEstimate"
       :show-estimate="showEstimateDialog"
       :show-order="showOrderDialog"
