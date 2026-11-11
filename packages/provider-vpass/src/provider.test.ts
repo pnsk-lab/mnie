@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import { VpassClient, type FetchLike } from './client'
 import { VpassProfile, type VpassSession } from './profile'
 import { createProvider } from './provider'

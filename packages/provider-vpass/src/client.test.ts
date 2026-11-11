@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import { VpassAuthError, VpassClient, VpassError, normalizeOrigin, type FetchLike } from './client'
 import { DEFAULT_VPASS_OS_VERSION, buildVpassUserAgent } from './constants'
 

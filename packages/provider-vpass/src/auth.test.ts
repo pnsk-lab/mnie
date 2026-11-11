@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import { generateKeyPairSync } from 'node:crypto'
 import { buildAuthPlaintext, buildAuthRequest, deviceIdCheckDigit, idTypeFor } from './auth'
 import { requestHash } from './client'

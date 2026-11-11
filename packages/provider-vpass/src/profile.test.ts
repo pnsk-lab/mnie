@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import * as crypto from './crypto'
 import { VpassClient } from './client'
 import { DEFAULT_VPASS_OS_VERSION, buildVpassUserAgent } from './constants'
