@@ -244,17 +244,34 @@ async function main() {
   await save(path, profile)
   report({ ok: true, sessionSaved: true })
 
-  const provider = createProvider(profile)
   stage = 'accounts.list'
+  const provider = await createProvider(profile)
   const accounts = await provider.invoke('accounts.list', {})
+  if (!accounts.items.some((account) => account.id === provider.accountId)) {
+    throw new VerificationError('Authenticated card is missing from accounts.list')
+  }
   report({ ok: true, count: accounts.items.length })
 
   stage = 'transactions.list'
   const transactions = await provider.invoke('transactions.list', { from, to })
+  const filtered = await provider.invoke('transactions.list', {
+    accountId: provider.accountId,
+    from,
+    to,
+  })
+  if (
+    transactions.items.some((item) => item.accountId !== provider.accountId) ||
+    filtered.items.length !== transactions.items.length ||
+    filtered.items.some((item, index) => item.id !== transactions.items[index]!.id)
+  ) {
+    throw new VerificationError('Authenticated account filter does not preserve the transactions')
+  }
   await save(path, profile)
   report({
     ok: true,
     count: transactions.items.length,
+    empty: transactions.items.length === 0,
+    accountFilterVerified: true,
     scope: from ? 'date-range' : 'latest-period',
   })
 

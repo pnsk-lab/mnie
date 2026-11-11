@@ -2,29 +2,33 @@ import { createHash } from 'node:crypto'
 import type {
   Account,
   CommonOperations,
+  DateRangeRequest,
   FinancialProvider,
   HistoryItem,
+  HistoryListRequest,
   Page,
   Transaction,
 } from '@mnie/types'
-import { VpassAuthError } from './client'
+import { VpassAuthError, VpassError } from './client'
 import type { VpassProfile, VpassStatementEntry } from './profile'
 
 const PROVIDER_ID = 'vpass'
 
 /**
  * Statement rows carry no upstream identifier, so observations are aligned on a
- * content fingerprint instead. Date, merchant and amount are the only fields
+ * content fingerprint instead. Date, merchant, direction and amount are the fields
  * that are both present on every row and stable across re-reads — the billing
  * month moves when a charge is re-billed, and the holder column is blank on
  * single-holder accounts.
  */
-const FINGERPRINT_VERSION = 'vpass-1'
+const FINGERPRINT_VERSION = 'vpass-2'
 
 const fingerprintOf = (transaction: Transaction): string => {
   const amount = transaction.amount?.kind === 'money' ? transaction.amount.money.value : ''
   return createHash('sha256')
-    .update([transaction.occurredAt, transaction.description, amount].join(' '))
+    .update(
+      [transaction.occurredAt, transaction.description, transaction.direction, amount].join(' '),
+    )
     .digest('hex')
     .slice(0, 32)
 }
@@ -50,15 +54,14 @@ const shiftYearMonth = (yearMonth: number, months: number): number => {
 }
 
 const periodsFor = (periods: string[], from?: string, to?: string): string[] => {
-  if (!from && !to) return periods.slice(0, 1)
   // Period codes are YYYYMM, except the not-yet-billed one, which carries a
   // trailing marker digit. Compare on the first six characters only.
   const bound = (value: string | undefined, fallback: number) =>
     value ? Number(value.slice(0, 7).replace('-', '')) : fallback
-  // Widen by a month on each side, stepping through the calendar rather than
-  // the integer: 202601 - 1 is 202512, not 202600.
+  // Include the normal two-month billing lag after the usage range, retaining
+  // one month before it. Step through the calendar: 202601 - 1 is 202512.
   const low = shiftYearMonth(bound(from, 190001), -1)
-  const high = shiftYearMonth(bound(to, 299912), 1)
+  const high = shiftYearMonth(bound(to, 299912), 2)
   return periods.filter((period) => {
     const yearMonth = Number(period.slice(0, 6))
     return Number.isFinite(yearMonth) && yearMonth >= low && yearMonth <= high
@@ -79,7 +82,7 @@ const toTransaction = (
       kind: 'money' as const,
       money: { currency: 'JPY', value: String(Math.abs(entry.amount)) },
     },
-    occurredAt: entry.usedOn,
+    occurredAt: `${entry.usedOn}T00:00:00+09:00`,
     description: entry.merchant,
   }
   // A negative row is a refund or a reversal: money coming back to the card.
@@ -88,11 +91,40 @@ const toTransaction = (
     : { ...base, kind: 'withdrawal' as const, direction: 'debit' as const }
 }
 
-export const createProvider = (profile: VpassProfile): FinancialProvider<CommonOperations> => {
-  const accountId = profile.session.cardCode ?? profile.session.globalId ?? PROVIDER_ID
+/** Resolves the authenticated card before exposing its member-site account identifier. */
+export const createProvider = async (
+  profile: VpassProfile,
+): Promise<FinancialProvider<CommonOperations>> => {
+  const cards = await profile.cards()
+  // Auth's cardCode and the member site's cardIdentifyKey are different IDs.
+  // The global ID and issuer identify the authenticated card in the card list.
+  const authenticatedCards = cards.filter(
+    (card) =>
+      profile.session.globalId &&
+      card.globalId === profile.session.globalId &&
+      card.cardCompanyCode === profile.session.cardCompanyCode,
+  )
+  if (authenticatedCards.length !== 1 || !authenticatedCards[0]!.cardCode) {
+    throw new VpassError('Could not uniquely resolve the authenticated VPass card')
+  }
+  const accountId = authenticatedCards[0]!.cardCode
 
-  const listTransactions = async (from?: string, to?: string): Promise<Page<Transaction>> => {
-    const periods = periodsFor(await profile.statementPeriods(), from, to)
+  const listTransactions = async ({
+    accountId: requestedAccountId,
+    from,
+    to,
+    limit,
+  }: DateRangeRequest): Promise<Page<Transaction>> => {
+    if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 0)) {
+      throw new Error('VPass transaction history limit must be a non-negative safe integer')
+    }
+    if ((requestedAccountId && requestedAccountId !== accountId) || limit === 0) {
+      return { items: [] }
+    }
+    // An undated request must keep the site's default selection. The first
+    // available option may be a future, empty billing bucket.
+    const periods =
+      !from && !to ? [undefined] : periodsFor(await profile.statementPeriods(), from, to)
     // Keyed by id: an installment charge is listed again on each statement it
     // is billed across, and asking for a period the site does not recognise
     // makes it answer with the default one instead of an error.
@@ -102,14 +134,14 @@ export const createProvider = (profile: VpassProfile): FinancialProvider<CommonO
       statement.entries.forEach((entry, index) => {
         if (from && entry.usedOn < from) return
         if (to && entry.usedOn > to) return
-        const transaction = toTransaction(accountId, statement.period || period, entry, index)
+        const transaction = toTransaction(accountId, statement.period || period || '', entry, index)
         if (!byId.has(transaction.id)) byId.set(transaction.id, transaction)
       })
     }
     const items = [...byId.values()].sort((left, right) =>
       right.occurredAt.localeCompare(left.occurredAt),
     )
-    return { items }
+    return { items: limit === undefined ? items : items.slice(0, limit) }
   }
 
   return {
@@ -157,19 +189,15 @@ export const createProvider = (profile: VpassProfile): FinancialProvider<CommonO
       }
 
       if (name === 'transactions.list') {
-        const input = request as { accountId?: string; from?: string; to?: string }
-        if (input.accountId && input.accountId !== accountId) {
-          return { items: [] } as Page<Transaction> as never
-        }
-        return (await listTransactions(input.from, input.to)) as never
+        return (await listTransactions(request as DateRangeRequest)) as never
       }
 
       if (name === 'history.list') {
-        const input = request as { kinds?: string[]; from?: string; to?: string }
+        const input = request as HistoryListRequest
         if (input.kinds?.some((kind) => kind !== 'transaction')) {
           throw new Error('VPass history.list supports transaction history only')
         }
-        const { items } = await listTransactions(input.from, input.to)
+        const { items } = await listTransactions(input)
         return {
           items: items.map((transaction) => ({
             kind: 'transaction' as const,

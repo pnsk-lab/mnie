@@ -163,6 +163,60 @@ describe('VpassClient error metadata', () => {
     })
   })
 
+  it.each([
+    [502, 'upstream unavailable'],
+    [200, '<html>challenge</html>'],
+    [502, JSON.stringify(envelope(400, 'login_invalid'))],
+    [200, JSON.stringify(envelope(400, 'required_app_version_update'))],
+    [200, JSON.stringify(envelope(200, 'success', null))],
+    [200, JSON.stringify({ status: 200, type: 'success' })],
+  ])(
+    'does not classify HTTP %s transport/protocol failures as token rejection',
+    async (status, body) => {
+      const fetch: FetchLike = async () => new Response(body, { status })
+      const error = await client(fetch)
+        .authenticate(
+          { mode: 'token', token: 'secret-token', idKind: 'vpass' },
+          { deviceId: '8e15abae-2918-4237-84f5-11c456415883', deviceToken: '' },
+        )
+        .catch((cause) => cause)
+
+      expect(error).toBeInstanceOf(VpassError)
+      expect(error).not.toBeInstanceOf(VpassAuthError)
+      expect(error.httpStatus).toBe(status)
+    },
+  )
+
+  it.each(
+    [
+      'login_invalid',
+      'login_token_expired',
+      'vpass_login_invalid',
+      'vpass_login_token_expired',
+      'fa_login_token_expired',
+      'login_token_not_exist',
+    ].flatMap((type) => [
+      { type, httpStatus: 200, providerStatus: 400 },
+      { type, httpStatus: 400, providerStatus: 400 },
+      { type, httpStatus: 200, providerStatus: 200 },
+    ]),
+  )(
+    'classifies $type with HTTP $httpStatus and provider status $providerStatus as authentication rejection',
+    async ({ type, httpStatus, providerStatus }) => {
+      const fetch: FetchLike = async () =>
+        new Response(JSON.stringify(envelope(providerStatus, type)), { status: httpStatus })
+      const error = await client(fetch)
+        .authenticate(
+          { mode: 'token', token: 'secret-token', idKind: 'vpass' },
+          { deviceId: '8e15abae-2918-4237-84f5-11c456415883', deviceToken: '' },
+        )
+        .catch((cause) => cause)
+
+      expect(error).toBeInstanceOf(VpassAuthError)
+      expect(error).toMatchObject({ httpStatus, providerStatus, providerType: type })
+    },
+  )
+
   it('drops unsafe provider type text', async () => {
     const fetch: FetchLike = async () =>
       new Response(JSON.stringify(envelope(400, 'secret-token\nother')), { status: 400 })

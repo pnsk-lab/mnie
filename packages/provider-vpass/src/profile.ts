@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { decryptPayload } from './crypto'
 import { FIELD_DELIMITER, type LoginIdKind, type LoginMethod } from './auth'
-import { DEFAULT_VPASS_OS_VERSION, buildVpassUserAgent } from './constants'
+import {
+  DEFAULT_VPASS_API_VERSION,
+  DEFAULT_VPASS_OS_VERSION,
+  buildVpassUserAgent,
+} from './constants'
 import { VpassAuthError, VpassClient, VpassError, type VpassClientOptions } from './client'
 
 /**
@@ -30,6 +34,8 @@ export interface VpassSession {
   apiBaseURL: string
   webBaseURL: string
   appVersion: string
+  /** App API endpoint version. Absent only in legacy saved sessions. */
+  apiVersion?: string
   /** Android release sent to the app API. Absent only in legacy saved sessions. */
   osVersion?: string
   /** Full Android app and WebView User-Agent. Absent only in legacy saved sessions. */
@@ -54,6 +60,7 @@ export interface VpassSession {
 
 export interface VpassCard {
   globalId: string
+  /** Member-site cardIdentifyKey; distinct from the app authentication cardCode. */
   cardCode: string
   cardName: string
   cardCompanyCode: string
@@ -100,11 +107,21 @@ export interface ConnectOptions extends VpassClientOptions {
 }
 
 const parseYen = (value: unknown): number => {
-  if (typeof value !== 'string' || value.trim() === '') return 0
-  const normalized = value.replace(/,/g, '').replace(/[^\d.-]/g, '')
-  const parsed = Number(normalized)
-  if (!Number.isFinite(parsed)) throw new VpassError(`unparseable amount: ${value}`)
+  if (typeof value !== 'string' || !/^-?(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(value.trim())) {
+    throw new VpassError('unparseable amount in statement row')
+  }
+  const parsed = Number(value.trim().replace(/,/g, ''))
+  if (!Number.isSafeInteger(parsed)) throw new VpassError('unparseable amount in statement row')
   return parsed
+}
+
+interface StatementBean {
+  meisaiList?: Record<string, string>[]
+  seikyuYMList?: { name?: string; value?: string }[]
+  seikyuYM?: string
+  cardName?: string
+  total: number
+  pageSize: number
 }
 
 /** `26/06/30` and `26/08` are how the member site writes dates. */
@@ -132,14 +149,19 @@ export class VpassProfile {
     const cards = content.MulticardInformationResponseServiceBean?.cardInfo
     if (!Array.isArray(cards)) throw new VpassError('multicard response had no cardInfo')
 
-    return cards.map((card) => ({
-      globalId: card.globalId ?? '',
-      cardCode: card.cardIdentifyKey ?? card.globalId ?? '',
-      cardName: card.cardName ?? 'VPass card',
-      cardCompanyCode: card.cardCompanyCode ?? this.session.cardCompanyCode,
-      last4: card.fpanSuffix || undefined,
-      memberCode: card.memberCode || undefined,
-    }))
+    return cards.map((card) => {
+      if (typeof card.cardIdentifyKey !== 'string' || !card.cardIdentifyKey) {
+        throw new VpassError('multicard response had no cardIdentifyKey')
+      }
+      return {
+        globalId: card.globalId ?? '',
+        cardCode: card.cardIdentifyKey,
+        cardName: card.cardName ?? 'VPass card',
+        cardCompanyCode: card.cardCompanyCode ?? this.session.cardCompanyCode,
+        last4: card.fpanSuffix || undefined,
+        memberCode: card.memberCode || undefined,
+      }
+    })
   }
 
   /**
@@ -158,7 +180,39 @@ export class VpassProfile {
   /** One billing period's statement. Omit `period` for the current one. */
   async statement(period?: string): Promise<VpassStatement> {
     const bean = await this.#statementBean(period)
-    const rows = Array.isArray(bean.meisaiList) ? bean.meisaiList : []
+    const { total, pageSize } = bean
+    if (
+      !Number.isSafeInteger(total) ||
+      total < 0 ||
+      !Number.isSafeInteger(pageSize) ||
+      pageSize <= 0
+    ) {
+      throw new VpassError('statement response had invalid pagination metadata')
+    }
+    const rows = Array.isArray(bean.meisaiList) ? [...bean.meisaiList] : []
+    if (rows.length !== Math.min(total, pageSize)) {
+      throw new VpassError('statement response had an incomplete page')
+    }
+    // Pin subsequent requests to the period the site actually selected, even
+    // when the initial request used its default billing period.
+    const selectedPeriod = bean.seikyuYM ?? period
+    if (total > pageSize && !selectedPeriod) {
+      throw new VpassError('paginated statement response had no billing period')
+    }
+    while (rows.length < total) {
+      // p03 is a one-based starting row, not a page number (1, 101, 201...).
+      const next = await this.#statementBean(selectedPeriod, rows.length + 1)
+      if (next.total !== total || next.pageSize !== pageSize || next.seikyuYM !== bean.seikyuYM) {
+        throw new VpassError('statement changed while retrieving its pages')
+      }
+      if (
+        !Array.isArray(next.meisaiList) ||
+        next.meisaiList.length !== Math.min(pageSize, total - rows.length)
+      ) {
+        throw new VpassError('statement response had an incomplete page')
+      }
+      rows.push(...next.meisaiList)
+    }
 
     const entries: VpassStatementEntry[] = []
     for (const row of rows) {
@@ -191,21 +245,11 @@ export class VpassProfile {
     this.client.jar.import({})
   }
 
-  async #statementBean(period?: string): Promise<{
-    meisaiList?: Record<string, string>[]
-    seikyuYMList?: { name?: string; value?: string }[]
-    seikyuYM?: string
-    cardName?: string
-  }> {
-    const content: Record<string, unknown> = { p03: '1' }
+  async #statementBean(period?: string, startRow = 1): Promise<StatementBean> {
+    const content: Record<string, unknown> = { p03: String(startRow) }
     if (period) content.p01 = period
     const payload = await this.client.callMember<{
-      CustomizedMeisaiAnsDisplayServiceBean?: {
-        meisaiList?: Record<string, string>[]
-        seikyuYMList?: { name?: string; value?: string }[]
-        seikyuYM?: string
-        cardName?: string
-      }
+      CustomizedMeisaiAnsDisplayServiceBean?: StatementBean
     }>('web_meisai/web_meisai_top/v1', { content })
 
     const bean = payload.CustomizedMeisaiAnsDisplayServiceBean
@@ -256,6 +300,7 @@ export const connect = async (options: ConnectOptions): Promise<VpassProfile> =>
     apiBaseURL: String(options.apiBaseURL),
     webBaseURL: String(options.webBaseURL),
     appVersion: options.appVersion,
+    apiVersion: options.apiVersion ?? DEFAULT_VPASS_API_VERSION,
     osVersion,
     userAgent,
     endpoint,
@@ -276,12 +321,12 @@ export const connect = async (options: ConnectOptions): Promise<VpassProfile> =>
   })
 
   if (typeof data.login_token !== 'string') {
-    throw new VpassAuthError('auth response carried no login_token')
+    throw new VpassError('auth response carried no login_token')
   }
 
   const fields = decryptPayload(data.login_token).split(FIELD_DELIMITER)
   if (fields.length <= RESPONSE_FIELDS.digest) {
-    throw new VpassAuthError(`auth response had ${fields.length} fields, expected at least 10`)
+    throw new VpassError(`auth response had ${fields.length} fields, expected at least 10`)
   }
 
   session.token = fields[RESPONSE_FIELDS.token]
@@ -307,6 +352,7 @@ export const resume = async (
     apiBaseURL: session.apiBaseURL,
     webBaseURL: session.webBaseURL,
     appVersion,
+    apiVersion: session.apiVersion,
     osVersion: session.osVersion,
     userAgent: useDefaultUserAgent ? buildVpassUserAgent(appVersion) : session.userAgent,
     endpoint: session.endpoint ?? 'Fauth',

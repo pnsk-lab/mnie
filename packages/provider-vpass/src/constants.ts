@@ -1,3 +1,6 @@
+/** Default app API endpoint version. */
+export const DEFAULT_VPASS_API_VERSION = 'v3'
+
 /** Android request identity verified against the live VPass app API. */
 export const DEFAULT_VPASS_OS_VERSION = '15'
 

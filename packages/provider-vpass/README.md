@@ -16,7 +16,7 @@ const profile = await connect({
   password: process.env.VPASS_PASSWORD!,
 })
 
-const provider = createProvider(profile)
+const provider = await createProvider(profile)
 const { items } = await provider.invoke('transactions.list', {
   from: '2026-06-01',
   to: '2026-08-31',
@@ -36,7 +36,7 @@ whole session and resume with it:
 import { resume } from '@mnie/provider-vpass'
 
 const profile = await resume(savedSession)
-const provider = createProvider(profile)
+const provider = await createProvider(profile)
 await store(provider.exportSession()) // the token rotates on every login
 ```
 
@@ -92,11 +92,11 @@ It is a checksum, not a signature; no secret is involved.
 
 ## Operations
 
-| Operation           | Source                                                   |
-| ------------------- | -------------------------------------------------------- |
-| `accounts.list`     | `multicard/get_multicard_data`                           |
-| `transactions.list` | `web_meisai/web_meisai_top`, one call per billing period |
-| `history.list`      | derived from `transactions.list`                         |
+| Operation           | Source                                                         |
+| ------------------- | -------------------------------------------------------------- |
+| `accounts.list`     | `multicard/get_multicard_data`                                 |
+| `transactions.list` | `web_meisai/web_meisai_top`, every page of each billing period |
+| `history.list`      | derived from `transactions.list`                               |
 
 `balances.list` is deliberately absent. A VPass statement reports billing
 information rather than a card balance; reporting one as the other would be
@@ -104,12 +104,17 @@ wrong. The current parser exposes statement rows but does not normalize billed
 or unbilled totals.
 
 Statements are addressed by **billing period**, not by date, and the two do not
-line up. `transactions.list` widens the requested range by one billing month on
-each side and then filters rows by usage date. Charges delayed by more than that
-window may require a wider caller-supplied date range.
+line up. Transaction and history reads include billing periods from one month
+before the requested start through two months after the end, covering June
+purchases billed in August, and then filter rows by usage date. Charges delayed
+beyond that billing window can still be omitted.
+
+Each statement is read in full before returning transactions. Invalid pagination,
+incomplete pages, and malformed yen amounts raise errors. Both transaction and
+history requests return an empty page for an account other than the authenticated card.
 
 Rows carry no upstream identifier, so the observation policy is
-`ordered-snapshot` with a fingerprint over date, merchant and amount. The
+`ordered-snapshot` with a fingerprint over date, merchant, direction and amount. The
 billing month is excluded from the fingerprint because a re-billed charge moves
 between statements. Transaction ids also contain the returned statement period
 and row index; duplicate suppression is reliable within repeated reads of the
@@ -119,6 +124,13 @@ collapse.
 `accounts.list` can report multiple cards, but statement requests currently use
 the authenticated/default card only. Per-card transaction selection is not yet
 implemented.
+
+`createProvider(profile)` is asynchronous: it resolves the authenticated card
+by global ID and issuer, then uses its member-site identifier for `accountId`
+and every transaction. Missing `cardIdentifyKey` values and missing or ambiguous
+card matches raise errors. Without a date range, transaction and history reads
+use the site's default statement, which can differ from the first available
+billing period.
 
 ## Verification status
 
@@ -183,7 +195,9 @@ The first command checks password login, card listing, latest-period transaction
 then token login and an authenticated session check. `--resume` loads the saved
 session and checks cards and transactions without requiring the password. Neither
 mode retries failed authentication. An empty statement is a successful read with
-count zero; it does not establish that every transaction is present.
+count zero and `empty: true`; it does not establish that every transaction is
+present. The script also checks that filtering by the authenticated card's
+listed account ID preserves the returned transactions.
 
 Mnie server/UI setup, registry session behavior, and the current Bitwarden Auth
 Manager integration are documented in `docs/docs/providers/vpass.md`.

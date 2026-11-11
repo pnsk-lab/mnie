@@ -1,6 +1,10 @@
 import { CookieJar } from './cookie-jar'
 import { buildAuthRequest, type BuildAuthRequestOptions, type LoginMethod } from './auth'
-import { DEFAULT_VPASS_OS_VERSION, buildVpassUserAgent } from './constants'
+import {
+  DEFAULT_VPASS_API_VERSION,
+  DEFAULT_VPASS_OS_VERSION,
+  buildVpassUserAgent,
+} from './constants'
 
 /**
  * Transport for the two APIs a VPass session spans.
@@ -14,12 +18,18 @@ import { DEFAULT_VPASS_OS_VERSION, buildVpassUserAgent } from './constants'
 /** `RESPONSE_OK` on the app API. */
 const APP_STATUS_OK = 200
 const SAFE_PROVIDER_TYPE = /^[A-Za-z0-9_.-]{1,64}$/
-const APP_FAILURE_TYPES = new Set([
-  'required_app_version_update',
-  'optional_app_version_update',
+const AUTH_FAILURE_TYPES = new Set([
   'login_invalid',
   'login_token_expired',
   'vpass_login_invalid',
+  'vpass_login_token_expired',
+  'fa_login_token_expired',
+  'login_token_not_exist',
+])
+const APP_FAILURE_TYPES = new Set([
+  'required_app_version_update',
+  'optional_app_version_update',
+  ...AUTH_FAILURE_TYPES,
 ])
 
 export interface VpassErrorMetadata {
@@ -147,7 +157,7 @@ export class VpassClient {
   constructor(options: VpassClientOptions) {
     this.#apiOrigin = normalizeOrigin(options.apiBaseURL, 'apiBaseURL')
     this.#webOrigin = normalizeOrigin(options.webBaseURL, 'webBaseURL')
-    this.#apiVersion = options.apiVersion ?? 'v3'
+    this.#apiVersion = options.apiVersion ?? DEFAULT_VPASS_API_VERSION
     this.#appVersion = headerValue('appVersion', options.appVersion)
     this.#osVersion = headerValue('osVersion', options.osVersion ?? DEFAULT_VPASS_OS_VERSION)
     this.#userAgent = headerValue(
@@ -221,7 +231,12 @@ export class VpassClient {
     if (!response.ok || providerStatus !== APP_STATUS_OK) {
       throw new VpassError(`${path} request failed`, metadata)
     }
-    if (!isRecord(parsed) || typeof parsed.type !== 'string' || !('data' in parsed)) {
+    if (
+      !isRecord(parsed) ||
+      typeof parsed.type !== 'string' ||
+      !('data' in parsed) ||
+      (isAuth && !isRecord(parsed.data))
+    ) {
       throw new VpassError(`${path} returned an invalid response`, metadata)
     }
     if (providerType && APP_FAILURE_TYPES.has(providerType)) {
@@ -302,10 +317,18 @@ export class VpassClient {
     })
     try {
       const envelope = await this.callApp<AuthResponseData>(endpoint, body)
-      if (!envelope.data) throw new VpassAuthError(`${endpoint} returned no data`)
       return envelope.data
     } catch (error) {
-      if (error instanceof VpassError && !(error instanceof VpassAuthError)) {
+      if (
+        error instanceof VpassError &&
+        !(error instanceof VpassAuthError) &&
+        error.httpStatus !== undefined &&
+        error.httpStatus >= 200 &&
+        error.httpStatus < 500 &&
+        (error.httpStatus < 300 || error.httpStatus >= 400) &&
+        error.providerType !== undefined &&
+        AUTH_FAILURE_TYPES.has(error.providerType)
+      ) {
         throw new VpassAuthError(error.message, {
           httpStatus: error.httpStatus,
           providerStatus: error.providerStatus,

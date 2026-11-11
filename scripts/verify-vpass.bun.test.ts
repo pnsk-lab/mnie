@@ -67,11 +67,12 @@ const setup = () => {
         if (![${JSON.stringify(deviceId)}, ${JSON.stringify(generatedDeviceId)}].includes(session.deviceId)) throw new Error('Lost device identity')
         return profile({ ...session, token: session.token + '-rotated' })
       },
-      createProvider: () => ({ invoke: async (name) => {
+      createProvider: async () => ({ accountId: 'CARD1', invoke: async (name, input) => {
         if (process.env.FAIL_STATEMENT && name === 'transactions.list') {
           throw new VpassError('secret-token secret-cookie secret-password')
         }
-        return { items: name === 'accounts.list' ? [{}] : [] }
+        return { items: name === 'accounts.list' ? [{ id: 'CARD1' }]
+          : process.env.FAIL_ACCOUNT_FILTER && !input.accountId ? [{ id: 'row1', accountId: 'CARD1' }] : [] }
       } }),
     }))`,
   )
@@ -88,6 +89,7 @@ const setup = () => {
       VPASS_USER_AGENT: undefined,
       FAIL_CONNECT: undefined,
       FAIL_STATEMENT: undefined,
+      FAIL_ACCOUNT_FILTER: undefined,
       VPASS_APP_VERSION: '5.13.0',
       VPASS_AUTH_ENDPOINT: undefined,
       VPASS_ID_KIND: undefined,
@@ -121,10 +123,20 @@ test('persists the rotated token with private permissions and accepts an empty s
   expect(result.code, result.output).toBe(0)
   expect(result.output).toContain('"stage":"complete","ok":true')
   expect(result.output).toContain('"count":0')
+  expect(result.output).toContain('"empty":true')
+  expect(result.output).toContain('"accountFilterVerified":true')
   expect(result.output).not.toContain('secret-')
   expect(session().token).toBe('secret-token-rotated')
   expect(session().cookies).toEqual({ cookie: 'secret-cookie' })
   expect(statSync(sessionPath).mode & 0o777).toBe(0o600)
+})
+
+test('rejects a listed-account filter that loses the default-card transactions', () => {
+  const { run } = setup()
+  const result = run([], { FAIL_ACCOUNT_FILTER: '1' })
+  expect(result.code).toBe(1)
+  expect(result.output).toContain('Authenticated account filter does not preserve the transactions')
+  expect(result.output).not.toContain('"stage":"complete"')
 })
 
 test('requires an external app version and lets the provider own request defaults', () => {

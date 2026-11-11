@@ -60,7 +60,7 @@ const profile = await connect({
   idKind: 'vpass', // or 'fa'
 })
 
-const provider = createProvider(profile)
+const provider = await createProvider(profile)
 const accounts = await provider.invoke('accounts.list', {})
 const transactions = await provider.invoke('transactions.list', {
   from: '2026-06-01',
@@ -85,15 +85,20 @@ billed and unbilled statement totals, not an account balance, and treating one
 as the other would be misleading.
 
 Statement periods and usage dates do not necessarily align. A date-range
-request widens the range by one billing month on each side and then filters rows
-by usage date. Charges delayed by more than that window may require a wider
-caller-supplied range. Negative statement rows are represented as credit/deposit
-transactions. Rows without usage dates, such as headings and subtotals, are
-omitted.
+request includes billing periods from one month before the start through two
+months after the end, covering June purchases billed in August, and then filters
+rows by usage date. Charges delayed beyond that billing window can still be
+omitted. Negative statement rows are represented as credit/deposit transactions.
+Rows without usage dates, such as headings and subtotals, are omitted.
+
+All pages of each statement are fetched before transactions or history are
+returned. Invalid pagination, incomplete pages, and malformed yen amounts raise
+errors. Both operations return an empty page when `accountId` does not match the
+authenticated card.
 
 VPass rows do not expose a stable upstream transaction ID. Mnie therefore uses
 an `ordered-snapshot` observation policy with a fingerprint over usage date,
-merchant, and amount. The billing month is excluded because a re-billed charge
+merchant, direction, and amount. The billing month is excluded because a re-billed charge
 can move between statements. Transaction ids additionally contain the returned
 statement period and row index, so repeated reads of the same statement are
 stable but duplicate charges across genuinely different periods are not
@@ -102,6 +107,13 @@ certain to collapse.
 `accounts.list` may report more than one card. Statement requests currently use
 the authenticated/default card only; selecting transactions independently for
 each listed card is not implemented.
+
+Await `createProvider(profile)` to resolve the authenticated card by global ID
+and issuer. Its `accountId` and transaction account IDs use that card's identifier
+from `accounts.list`; missing `cardIdentifyKey` values and missing or ambiguous
+matches are errors. Without a date range, transaction and history reads preserve
+the site's default statement rather than selecting the first available billing
+period.
 
 ## Auto-login and session lifecycle
 
@@ -136,6 +148,9 @@ the live cookie jar may have changed. Treat the entire session as a credential.
 The password fallback is important because a failed token attempt may leave the
 old token unusable. Other transport and parsing failures are not hidden by a
 credential retry.
+
+Logins and persistence are serialized for each stored VPass session. Persisting
+an older open connection does not replace a token saved by a newer login.
 
 The app normally includes an FCM registration token. The SDK can accept a
 captured `deviceToken`, but the Mnie registry sends an empty value; live
