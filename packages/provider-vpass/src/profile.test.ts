@@ -92,6 +92,47 @@ describe('VPass request identity', () => {
     expect(resumed.session.apiVersion).toBe('v3')
   })
 
+  it('reuses saved cookies across APIs and drops cookies revoked during resume', async () => {
+    vi.spyOn(crypto, 'decryptPayload').mockReturnValue(responseFields)
+    const requests: { host: string; cookie: string | null }[] = []
+    const fetch = async (url: URL, init: RequestInit) => {
+      requests.push({ host: url.hostname, cookie: new Headers(init.headers).get('cookie') })
+      if (url.hostname === 'member.example.test') {
+        return Response.json({ header: { resultCode: '0' }, body: { content: {} } })
+      }
+      const headers = new Headers()
+      if (requests.length === 1) {
+        headers.append('Set-Cookie', 'session=active')
+        headers.append('Set-Cookie', 'obsolete=old')
+      } else {
+        headers.append('Set-Cookie', 'obsolete=discard; Max-Age=-1')
+      }
+      return Response.json(
+        { status: 200, type: 'success', data: { login_token: 'encrypted' } },
+        { headers },
+      )
+    }
+
+    const first = await connect({
+      apiBaseURL: 'https://app.example.test',
+      webBaseURL: 'https://member.example.test',
+      appVersion: '5.13.0',
+      loginId: 'login-id',
+      password: 'password',
+      fetch,
+    })
+    const saved: VpassSession = JSON.parse(JSON.stringify(first.session))
+    const resumed = await resume(saved, { fetch })
+    await resumed.client.callMember('test')
+
+    expect(requests).toEqual([
+      { host: 'app.example.test', cookie: null },
+      { host: 'app.example.test', cookie: 'session=active; obsolete=old' },
+      { host: 'member.example.test', cookie: 'session=active' },
+    ])
+    expect(resumed.session.cookies).toEqual({ session: 'active' })
+  })
+
   it('reuses the saved device and effective request profile on resume', async () => {
     const authenticate = vi
       .spyOn(VpassClient.prototype, 'authenticate')

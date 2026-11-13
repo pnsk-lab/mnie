@@ -40,19 +40,17 @@ export class CookieJar {
 
     const normalized = attributes.map((attribute) => attribute.trim())
 
-    const maxAge = normalized.find((attribute) => attribute.toLowerCase().startsWith('max-age='))
-    if (maxAge && /^max-age\s*=\s*0$/i.test(maxAge)) {
+    const maxAge = normalized
+      .map((attribute) => /^max-age\s*=\s*(-?\d+)$/i.exec(attribute))
+      .findLast((match) => match !== null)?.[1]
+    const expires = normalized.find((attribute) => attribute.toLowerCase().startsWith('expires='))
+    const expired =
+      maxAge !== undefined
+        ? Number(maxAge) <= 0
+        : expires !== undefined && Date.parse(expires.slice(expires.indexOf('=') + 1)) <= Date.now()
+    if (expired) {
       this.#cookies.delete(name)
       return
-    }
-
-    const expires = normalized.find((attribute) => attribute.toLowerCase().startsWith('expires='))
-    if (expires) {
-      const date = new Date(expires.slice(expires.indexOf('=') + 1))
-      if (!Number.isNaN(date.valueOf()) && date <= new Date()) {
-        this.#cookies.delete(name)
-        return
-      }
     }
 
     this.#cookies.set(name, value)
