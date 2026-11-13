@@ -42,6 +42,7 @@
     "test:coverage": "vp run sdk-build && vp test run --coverage",
     "typecheck": "vp run typecheck:all",
     "verify:paypay-bank-runtime": "bun scripts/verify-paypay-bank-runtime.ts",
+    "verify:vpass": "bun scripts/verify-vpass.ts",
     "mnie": "cd packages/mnie-cli && bun mnie"
   },
   "dependencies": {
