@@ -1,4 +1,5 @@
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser'
+import { notify } from '../feedback/feedback'
 import { ref, watch } from 'vue'
 import {
   createApiKey,
@@ -38,6 +39,7 @@ import {
 import { defaultApiKeyPolicy } from './api-key-policy'
 
 export const useAuthAdmin = () => {
+  const statusLoaded = ref(false)
   const status = ref<AuthStatus>({ configured: true, authenticated: false })
   const apiKeys = ref<ApiKey[]>([])
   const sbiPasskeys = ref<SbiPasskey[]>([])
@@ -88,6 +90,7 @@ export const useAuthAdmin = () => {
 
   const refresh = async (options?: { autoConnect?: boolean; connect?: () => void }) => {
     status.value = await getStatus()
+    statusLoaded.value = true
     if (status.value.authenticated) {
       apiKeys.value = (await listApiKeys()).apiKeys.filter((key) => !key.revokedAt)
       sbiPasskeys.value = (await listSbiPasskeys()).passkeys
@@ -146,10 +149,20 @@ export const useAuthAdmin = () => {
     }
   }
 
+  const refreshAfterMutation = async () => {
+    try {
+      await refresh()
+    } catch (cause) {
+      notify(
+        `変更は保存されましたが、一覧を更新できませんでした。更新ボタンで再取得してください。${cause instanceof Error ? cause.message : String(cause)}`,
+      )
+    }
+  }
+
   const addApiKey = async () => {
     const { apiKey } = await createApiKey(apiKeyLabel.value, newApiKeySettings.value)
     newApiToken.value = apiKey.token ?? ''
-    await refresh()
+    await refreshAfterMutation()
   }
 
   const saveApiKeySettings = async (key: ApiKey) => {
@@ -160,8 +173,9 @@ export const useAuthAdmin = () => {
       maxOrderPriceJpy: key.maxOrderPriceJpy,
       maxOrderAmountJpy: key.maxOrderAmountJpy,
       allowedMethods: key.allowedMethods,
+      scopes: key.scopes,
     })
-    await refresh()
+    await refreshAfterMutation()
   }
 
   const setupOwnerPasskey = async () => {
@@ -210,7 +224,7 @@ export const useAuthAdmin = () => {
     sbiCredentialJson.value = ''
     tradePassword.value = ''
     sbiDeviceId.value = ''
-    await refresh()
+    await refreshAfterMutation()
   }
 
   const addAuthManager = async () => {
@@ -219,13 +233,13 @@ export const useAuthAdmin = () => {
       dataPath: authManagerDataPath.value.trim() || undefined,
     })
     selectedAuthManagerId.value = authManager.id
-    await refresh()
+    await refreshAfterMutation()
   }
 
   const removeAuthManager = async (id: string) => {
     await deleteAuthManager(id)
     if (selectedAuthManagerId.value === id) selectedAuthManagerId.value = ''
-    await refresh()
+    await refreshAfterMutation()
   }
 
   const fillProviderCredentials = async (provider: AccountProfile['provider'] = 'sbisec') => {
@@ -235,15 +249,18 @@ export const useAuthAdmin = () => {
       selectedAuthManagerId.value,
       provider,
       authManagerMasterPassword.value,
-    )
-      .then((result) => result.credentials)
-      .finally(() => {
-        authManagerMasterPassword.value = ''
-      })
+    ).then((result) => result.credentials)
+
     if (credentials.length !== 1) {
       throw new Error(`認証情報を1件に特定できませんでした（${credentials.length}件）`)
     }
     const credential = credentials[0]!
+    if (
+      ['smbc-direct', 'paypay-bank', 'starbucks-jp'].includes(provider) &&
+      (!credential.username || !credential.password)
+    ) {
+      throw new Error('ユーザー名またはパスワードが見つかりませんでした')
+    }
     if (provider === 'sbisec') {
       if (credential.passkeys.length !== 1) {
         throw new Error(`パスキーを1件に特定できませんでした（${credential.passkeys.length}件）`)
@@ -251,6 +268,7 @@ export const useAuthAdmin = () => {
       const portableCredential = credential.passkeys[0]!.portableCredential
       if (!portableCredential) throw new Error('パスキーをエクスポートできませんでした')
       sbiCredentialJson.value = JSON.stringify(portableCredential, null, 2)
+      authManagerMasterPassword.value = ''
       return
     }
     if (provider === 'paypay-sec') {
@@ -260,33 +278,37 @@ export const useAuthAdmin = () => {
       const portableCredential = credential.passkeys[0]!.portableCredential
       if (!portableCredential) throw new Error('パスキーをエクスポートできませんでした')
       payPaySecCredentialJson.value = JSON.stringify(portableCredential, null, 2)
+      authManagerMasterPassword.value = ''
       return
     }
     if (provider === 'smbc-direct') {
       smbcUser.value = credential.username ?? ''
       smbcPassword.value = credential.password ?? ''
+      authManagerMasterPassword.value = ''
       return
     }
     if (provider === 'paypay-bank') {
       payPayBankBranchNo.value = credential.username ?? ''
       payPayBankPassword.value = credential.password ?? ''
+      authManagerMasterPassword.value = ''
       return
     }
     if (provider === 'starbucks-jp') {
       starbucksUsername.value = credential.username ?? ''
       starbucksPassword.value = credential.password ?? ''
+      authManagerMasterPassword.value = ''
     }
   }
 
   const removeSbiPasskey = async (id: string) => {
     await deleteAccountProfile(id)
     if (selectedProfileId.value === id) selectedProfileId.value = ''
-    await refresh()
+    await refreshAfterMutation()
   }
 
   const updateProfile = async (id: string, label: string, color: string, password?: string) => {
     await updateAccountProfile(id, { label, color, tradePassword: password || undefined })
-    await refresh()
+    await refreshAfterMutation()
   }
 
   const addSmbcDirectProfile = async () => {
@@ -298,7 +320,7 @@ export const useAuthAdmin = () => {
     })
     selectedProfileId.value = profile.id
     smbcPassword.value = ''
-    await refresh()
+    await refreshAfterMutation()
   }
 
   const addPayPayBankProfile = async () => {
@@ -310,7 +332,7 @@ export const useAuthAdmin = () => {
     })
     selectedProfileId.value = profile.id
     payPayBankPassword.value = ''
-    await refresh()
+    await refreshAfterMutation()
   }
 
   const addPayPaySecProfile = async () => {
@@ -332,7 +354,7 @@ export const useAuthAdmin = () => {
     selectedProfileId.value = profile.id
     payPaySecCredentialJson.value = ''
     payPaySecTradePassword.value = ''
-    await refresh()
+    await refreshAfterMutation()
   }
 
   const addStarbucksProfile = async () => {
@@ -343,10 +365,11 @@ export const useAuthAdmin = () => {
     })
     selectedProfileId.value = profile.id
     starbucksPassword.value = ''
-    await refresh()
+    await refreshAfterMutation()
   }
 
   return {
+    statusLoaded,
     status,
     apiKeys,
     sbiPasskeys,

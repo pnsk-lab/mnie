@@ -37,9 +37,12 @@ import AuthManagerPasskeyDialog from '../../components/AuthManagerPasskeyDialog.
 import UiModal from '../../components/ui/UiModal.vue'
 import { ui } from '../../styles/ui'
 import { profileColor } from '../../constants/provider'
+import AsyncButton from '../../components/ui/AsyncButton.vue'
+import type { SettingsActions } from './settings-actions'
 import MobileSuicaPanel from './MobileSuicaPanel.vue'
 
 const props = defineProps<{
+  actions: SettingsActions
   apiKeys: ApiKey[]
   sbiPasskeys: SbiPasskey[]
   authManagers: AuthManagerConfig[]
@@ -84,6 +87,7 @@ const payPaySecTradePassword = defineModel<string>('payPaySecTradePassword', { r
 const starbucksLabel = defineModel<string>('starbucksLabel', { required: true })
 const starbucksUsername = defineModel<string>('starbucksUsername', { required: true })
 const starbucksPassword = defineModel<string>('starbucksPassword', { required: true })
+const pendingActions = ref(0)
 const editedLabel = ref('')
 const editedColor = ref('')
 const editedTradePassword = ref('')
@@ -95,25 +99,20 @@ const openPasskeyJsonDialog = (provider: 'sbisec' | 'paypay-sec') => {
   showPasskeyJsonDialog.value = true
 }
 
-const emit = defineEmits<{
-  addApiKey: []
-  refresh: []
-  saveApiKeySettings: [key: ApiKey]
-  revokeApiKey: [id: string]
-  addSbiPasskey: []
-  addAuthManager: []
-  removeAuthManager: [id: string]
-  fillProviderCredentials: [provider?: AccountProfile['provider']]
-  addSmbcDirectProfile: []
-  addPayPayBankProfile: []
-  addPayPaySecProfile: []
-  addStarbucksProfile: []
-  finishSmbc2fa: []
-  forceProfileAvailability: [profileId: string]
-  connect: []
-  removeSbiPasskey: [id: string]
-  updateProfile: [id: string, label: string, color: string, tradePassword?: string]
-}>()
+const action = async <K extends keyof SettingsActions>(
+  name: K,
+  ...args: Parameters<SettingsActions[K]>
+) => {
+  if (pendingActions.value) throw new Error('別の操作が完了するまでお待ちください')
+  pendingActions.value += 1
+  try {
+    return await (props.actions[name] as (...values: Parameters<SettingsActions[K]>) => unknown)(
+      ...args,
+    )
+  } finally {
+    pendingActions.value -= 1
+  }
+}
 
 type SettingsSection = 'api-keys' | 'providers' | 'auth-managers'
 
@@ -156,8 +155,9 @@ const editedProfile = computed(() => {
     : undefined
 })
 watch(
-  editedProfile,
-  (profile) => {
+  () => editedProfile.value?.id,
+  () => {
+    const profile = editedProfile.value
     editedLabel.value = profile?.label ?? ''
     editedColor.value = profile ? profileColor(profile) : ''
     editedTradePassword.value = ''
@@ -259,7 +259,8 @@ const availabilityLabel = (availability: ProfileAvailability | undefined) => {
   if (!availability) return '未確認'
   if (availability.ok) return '利用可'
   if (availability.reason === '2FA_REQUIRED') return '再認証必要'
-  if (availability.reason === 'CAPTCHA_REQIRED') return 'CAPTCHA 必要'
+  if (availability.reason === 'CAPTCHA_REQIRED' || availability.reason === 'CAPTCHA_REQUIRED')
+    return 'CAPTCHA 必要'
   return '利用不可'
 }
 
@@ -295,15 +296,15 @@ const backFromProviderSetup = () => {
   else backToProviderChooser()
 }
 
-const startSmbcReauthentication = () => {
+const startSmbcReauthentication = async () => {
   if (!editedProfile.value) return
   selectedProfileId.value = editedProfile.value.id
-  emit('connect')
+  await action('connect')
 }
 
-const confirmProfileDeletion = () => {
+const confirmProfileDeletion = async () => {
   if (!profileToDelete.value) return
-  emit('removeSbiPasskey', profileToDelete.value.id)
+  await action('removeSbiPasskey', profileToDelete.value.id)
   profileToDelete.value = null
 }
 
@@ -331,13 +332,14 @@ const openApiKeyEditor = (key: ApiKey) => {
 }
 
 const closeApiKeyEditor = () => {
+  if (pendingActions.value) return
   editingApiKey.value = null
 }
 
-const saveEditingApiKey = () => {
+const saveEditingApiKey = async () => {
   if (!editingApiKey.value) return
-  emit('saveApiKeySettings', editingApiKey.value)
-  closeApiKeyEditor()
+  await action('saveApiKeySettings', editingApiKey.value)
+  editingApiKey.value = null
 }
 </script>
 
@@ -402,20 +404,28 @@ const saveEditingApiKey = () => {
           <h2 class="text-2xl font-black text-fg">{{ sectionTitle }}</h2>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <button
+          <AsyncButton
+            :disabled="pendingActions > 0"
             v-if="isNewApiKey"
             :class="ui.primaryButton"
             type="button"
-            @click="emit('addApiKey')"
+            :action="() => action('addApiKey')"
+            success="保存しました"
           >
             <KeyRound class="h-4 w-4" aria-hidden="true" />
             発行
-          </button>
+          </AsyncButton>
           <template v-else>
-            <button :class="ui.ghostButton" type="button" @click="emit('refresh')">
+            <AsyncButton
+              :disabled="pendingActions > 0"
+              v-if="!isProviderSetup"
+              :class="ui.ghostButton"
+              type="button"
+              :action="() => action('refresh')"
+            >
               <RefreshCw class="h-4 w-4" aria-hidden="true" />
               更新
-            </button>
+            </AsyncButton>
             <button
               v-if="activeSection === 'api-keys'"
               class="inline-grid h-10 w-10 place-items-center rounded-full bg-primary text-on-primary transition hover:bg-primary-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-soft"
@@ -462,15 +472,17 @@ const saveEditingApiKey = () => {
                   <Pencil class="h-4 w-4" aria-hidden="true" />
                   編集
                 </button>
-                <button
+                <AsyncButton
+                  :disabled="pendingActions > 0"
                   :class="ui.dangerButton"
                   type="button"
                   title="Revoke"
-                  @click="emit('revokeApiKey', key.id)"
+                  :action="() => action('revokeApiKey', key.id)"
+                  success="API キーを失効しました"
                 >
                   <Ban class="h-4 w-4" aria-hidden="true" />
                   失効
-                </button>
+                </AsyncButton>
               </div>
             </div>
           </div>
@@ -536,14 +548,15 @@ const saveEditingApiKey = () => {
                     autocomplete="new-password"
                   />
                 </label>
-                <div v-if="selectedProvider === 'smbc-direct'" class="flex justify-end">
-                  <button
-                    :class="ui.primaryButton"
+                <div v-if="selectedProvider === 'smbc-direct'" class="flex justify-start">
+                  <AsyncButton
+                    :disabled="pendingActions > 0"
+                    :class="ui.ghostButton"
                     type="button"
-                    @click="startSmbcReauthentication"
+                    :action="startSmbcReauthentication"
                   >
                     再認証
-                  </button>
+                  </AsyncButton>
                 </div>
                 <div
                   v-if="selectedProvider === 'smbc-direct' && smbcQrUrl"
@@ -556,32 +569,45 @@ const saveEditingApiKey = () => {
                     class="h-56 w-56 rounded-lg bg-white p-2"
                   />
                   <a v-if="smbcUrl" :class="ui.ghostButton" :href="smbcUrl">直接開く</a>
-                  <button :class="ui.primaryButton" type="button" @click="emit('finishSmbc2fa')">
+                  <AsyncButton
+                    :disabled="pendingActions > 0"
+                    :class="ui.primaryButton"
+                    type="button"
+                    :action="() => action('finishSmbc2fa')"
+                  >
                     承認完了
-                  </button>
+                  </AsyncButton>
                 </div>
                 <MobileSuicaPanel
                   v-else-if="selectedProvider === 'mobile-suica'"
                   reauth
                   :profile-id="editedProfile.id"
-                  @reauthenticated="emit('forceProfileAvailability', $event)"
+                  :on-saved="
+                    async (id) => {
+                      await action('refresh')
+                      await action('forceProfileAvailability', id)
+                    }
+                  "
                 />
                 <div class="flex justify-end">
-                  <button
+                  <AsyncButton
+                    :disabled="pendingActions > 0"
                     :class="ui.primaryButton"
                     type="button"
-                    @click="
-                      emit(
-                        'updateProfile',
-                        editedProfile.id,
-                        editedLabel,
-                        editedColor,
-                        editedTradePassword || undefined,
-                      )
+                    :action="
+                      () =>
+                        action(
+                          'updateProfile',
+                          editedProfile!.id,
+                          editedLabel,
+                          editedColor,
+                          editedTradePassword || undefined,
+                        )
                     "
+                    success="保存しました"
                   >
                     <Save class="h-4 w-4" aria-hidden="true" /> 保存
-                  </button>
+                  </AsyncButton>
                 </div>
                 <div
                   v-if="selectedProvider === 'smbc-direct' || selectedProvider === 'mobile-suica'"
@@ -649,9 +675,15 @@ const saveEditingApiKey = () => {
                 /></label>
               </div>
               <div class="flex justify-end">
-                <button :class="ui.primaryButton" type="button" @click="emit('addSbiPasskey')">
+                <AsyncButton
+                  :disabled="pendingActions > 0"
+                  :class="ui.primaryButton"
+                  type="button"
+                  :action="() => action('addSbiPasskey')"
+                  success="保存しました"
+                >
                   <Save class="h-4 w-4" aria-hidden="true" /> 保存
-                </button>
+                </AsyncButton>
               </div>
             </template>
 
@@ -689,13 +721,15 @@ const saveEditingApiKey = () => {
                   required
               /></label>
               <div class="flex justify-end">
-                <button
+                <AsyncButton
+                  :disabled="pendingActions > 0"
                   :class="ui.primaryButton"
                   type="button"
-                  @click="emit('addPayPaySecProfile')"
+                  :action="() => action('addPayPaySecProfile')"
+                  success="保存しました"
                 >
                   <Save class="h-4 w-4" aria-hidden="true" /> 保存
-                </button>
+                </AsyncButton>
               </div>
             </template>
 
@@ -714,9 +748,14 @@ const saveEditingApiKey = () => {
                     class="h-56 w-56 rounded-lg bg-white p-2"
                   />
                   <a v-if="smbcUrl" :class="ui.ghostButton" :href="smbcUrl">直接開く</a>
-                  <button :class="ui.primaryButton" type="button" @click="emit('finishSmbc2fa')">
+                  <AsyncButton
+                    :disabled="pendingActions > 0"
+                    :class="ui.primaryButton"
+                    type="button"
+                    :action="() => action('finishSmbc2fa')"
+                  >
                     承認完了
-                  </button>
+                  </AsyncButton>
                 </div>
               </template>
               <p
@@ -749,18 +788,26 @@ const saveEditingApiKey = () => {
                   placeholder="2206"
               /></label>
               <div class="flex justify-end">
-                <button
+                <AsyncButton
+                  :disabled="pendingActions > 0"
                   :class="ui.primaryButton"
                   type="button"
-                  @click="emit('addSmbcDirectProfile')"
+                  :action="() => action('addSmbcDirectProfile')"
+                  success="保存しました"
                 >
                   <Save class="h-4 w-4" aria-hidden="true" /> 保存
-                </button>
+                </AsyncButton>
               </div>
             </template>
 
             <template v-else-if="selectedProvider === 'mobile-suica'">
-              <MobileSuicaPanel />
+              <MobileSuicaPanel
+                :on-saved="
+                  async () => {
+                    await action('refresh')
+                  }
+                "
+              />
             </template>
             <template v-else-if="selectedProvider === 'paypay-bank'">
               <label :class="ui.label"
@@ -791,13 +838,15 @@ const saveEditingApiKey = () => {
                   autocomplete="current-password"
               /></label>
               <div class="flex justify-end">
-                <button
+                <AsyncButton
+                  :disabled="pendingActions > 0"
                   :class="ui.primaryButton"
                   type="button"
-                  @click="emit('addPayPayBankProfile')"
+                  :action="() => action('addPayPayBankProfile')"
+                  success="保存しました"
                 >
                   <Save class="h-4 w-4" aria-hidden="true" /> 保存
-                </button>
+                </AsyncButton>
               </div>
             </template>
             <template v-else-if="selectedProvider === 'starbucks-jp'">
@@ -821,13 +870,15 @@ const saveEditingApiKey = () => {
                 />
               </label>
               <div class="flex justify-end">
-                <button
+                <AsyncButton
+                  :disabled="pendingActions > 0"
                   :class="ui.primaryButton"
                   type="button"
-                  @click="emit('addStarbucksProfile')"
+                  :action="() => action('addStarbucksProfile')"
+                  success="保存しました"
                 >
                   <Save class="h-4 w-4" aria-hidden="true" /> 保存
-                </button>
+                </AsyncButton>
               </div>
             </template>
             <p v-else class="text-sm text-negative" role="alert">
@@ -931,9 +982,15 @@ const saveEditingApiKey = () => {
                 spellcheck="false"
             /></label>
             <div class="flex justify-end">
-              <button :class="ui.primaryButton" type="button" @click="emit('addAuthManager')">
+              <AsyncButton
+                :disabled="pendingActions > 0"
+                :class="ui.primaryButton"
+                type="button"
+                :action="() => action('addAuthManager')"
+                success="保存しました"
+              >
                 <Save class="h-4 w-4" aria-hidden="true" /> 保存
-              </button>
+              </AsyncButton>
             </div>
           </article>
           <article
@@ -945,13 +1002,15 @@ const saveEditingApiKey = () => {
               <strong class="text-fg">{{ manager.label }}</strong>
               <small class="text-fg-muted">Bitwarden</small>
             </span>
-            <button
+            <AsyncButton
+              :disabled="pendingActions > 0"
               :class="ui.dangerButton"
               type="button"
-              @click="emit('removeAuthManager', manager.id)"
+              :action="() => action('removeAuthManager', manager.id)"
+              success="削除しました"
             >
               <Trash2 class="h-4 w-4" aria-hidden="true" /> 削除
-            </button>
+            </AsyncButton>
           </article>
         </div>
       </template>
@@ -965,9 +1024,16 @@ const saveEditingApiKey = () => {
         v-model:selected-auth-manager-id="selectedAuthManagerId"
         v-model:auth-manager-master-password="authManagerMasterPassword"
         @close="showPasskeyJsonDialog = false"
-        @fill="emit('fillProviderCredentials', passkeyJsonProvider)"
+        :fill="
+          async () => {
+            await action('fillProviderCredentials', passkeyJsonProvider)
+            showPasskeyJsonDialog = false
+          }
+        "
       />
       <UiModal
+        :close-on-backdrop="pendingActions === 0"
+        :close-on-escape="pendingActions === 0"
         v-if="unavailableProfile"
         key="availability-detail"
         :title="unavailableProfile.label"
@@ -993,23 +1059,38 @@ const saveEditingApiKey = () => {
         </template>
       </UiModal>
       <UiModal
+        :close-on-backdrop="pendingActions === 0"
+        :close-on-escape="pendingActions === 0"
         v-if="editingApiKey"
         :title="editingApiKey.label"
         size="lg"
         @close="closeApiKeyEditor"
       >
         <template #actions>
-          <button :class="ui.ghostButton" type="button" @click="closeApiKeyEditor">
+          <button
+            :disabled="pendingActions > 0"
+            :class="ui.ghostButton"
+            type="button"
+            @click="closeApiKeyEditor"
+          >
             キャンセル
           </button>
-          <button :class="ui.primaryButton" type="button" @click="saveEditingApiKey">
+          <AsyncButton
+            :disabled="pendingActions > 0"
+            :class="ui.primaryButton"
+            type="button"
+            :action="saveEditingApiKey"
+            success="保存しました"
+          >
             <Save class="h-4 w-4" aria-hidden="true" />
             保存
-          </button>
+          </AsyncButton>
         </template>
         <ApiKeyPolicyEditor v-model="editingApiKey" permissions-open />
       </UiModal>
       <UiModal
+        :close-on-backdrop="pendingActions === 0"
+        :close-on-escape="pendingActions === 0"
         v-if="profileToDelete"
         key="delete-provider-profile"
         title="接続を削除しますか？"
@@ -1020,12 +1101,23 @@ const saveEditingApiKey = () => {
           を削除すると、この接続の認証情報も削除されます。この操作は元に戻せません。
         </p>
         <template #actions>
-          <button :class="ui.ghostButton" type="button" @click="profileToDelete = null">
+          <button
+            :disabled="pendingActions > 0"
+            :class="ui.ghostButton"
+            type="button"
+            @click="profileToDelete = null"
+          >
             キャンセル
           </button>
-          <button :class="ui.dangerButton" type="button" @click="confirmProfileDeletion">
+          <AsyncButton
+            :disabled="pendingActions > 0"
+            :class="ui.dangerButton"
+            type="button"
+            :action="confirmProfileDeletion"
+            success="削除しました"
+          >
             <Trash2 class="h-4 w-4" aria-hidden="true" /> 削除
-          </button>
+          </AsyncButton>
         </template>
       </UiModal>
     </AnimatePresence>

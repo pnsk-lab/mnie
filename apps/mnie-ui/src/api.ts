@@ -271,6 +271,7 @@ export interface MobileSuicaTransaction {
 
 const httpRequest = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(`/api${path}`, {
+    signal: AbortSignal.timeout(60_000),
     cache: 'no-store',
     credentials: 'include',
     headers: {
@@ -302,7 +303,12 @@ const connectAdminSocket = () => {
   if (adminSocketReady) return adminSocketReady
   adminSocketReady = new Promise<WebSocket>((resolve, reject) => {
     const socket = createRpcSocket()
+    const timeout = setTimeout(() => {
+      reject(new Error('接続がタイムアウトしました。接続状態を確認してください。'))
+      socket.close()
+    }, 30_000)
     socket.addEventListener('open', () => {
+      clearTimeout(timeout)
       adminSocket = socket
       adminSocketReady = undefined
       resolve(socket)
@@ -319,10 +325,16 @@ const connectAdminSocket = () => {
       if (!pending) return
       adminPending.delete(response.id)
       if (response.error) pending.reject(new Error(response.error.message || 'RPC request failed'))
-      else pending.resolve(response.result)
+      else if ('result' in response) pending.resolve(response.result)
+      else pending.reject(new Error('サーバーからの応答が不正です'))
     })
-    socket.addEventListener('error', () => reject(new Error('WebSocket connection failed')))
+    socket.addEventListener('error', () => {
+      reject(new Error('サーバーに接続できませんでした'))
+      socket.close()
+    })
     socket.addEventListener('close', () => {
+      clearTimeout(timeout)
+      reject(new Error('サーバーとの接続が切れました'))
       if (adminSocket === socket) adminSocket = undefined
       adminSocketReady = undefined
       for (const pending of adminPending.values()) pending.reject(new Error('WebSocket closed'))
@@ -335,11 +347,32 @@ const connectAdminSocket = () => {
 const rpcRequest = async <T>(method: string, params?: unknown): Promise<T> => {
   const socket = await connectAdminSocket()
   const id = ++adminRpcId
-  const response = new Promise<T>((resolve, reject) => {
-    adminPending.set(id, { resolve: (value) => resolve(value as T), reject })
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      adminPending.delete(id)
+      reject(
+        new Error(
+          '応答がタイムアウトしました。操作が反映されているか確認してから再試行してください。',
+        ),
+      )
+    }, 60_000)
+    adminPending.set(id, {
+      resolve: (value) => {
+        clearTimeout(timeout)
+        resolve(value as T)
+      },
+      reject: (cause) => {
+        clearTimeout(timeout)
+        reject(cause)
+      },
+    })
+    try {
+      socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
+    } catch (cause) {
+      adminPending.get(id)?.reject(cause)
+      adminPending.delete(id)
+    }
   })
-  socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
-  return response
 }
 
 const adminRequest = <T>(operation: string, input: Record<string, unknown> = {}) =>

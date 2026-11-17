@@ -156,7 +156,7 @@ export const ui = {
     'flex flex-wrap items-center justify-between gap-2 rounded-[18px] border border-border bg-inset px-5 py-4',
   holdingNote:
     'rounded-[16px] border border-border bg-inset px-4 py-3 text-sm font-semibold text-fg-secondary',
-  actions: 'grid gap-3',
+  actions: 'flex flex-wrap items-center justify-end gap-3',
   primaryButton:
     'inline-flex min-h-10 items-center justify-center gap-2 rounded-full bg-primary px-5 font-extrabold text-on-primary transition hover:bg-primary-soft disabled:opacity-50',
   dangerButton:
