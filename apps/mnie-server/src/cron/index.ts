@@ -123,6 +123,7 @@ export const createCronSystem = (
       const availability = availabilityCache.get(profile.id)
       if (!availability?.result.ok) continue
       const interval = providers.assetRefreshIntervalMs(profile)
+      if (!interval) continue
       const previous = lastAssetRuns.get(profile.id) ?? 0
       if (Date.now() - previous < interval) continue
       lastAssetRuns.set(profile.id, Date.now())

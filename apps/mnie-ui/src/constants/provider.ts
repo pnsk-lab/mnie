@@ -6,6 +6,7 @@ export const defaultProviderColors: Record<string, string> = {
   'paypay-bank': '#f5bac4',
   'paypay-sec': '#ff003c',
   'starbucks-jp': '#00704a',
+  vpass: '#00963c',
   sbisec: '#0a3e86',
 }
 

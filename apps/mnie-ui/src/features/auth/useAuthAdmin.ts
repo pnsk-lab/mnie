@@ -23,6 +23,7 @@ import {
   savePayPayBankProfile,
   savePayPaySecProfile,
   saveStarbucksProfile,
+  saveVpassProfile,
   updateApiKeySettings,
   updateAccountProfile,
   verifyLogin,
@@ -79,6 +80,10 @@ export const useAuthAdmin = () => {
   const starbucksLabel = ref('スターバックス')
   const starbucksUsername = ref('')
   const starbucksPassword = ref('')
+  const vpassLabel = ref('Vpass')
+  const vpassLoginId = ref('')
+  const vpassPassword = ref('')
+  const vpassIdKind = ref<'vpass' | 'fa'>('vpass')
 
   watch(payPayBankBranchNo, (value) => {
     const match = /^(\d{3})-(\d{1,7})$/.exec(value)
@@ -256,7 +261,7 @@ export const useAuthAdmin = () => {
     }
     const credential = credentials[0]!
     if (
-      ['smbc-direct', 'paypay-bank', 'starbucks-jp'].includes(provider) &&
+      ['smbc-direct', 'paypay-bank', 'starbucks-jp', 'vpass'].includes(provider) &&
       (!credential.username || !credential.password)
     ) {
       throw new Error('ユーザー名またはパスワードが見つかりませんでした')
@@ -296,6 +301,12 @@ export const useAuthAdmin = () => {
     if (provider === 'starbucks-jp') {
       starbucksUsername.value = credential.username ?? ''
       starbucksPassword.value = credential.password ?? ''
+      authManagerMasterPassword.value = ''
+      return
+    }
+    if (provider === 'vpass') {
+      vpassLoginId.value = credential.username ?? ''
+      vpassPassword.value = credential.password ?? ''
       authManagerMasterPassword.value = ''
     }
   }
@@ -368,6 +379,18 @@ export const useAuthAdmin = () => {
     await refreshAfterMutation()
   }
 
+  const addVpassProfile = async () => {
+    const { profile } = await saveVpassProfile({
+      label: vpassLabel.value,
+      loginId: vpassLoginId.value,
+      password: vpassPassword.value,
+      idKind: vpassIdKind.value,
+    })
+    selectedProfileId.value = profile.id
+    vpassPassword.value = ''
+    await refreshAfterMutation()
+  }
+
   return {
     statusLoaded,
     status,
@@ -408,6 +431,11 @@ export const useAuthAdmin = () => {
     starbucksLabel,
     starbucksUsername,
     starbucksPassword,
+    vpassLabel,
+    vpassLoginId,
+    vpassPassword,
+    vpassIdKind,
+    addVpassProfile,
     refresh,
     forceProfileAvailability,
     addApiKey,

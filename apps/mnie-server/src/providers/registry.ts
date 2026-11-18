@@ -22,6 +22,14 @@ import {
   type SmbcDirectSession,
 } from '@mnie/provider-smbc-direct'
 import {
+  connect as connectVpass,
+  createProvider as createVpassProvider,
+  resume as resumeVpass,
+  VpassAuthError,
+  type VpassProfile,
+  type VpassSession,
+} from '@mnie/provider-vpass'
+import {
   createStarbucksIoBlackboxRuntimeFromLogin,
   createStarbucksJpClient,
   createStarbucksProvider,
@@ -52,6 +60,7 @@ import type {
   StoredSbiPasskeySecret,
   StoredStarbucksSecret,
   StoredSmbcDirectSecret,
+  StoredVpassSecret,
 } from './credentials'
 import { openPayPaySec } from './paypay-sec'
 import { normalizePayPaySecCredential } from './paypay-sec-options'
@@ -129,6 +138,11 @@ const compactDate = (date: Date) => {
 
 const dashedDate = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+
+const tokyoDashedDate = (date: Date) => {
+  const compact = compactDate(date)
+  return `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6, 8)}`
+}
 
 const splitDateRange = (from: Date, to: Date): [Date, Date, Date, Date] | undefined => {
   const start = new Date(from)
@@ -218,6 +232,18 @@ export class ProviderRegistry {
         ],
       },
       {
+        id: 'vpass',
+        name: 'Vpass',
+        kind: 'other',
+        authentication: 'credentials',
+        defaultColor: '#00963c',
+        credentialFields: [
+          { name: 'loginId', kind: 'text', required: true, secret: true },
+          { name: 'password', kind: 'password', required: true, secret: true },
+          { name: 'idKind', kind: 'text', required: false, secret: false },
+        ],
+      },
+      {
         id: 'starbucks-jp',
         name: 'スターバックス',
         kind: 'other',
@@ -265,7 +291,9 @@ export class ProviderRegistry {
                 ? this.config.starbucksLoginOrigin
                 : providerId === 'paypay-sec'
                   ? this.config.payPaySecPasskeyOrigin
-                  : undefined
+                  : providerId === 'vpass'
+                    ? this.config.vpassWebBaseUrl
+                    : undefined
     if (!configured) throw new Error(`provider origin is not configured: ${providerId}`)
     return new URL(configured).origin
   }
@@ -343,6 +371,14 @@ export class ProviderRegistry {
         username: requiredCredential(credentials, 'username'),
         password: requiredCredential(credentials, 'password'),
       } satisfies StoredStarbucksSecret)
+    } else if (providerId === 'vpass') {
+      const idKind = optionalCredential(credentials.idKind) ?? 'vpass'
+      if (idKind !== 'vpass' && idKind !== 'fa') throw new Error('idKind must be vpass or fa')
+      await saveSecret(keyringAccount, {
+        loginId: requiredCredential(credentials, 'loginId'),
+        password: requiredCredential(credentials, 'password'),
+        idKind,
+      } satisfies StoredVpassSecret)
     } else {
       throw new Error(`provider profile creation is not registered: ${providerId}`)
     }
@@ -427,6 +463,85 @@ export class ProviderRegistry {
       }
     }
 
+    if (profile.provider === 'vpass') {
+      // Independent of the operation lock: RPC connections can stay open while
+      // background jobs authenticate, and persist may run after that newer login.
+      const sessionLock = `vpass-session:${profile.keyringAccount}`
+      return withProfileLock(sessionLock, async () => {
+        const secret = await readSecret<StoredVpassSecret>(profile.keyringAccount)
+        const apiBaseURL = this.config.vpassApiBaseUrl
+        const webBaseURL = this.config.vpassWebBaseUrl
+        const appVersion = this.config.vpassAppVersion
+        if (!apiBaseURL || !webBaseURL || !appVersion) {
+          throw new Error(
+            'VPASS_API_BASE_URL, VPASS_WEB_BASE_URL, and VPASS_APP_VERSION are required',
+          )
+        }
+        const savedDeviceId = secret.deviceId ?? secret.session?.deviceId
+        const base = {
+          apiBaseURL,
+          webBaseURL,
+          appVersion,
+          ...(this.config.vpassOsVersion ? { osVersion: this.config.vpassOsVersion } : {}),
+          ...(this.config.vpassUserAgent ? { userAgent: this.config.vpassUserAgent } : {}),
+          idKind: secret.idKind ?? ('vpass' as const),
+          // Spread rather than assigned: `resume` merges overrides last, so an
+          // explicit `deviceId: undefined` would discard the stored one and mint
+          // a new device on every login.
+          ...(savedDeviceId ? { deviceId: savedDeviceId } : {}),
+        }
+        const resumeOverrides = {
+          apiBaseURL,
+          webBaseURL,
+          appVersion,
+          ...(this.config.vpassOsVersion ? { osVersion: this.config.vpassOsVersion } : {}),
+          ...(this.config.vpassUserAgent ? { userAgent: this.config.vpassUserAgent } : {}),
+        }
+        const initialize = async (connected: VpassProfile) => {
+          // Authentication rotates the token and may mint the first device UUID.
+          // Persist both before any later provider operation can fail.
+          await saveSecret(profile.keyringAccount, {
+            ...secret,
+            deviceId: connected.session.deviceId,
+            session: connected.session,
+          } satisfies StoredVpassSecret)
+          return { connected, vpassProvider: await createVpassProvider(connected) }
+        }
+        // Retry password authentication only for explicit authentication rejection,
+        // including the initial card lookup. Transport and protocol failures escape.
+        const { connected, vpassProvider } = await (async () => {
+          if (!options.forceLogin && secret.session?.token) {
+            try {
+              return await initialize(
+                await resumeVpass(secret.session as VpassSession, resumeOverrides),
+              )
+            } catch (cause) {
+              if (!(cause instanceof VpassAuthError)) throw cause
+            }
+          }
+          return initialize(
+            await connectVpass({ ...base, loginId: secret.loginId, password: secret.password }),
+          )
+        })()
+        const provider = asProvider(vpassProvider)
+        return {
+          profile,
+          provider,
+          persist: () =>
+            withProfileLock(sessionLock, async () => {
+              const current = await readSecret<StoredVpassSecret>(profile.keyringAccount)
+              // Another open may have consumed this provider's token already.
+              if (current.session?.token !== connected.session.token) return
+              await saveSecret(profile.keyringAccount, {
+                ...current,
+                deviceId: connected.session.deviceId,
+                session: vpassProvider.exportSession() as VpassSession,
+              } satisfies StoredVpassSecret)
+            }),
+          release: async () => {},
+        }
+      })
+    }
     if (profile.provider === 'paypay-bank') {
       const secret = await readSecret<StoredPayPayBankSecret>(profile.keyringAccount)
       const imported =
@@ -594,7 +709,10 @@ export class ProviderRegistry {
       let availability = await this.availabilityForProvider(open.provider)
       if (
         !availability.connection.ok &&
-        (profile.provider === 'paypay-bank' || profile.provider === 'starbucks-jp')
+        (profile.provider === 'paypay-bank' ||
+          profile.provider === 'starbucks-jp' ||
+          (profile.provider === 'vpass' &&
+            availability.connection.reason === 'AUTHENTICATION_REQUIRED'))
       ) {
         const expired = open
         open = undefined
@@ -788,7 +906,9 @@ export class ProviderRegistry {
       const initial = await check()
       if (
         !initial.connection.ok &&
-        (profile.provider === 'paypay-bank' || profile.provider === 'starbucks-jp')
+        (profile.provider === 'paypay-bank' ||
+          profile.provider === 'starbucks-jp' ||
+          (profile.provider === 'vpass' && initial.connection.reason === 'AUTHENTICATION_REQUIRED'))
       ) {
         return check(true)
       }
@@ -833,7 +953,13 @@ export class ProviderRegistry {
     return { connection, operations, checkedAt }
   }
 
+  supportsAssetValuation(profile: AccountProfile) {
+    // VPass statements expose neither a balance nor per-transaction balances.
+    return profile.provider !== 'vpass'
+  }
+
   assetRefreshIntervalMs(profile: AccountProfile) {
+    if (!this.supportsAssetValuation(profile)) return undefined
     return profile.provider === 'sbisec' || profile.provider === 'starbucks-jp'
       ? 5 * 60_000
       : 60 * 60_000
@@ -857,6 +983,13 @@ export class ProviderRegistry {
     }
     if (profile.provider === 'starbucks-jp') {
       return { from: from.toISOString(), to: to.toISOString(), kinds: ['transaction'] as const }
+    }
+    if (profile.provider === 'vpass') {
+      return {
+        from: tokyoDashedDate(from),
+        to: tokyoDashedDate(to),
+        kinds: ['transaction'] as const,
+      }
     }
     return { kinds: ['transaction'] as const }
   }

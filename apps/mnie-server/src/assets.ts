@@ -25,6 +25,9 @@ export const fetchAssetValuation = async (
   providers: ProviderRegistry,
   profile: Profile,
 ): Promise<AssetValuationResult> => {
+  if (!providers.supportsAssetValuation(profile)) {
+    throw new Error(`${profile.provider} does not support asset valuation`)
+  }
   return providers.use(profile, async ({ provider }) => {
     if (provider.operations().includes('assets.valuation.get')) {
       const result = (await provider.invoke('assets.valuation.get', {})) as AssetValuation
@@ -100,7 +103,10 @@ export const ensureInitialAssetValuations = async (db: Db, providers: ProviderRe
 
   const results = await Promise.allSettled(
     profiles
-      .filter((profile) => !existingProfileIds.has(profile.id))
+      .filter(
+        (profile) =>
+          providers.supportsAssetValuation(profile) && !existingProfileIds.has(profile.id),
+      )
       .map(async (profile) => {
         try {
           const valuation = await fetchAssetValuation(providers, profile)

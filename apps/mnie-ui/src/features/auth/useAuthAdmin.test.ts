@@ -4,6 +4,7 @@ import {
   updateApiKeySettings,
   getStatus,
   saveStarbucksProfile,
+  saveVpassProfile,
 } from '../../api'
 import { useAuthAdmin } from './useAuthAdmin'
 import { notifications } from '../feedback/feedback'
@@ -14,6 +15,7 @@ vi.mock('../../api', async (importOriginal) => ({
   updateApiKeySettings: vi.fn(),
   getStatus: vi.fn(),
   saveStarbucksProfile: vi.fn(),
+  saveVpassProfile: vi.fn(),
 }))
 beforeEach(() => {
   vi.resetAllMocks()
@@ -80,6 +82,49 @@ describe('credential input survives unsuccessful actions', () => {
       'key',
       expect.objectContaining({ scopes: ['read'] }),
     )
+    expect(notifications.value[0]?.message).toContain('変更は保存されましたが')
+  })
+
+  test('VPass fill preserves existing inputs on incomplete credentials and clears the master password on success', async () => {
+    const admin = adminWithPassword()
+    admin.vpassLoginId.value = 'original-user'
+    admin.vpassPassword.value = 'original-password'
+    vi.mocked(fillFromAuthManager).mockResolvedValue({
+      credentials: [{ ...credential, password: '' }],
+    })
+    await expect(admin.fillProviderCredentials('vpass')).rejects.toThrow('見つかりません')
+    expect(admin.vpassLoginId.value).toBe('original-user')
+    expect(admin.vpassPassword.value).toBe('original-password')
+    expect(admin.authManagerMasterPassword.value).toBe('entered')
+
+    vi.mocked(fillFromAuthManager).mockResolvedValue({ credentials: [credential] })
+    await admin.fillProviderCredentials('vpass')
+    expect(admin.vpassLoginId.value).toBe('user')
+    expect(admin.vpassPassword.value).toBe('filled')
+    expect(admin.authManagerMasterPassword.value).toBe('')
+  })
+
+  test('a saved VPass profile is not reported as a failed save when reloading fails', async () => {
+    const admin = useAuthAdmin()
+    admin.vpassPassword.value = 'entered'
+    vi.mocked(saveVpassProfile).mockResolvedValue({
+      profile: {
+        id: 'vpass-profile',
+        provider: 'vpass',
+        providerName: 'VPass',
+        category: 'other',
+        defaultColor: '#00963c',
+        color: null,
+        label: 'VPass',
+        createdAt: '',
+        updatedAt: '',
+      },
+    })
+    vi.mocked(getStatus).mockRejectedValue(new Error('offline'))
+
+    await expect(admin.addVpassProfile()).resolves.toBeUndefined()
+    expect(admin.selectedProfileId.value).toBe('vpass-profile')
+    expect(admin.vpassPassword.value).toBe('')
     expect(notifications.value[0]?.message).toContain('変更は保存されましたが')
   })
 })

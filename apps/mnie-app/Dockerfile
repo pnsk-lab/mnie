@@ -12,6 +12,7 @@ COPY packages/provider-mobile-suica/package.json packages/provider-mobile-suica/
 COPY packages/provider-paypay/package.json packages/provider-paypay/package.json
 COPY packages/provider-paypay-sec/package.json packages/provider-paypay-sec/package.json
 COPY packages/provider-paypay-bank/package.json packages/provider-paypay-bank/package.json
+COPY packages/provider-vpass/package.json packages/provider-vpass/package.json
 COPY packages/provider-smbc-direct/package.json packages/provider-smbc-direct/package.json
 COPY packages/starbucks-jp/package.json packages/starbucks-jp/package.json
 COPY packages/mnie-types/package.json packages/mnie-types/package.json

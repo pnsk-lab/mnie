@@ -4,6 +4,7 @@ import {
   Building2,
   Coffee,
   ChevronRight,
+  CreditCard,
   ChevronLeft,
   Import,
   KeyRound,
@@ -87,16 +88,20 @@ const payPaySecTradePassword = defineModel<string>('payPaySecTradePassword', { r
 const starbucksLabel = defineModel<string>('starbucksLabel', { required: true })
 const starbucksUsername = defineModel<string>('starbucksUsername', { required: true })
 const starbucksPassword = defineModel<string>('starbucksPassword', { required: true })
+const vpassLabel = defineModel<string>('vpassLabel', { required: true })
+const vpassLoginId = defineModel<string>('vpassLoginId', { required: true })
+const vpassPassword = defineModel<string>('vpassPassword', { required: true })
+const vpassIdKind = defineModel<'vpass' | 'fa'>('vpassIdKind', { required: true })
 const pendingActions = ref(0)
 const editedLabel = ref('')
 const editedColor = ref('')
 const editedTradePassword = ref('')
-const showPasskeyJsonDialog = ref(false)
-const passkeyJsonProvider = ref<'sbisec' | 'paypay-sec'>('sbisec')
+const showCredentialImportDialog = ref(false)
+const credentialImportProvider = ref<'sbisec' | 'paypay-sec' | 'vpass'>('sbisec')
 
-const openPasskeyJsonDialog = (provider: 'sbisec' | 'paypay-sec') => {
-  passkeyJsonProvider.value = provider
-  showPasskeyJsonDialog.value = true
+const openCredentialImportDialog = (provider: 'sbisec' | 'paypay-sec' | 'vpass') => {
+  credentialImportProvider.value = provider
+  showCredentialImportDialog.value = true
 }
 
 const action = async <K extends keyof SettingsActions>(
@@ -170,6 +175,7 @@ const providerPresentation = (provider: ProviderDefinition) => {
   if (provider.kind === 'bank') return { icon: Building2, description: '銀行口座・残高' }
   if (provider.kind === 'transit-card') return { icon: TrainFront, description: '利用履歴' }
   if (provider.id === 'starbucks-jp') return { icon: Coffee, description: 'カード残高・利用履歴' }
+  if (provider.id === 'vpass') return { icon: CreditCard, description: 'カード利用明細' }
   return { icon: WalletCards, description: provider.kind }
 }
 
@@ -647,7 +653,7 @@ const saveEditingApiKey = async () => {
                     type="button"
                     title="パスキー JSON をインポート"
                     aria-label="パスキー JSON をインポート"
-                    @click="openPasskeyJsonDialog('sbisec')"
+                    @click="openCredentialImportDialog('sbisec')"
                   >
                     <Import class="h-4 w-4" aria-hidden="true" />
                   </button>
@@ -700,7 +706,7 @@ const saveEditingApiKey = async () => {
                     type="button"
                     title="パスキー JSON をインポート"
                     aria-label="パスキー JSON をインポート"
-                    @click="openPasskeyJsonDialog('paypay-sec')"
+                    @click="openCredentialImportDialog('paypay-sec')"
                   >
                     <Import class="h-4 w-4" aria-hidden="true" />
                   </button>
@@ -881,6 +887,58 @@ const saveEditingApiKey = async () => {
                 </AsyncButton>
               </div>
             </template>
+            <template v-else-if="selectedProvider === 'vpass'">
+              <label :class="ui.label">
+                名前<input
+                  v-model="vpassLabel"
+                  :class="ui.input"
+                  placeholder="例: 三井住友カード"
+                />
+              </label>
+              <label :class="ui.label">
+                ID種別<select v-model="vpassIdKind" :class="ui.input">
+                  <option value="vpass">Vpass ID</option>
+                  <option value="fa">統合ID</option>
+                </select>
+              </label>
+              <div class="grid gap-2">
+                <div class="flex items-center justify-between gap-3">
+                  <label for="vpass-login-id" :class="ui.label">ログインID</label>
+                  <button
+                    :class="ui.ghostButton"
+                    type="button"
+                    @click="openCredentialImportDialog('vpass')"
+                  >
+                    <Import class="h-4 w-4" aria-hidden="true" /> Bitwarden から読み込む
+                  </button>
+                </div>
+                <input
+                  id="vpass-login-id"
+                  v-model="vpassLoginId"
+                  :class="ui.input"
+                  type="text"
+                  autocomplete="username"
+                />
+              </div>
+              <label :class="ui.label">
+                ログインパスワード<input
+                  v-model="vpassPassword"
+                  :class="ui.input"
+                  type="password"
+                  autocomplete="current-password"
+                />
+              </label>
+              <div class="flex justify-end">
+                <AsyncButton
+                  :disabled="pendingActions > 0"
+                  :class="ui.primaryButton"
+                  :action="() => action('addVpassProfile')"
+                  success="保存しました"
+                >
+                  <Save class="h-4 w-4" aria-hidden="true" /> 保存
+                </AsyncButton>
+              </div>
+            </template>
             <p v-else class="text-sm text-negative" role="alert">
               このプロバイダーの認証フォームはまだ実装されていません。登録層に認証処理を追加してください。
             </p>
@@ -1018,16 +1076,16 @@ const saveEditingApiKey = async () => {
 
     <AnimatePresence>
       <AuthManagerPasskeyDialog
-        v-if="showPasskeyJsonDialog"
-        key="passkey-json-import"
+        v-if="showCredentialImportDialog"
+        key="credential-import"
         :auth-managers="authManagers"
         v-model:selected-auth-manager-id="selectedAuthManagerId"
         v-model:auth-manager-master-password="authManagerMasterPassword"
-        @close="showPasskeyJsonDialog = false"
+        @close="showCredentialImportDialog = false"
         :fill="
           async () => {
-            await action('fillProviderCredentials', passkeyJsonProvider)
-            showPasskeyJsonDialog = false
+            await action('fillProviderCredentials', credentialImportProvider)
+            showCredentialImportDialog = false
           }
         "
       />

@@ -12,6 +12,7 @@ export interface SettingsActionArgs {
   addPayPayBankProfile: []
   addPayPaySecProfile: []
   addStarbucksProfile: []
+  addVpassProfile: []
   finishSmbc2fa: []
   forceProfileAvailability: [profileId: string]
   connect: []
