@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import Spinner from './Spinner.vue'
 withDefaults(
   defineProps<{
+    loading?: boolean
+    disabled?: boolean
     variant?: 'primary' | 'danger' | 'ghost' | 'plain'
     size?: 'sm' | 'md'
     type?: 'button' | 'submit' | 'reset'
@@ -29,13 +32,16 @@ const sizeClass = {
 <template>
   <button
     :type="type"
+    :disabled="disabled || loading"
+    :aria-busy="loading"
     :class="[
-      'rounded-full font-extrabold outline-none transition disabled:cursor-not-allowed disabled:opacity-50',
+      'rounded-full font-extrabold outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition disabled:cursor-not-allowed disabled:opacity-50',
       'inline-flex items-center justify-center gap-2',
       variantClass[variant],
       sizeClass[size],
     ]"
   >
+    <Spinner v-if="loading" size="sm" aria-hidden="true" />
     <slot />
   </button>
 </template>

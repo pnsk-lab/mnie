@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { AnimatePresence } from 'motion-v'
 import {
   ArrowLeft,
@@ -25,6 +25,7 @@ const props = defineProps<{
   cancelingOrderKey: string
   orderHistoryLoaded: boolean
   orderHistoryNotice: string
+  cancelOrder: (order: OrderRow) => Promise<boolean>
   loadOrderDetail: (order: OrderRow) => Promise<OrderDetail>
   loadTradeRecords: () => Promise<TradeRecordRow[]>
   estimateOrderCorrection: (
@@ -39,7 +40,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   refresh: []
-  cancel: [order: OrderRow]
 }>()
 
 const cancelCandidate = ref<OrderRow | null>(null)
@@ -69,6 +69,15 @@ const correctionPriceInput = ref('')
 const correctionPreview = ref<OrderPreview | null>(null)
 const correctionLoading = ref(false)
 const correctionSubmitting = ref(false)
+let correctionPreviewVersion = 0
+watch(
+  [correctionQuantityInput, correctionPriceCondition, correctionPriceInput],
+  () => {
+    correctionPreviewVersion += 1
+    correctionPreview.value = null
+  },
+  { flush: 'sync' },
+)
 
 const orderActionKey = (order: OrderRow) => orderHistoryKey(order)
 const numericInput = (value: string) => {
@@ -95,10 +104,9 @@ const askCancel = (order: OrderRow) => {
   cancelCandidate.value = order
 }
 
-const confirmCancel = () => {
-  if (!cancelCandidate.value) return
-  emit('cancel', cancelCandidate.value)
-  cancelCandidate.value = null
+const confirmCancel = async () => {
+  if (!cancelCandidate.value || props.cancelingOrderKey) return
+  if (await props.cancelOrder(cancelCandidate.value)) cancelCandidate.value = null
 }
 
 const showOrderDetail = async (order: OrderRow) => {
@@ -142,11 +150,14 @@ const estimateCorrection = async () => {
   if (!correctionCandidate.value || correctionLoading.value) return
   orderActionError.value = ''
   correctionLoading.value = true
+  correctionPreview.value = null
+  const version = correctionPreviewVersion
   try {
-    correctionPreview.value = await props.estimateOrderCorrection(
+    const preview = await props.estimateOrderCorrection(
       correctionCandidate.value,
       correctionDraft(),
     )
+    if (version === correctionPreviewVersion) correctionPreview.value = preview
   } catch (cause) {
     orderActionError.value = cause instanceof Error ? cause.message : '注文訂正の見積に失敗しました'
   } finally {
@@ -155,7 +166,13 @@ const estimateCorrection = async () => {
 }
 
 const confirmCorrection = async () => {
-  if (!correctionCandidate.value || correctionSubmitting.value) return
+  if (
+    !correctionCandidate.value ||
+    !correctionPreview.value ||
+    correctionLoading.value ||
+    correctionSubmitting.value
+  )
+    return
   orderActionError.value = ''
   correctionSubmitting.value = true
   try {
@@ -191,12 +208,13 @@ const confirmCorrection = async () => {
           :disabled="!connected || dataLoading"
           @click="emit('refresh')"
         >
-          <RefreshCw class="h-4 w-4" aria-hidden="true" />
+          <Spinner v-if="dataLoading" size="sm" />
+          <RefreshCw v-else class="h-4 w-4" aria-hidden="true" />
           更新
         </button>
       </span>
     </div>
-    <p v-if="orderActionError" :class="ui.dialogNote">{{ orderActionError }}</p>
+    <p v-if="orderActionError" :class="ui.dialogNote" role="alert">{{ orderActionError }}</p>
     <div :class="ui.list">
       <div v-for="order in orders" :key="order.id" :class="ui.orderRow">
         <span>
@@ -367,6 +385,8 @@ const confirmCorrection = async () => {
       key="correction-dialog"
       eyebrow="注文訂正"
       :title="correctionCandidate.stock"
+      :close-on-backdrop="!correctionLoading && !correctionSubmitting"
+      :close-on-escape="!correctionLoading && !correctionSubmitting"
       @close="correctionCandidate = null"
     >
       <dl :class="ui.confirmList">
@@ -383,7 +403,10 @@ const confirmCorrection = async () => {
           <dd>{{ priceText(correctionCandidate.price, correctionCandidate.market) }}</dd>
         </div>
       </dl>
-      <div class="grid gap-3">
+      <p v-if="orderActionError" class="text-sm text-negative" role="alert">
+        {{ orderActionError }}
+      </p>
+      <fieldset :disabled="correctionSubmitting" class="grid gap-3">
         <label :class="ui.label">
           数量
           <input
@@ -413,7 +436,7 @@ const confirmCorrection = async () => {
             @input="correctionPreview = null"
           />
         </label>
-      </div>
+      </fieldset>
       <dl v-if="correctionPreview" :class="ui.confirmList">
         <div :class="ui.confirmRow">
           <dt>見積数量</dt>
@@ -431,18 +454,22 @@ const confirmCorrection = async () => {
         </div>
       </dl>
       <div :class="ui.actions">
-        <UiButton variant="ghost" @click="correctionCandidate = null">
+        <UiButton
+          variant="ghost"
+          :disabled="correctionLoading || correctionSubmitting"
+          @click="correctionCandidate = null"
+        >
           <ArrowLeft class="h-4 w-4" aria-hidden="true" />
           戻る
         </UiButton>
-        <UiButton :disabled="correctionLoading" @click="estimateCorrection">
+        <UiButton :disabled="correctionLoading || correctionSubmitting" @click="estimateCorrection">
           <Spinner v-if="correctionLoading" size="sm" />
           <ShieldCheck v-else class="h-4 w-4" aria-hidden="true" />
           見積
         </UiButton>
         <UiButton
           variant="danger"
-          :disabled="!correctionPreview || correctionSubmitting"
+          :disabled="!correctionPreview || correctionLoading || correctionSubmitting"
           @click="confirmCorrection"
         >
           <Spinner v-if="correctionSubmitting" size="sm" />
@@ -459,6 +486,8 @@ const confirmCorrection = async () => {
       key="cancel-order-dialog"
       eyebrow="注文取消"
       :title="cancelTitle"
+      :close-on-backdrop="!cancelingOrderKey"
+      :close-on-escape="!cancelingOrderKey"
       @close="cancelCandidate = null"
     >
       <dl :class="ui.confirmList">
@@ -480,11 +509,15 @@ const confirmCorrection = async () => {
         </div>
       </dl>
       <div :class="ui.actions">
-        <UiButton variant="ghost" @click="cancelCandidate = null">
+        <UiButton
+          variant="ghost"
+          :disabled="Boolean(cancelingOrderKey)"
+          @click="cancelCandidate = null"
+        >
           <ArrowLeft class="h-4 w-4" aria-hidden="true" />
           戻る
         </UiButton>
-        <UiButton variant="danger" @click="confirmCancel">
+        <UiButton variant="danger" :loading="Boolean(cancelingOrderKey)" @click="confirmCancel">
           <Ban class="h-4 w-4" aria-hidden="true" />
           注文取消
         </UiButton>

@@ -44,9 +44,11 @@ export const useOAuthApproval = () => {
     if (!oauthApproval.value.clientId) return
 
     const response = await fetch(`/api/oauth/client/${oauthApproval.value.clientId}`, {
+      signal: AbortSignal.timeout(60_000),
       credentials: 'include',
     })
-    if (!response.ok) return
+    if (!response.ok)
+      throw new Error((await response.text()) || '承認先の情報を取得できませんでした')
     const { client } = (await response.json()) as { client?: { client_name?: string } }
     oauthApproval.value.clientName = client?.client_name ?? oauthApproval.value.clientName
   }
@@ -54,6 +56,7 @@ export const useOAuthApproval = () => {
   const approveOAuth = async () => {
     const response = await fetch('/api/oauth/approve', {
       method: 'POST',
+      signal: AbortSignal.timeout(60_000),
       credentials: 'include',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -68,6 +71,7 @@ export const useOAuthApproval = () => {
     })
     if (!response.ok) throw new Error(await response.text())
     const { redirectTo } = (await response.json()) as { redirectTo: string }
+    if (!redirectTo) throw new Error('承認後の移動先が返されませんでした')
     location.href = redirectTo
   }
 

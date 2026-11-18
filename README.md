@@ -24,6 +24,16 @@ const positions = await workspace.profile('sbi_xxx').invoke('investments.positio
 Individual profiles implement `FinancialProvider`; cross-profile aggregation implements
 `FinancialWorkspace`. See `docs/docs/sdk/workspaces.md` for direct, local, and remote usage.
 
+## MCP
+
+Connect a Streamable HTTP MCP client to `/api/mcp` on your Mnie server origin.
+The legacy `/mcp` path is also supported. Authenticate through OAuth or an
+`Authorization: Bearer <API_KEY>` header. API keys retain their OAuth scopes and trade limits; owner administration requires an owner session.
+
+Start with `mnie-workspace-operations`, then use `mnie-workspace-invoke` with
+`operation: "profiles.list"`. Pass a returned profile ID to `mnie-profile-operations`
+and `mnie-profile-invoke`. MCP uses the same operations as WebSocket RPC.
+
 ## Apps
 
 - `apps/mnie-app`: bundled server plus UI runtime

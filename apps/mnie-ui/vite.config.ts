@@ -24,6 +24,7 @@ export default defineConfig({
         ...proxyToServer,
       },
       '/.well-known': proxyToServer,
+      '/mcp': proxyToServer,
       '/authorize': proxyToServer,
       '/token': proxyToServer,
       '/register': proxyToServer,
