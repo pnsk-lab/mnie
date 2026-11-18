@@ -14,6 +14,29 @@ import type { VpassProfile, VpassStatementEntry } from './profile'
 
 const PROVIDER_ID = 'vpass'
 
+/** Statement dates have day precision in Tokyo, regardless of the input offset. */
+const tokyoCalendarDate = (value: string | undefined): string | undefined => {
+  if (value === undefined) return undefined
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value)
+  const timestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
+    value,
+  )
+  const date = new Date(value)
+  const calendarDate = new Date(value.slice(0, 10))
+  if (
+    (!dateOnly && !timestamp) ||
+    !Number.isFinite(date.getTime()) ||
+    !Number.isFinite(calendarDate.getTime()) ||
+    calendarDate.toISOString().slice(0, 10) !== value.slice(0, 10)
+  ) {
+    throw new Error(
+      'VPass history bounds must be valid YYYY-MM-DD dates or ISO timestamps with a timezone',
+    )
+  }
+  if (dateOnly) return value
+  return new Date(date.getTime() + 9 * 60 * 60_000).toISOString().slice(0, 10)
+}
+
 /**
  * Statement rows carry no upstream identifier, so observations are aligned on a
  * content fingerprint instead. Date, merchant, direction and amount are the fields
@@ -111,13 +134,15 @@ export const createProvider = async (
 
   const listTransactions = async ({
     accountId: requestedAccountId,
-    from,
-    to,
+    from: requestedFrom,
+    to: requestedTo,
     limit,
   }: DateRangeRequest): Promise<Page<Transaction>> => {
     if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 0)) {
       throw new Error('VPass transaction history limit must be a non-negative safe integer')
     }
+    const from = tokyoCalendarDate(requestedFrom)
+    const to = tokyoCalendarDate(requestedTo)
     if ((requestedAccountId && requestedAccountId !== accountId) || limit === 0) {
       return { items: [] }
     }

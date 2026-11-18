@@ -297,6 +297,73 @@ describe.each(['transactions.list', 'history.list'] as const)('%s limits', (oper
 })
 
 describe.each(['transactions.list', 'history.list'] as const)('%s dated reads', (operation) => {
+  it.each(['', 'not-a-date', '2026-02-30', '2026-02-30T00:00:00+09:00', '2026-01-02T08:00:00'])(
+    'rejects invalid or timezone-less bounds %j before fetching statements',
+    async (value) => {
+      const calls: string[] = []
+      const provider = await providerWith({ default: meisai('202601', []) }, calls)
+
+      await expect(provider.invoke(operation, { from: value })).rejects.toThrow(/history bounds/)
+      await expect(provider.invoke(operation, { to: value })).rejects.toThrow(/history bounds/)
+      expect(calls).toEqual([])
+    },
+  )
+
+  it.each([
+    { from: '2026-01-02', to: '2026-01-02' },
+    { from: '2026-01-02T00:00:00+09:00', to: '2026-01-02T08:00:00+09:00' },
+    { from: '2026-01-02T08:00:00+09:00', to: '2026-01-02T23:00:00+09:00' },
+    { from: '2026-01-01T15:00:00Z', to: '2026-01-02T14:59:59Z' },
+    { from: '2026-01-01T07:00:00-08:00', to: '2026-01-02T06:59:59-08:00' },
+  ])('includes both Tokyo calendar bounds for $from to $to', async ({ from, to }) => {
+    const provider = await providerWith({
+      default: meisai('202601', [
+        { riyouDate: '26/01/01', kmName: 'Previous day', riyouKin: '100' },
+        { riyouDate: '26/01/02', kmName: 'In range', riyouKin: '200' },
+        { riyouDate: '26/01/03', kmName: 'Next day', riyouKin: '300' },
+      ]),
+    })
+
+    const { items } = await provider.invoke(operation, { from, to })
+
+    expect(items.map((item) => item.occurredAt)).toEqual(['2026-01-02T00:00:00+09:00'])
+  })
+
+  it('selects billing periods using the Tokyo month across New Year', async () => {
+    const calls: string[] = []
+    const statement = meisai(
+      '202603',
+      [{ riyouDate: '26/01/01', kmName: 'In range', riyouKin: '500' }],
+      ['202603'],
+    )
+    const provider = await providerWith({ default: statement, '202603': statement }, calls)
+
+    const { items } = await provider.invoke(operation, {
+      from: '2025-12-31T15:00:00Z',
+      to: '2025-12-31T23:00:00Z',
+    })
+
+    expect(items.map((item) => item.occurredAt)).toEqual(['2026-01-01T00:00:00+09:00'])
+    expect(calls).toContain('202603')
+  })
+
+  it.each(['from', 'to'] as const)('normalizes an open-ended %s bound', async (bound) => {
+    const provider = await providerWith({
+      default: meisai('202601', [
+        { riyouDate: '26/01/01', kmName: 'Earlier', riyouKin: '100' },
+        { riyouDate: '26/01/02', kmName: 'Later', riyouKin: '200' },
+      ]),
+    })
+
+    const { items } = await provider.invoke(operation, { [bound]: '2026-01-01T15:00:00Z' })
+
+    expect(items.map((item) => item.occurredAt)).toEqual(
+      bound === 'from'
+        ? ['2026-01-02T00:00:00+09:00']
+        : ['2026-01-02T00:00:00+09:00', '2026-01-01T00:00:00+09:00'],
+    )
+  })
+
   it.each([
     { from: '2026-06-01', to: '2026-06-30', period: '202608' },
     { from: '2026-11-01', to: '2026-11-30', period: '202701' },
