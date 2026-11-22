@@ -12,7 +12,7 @@
   },
   "scripts": {
     "build": "cd ../.. && cd packages/provider-paypay && vp pack",
-    "dev": "vp pack --watch",
+    "dev": "vp pack --watch --no-clean",
     "clean": "rm -rf dist",
     "typecheck": "tsc"
   },

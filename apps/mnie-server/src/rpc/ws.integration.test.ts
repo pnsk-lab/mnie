@@ -1,15 +1,19 @@
-import { afterAll, beforeAll, describe, expect, test } from 'vite-plus/test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { FinancialProvider, OperationMap } from '@mnie/types'
-import { connectMnie, type MnieWorkspace } from '../../../../packages/client-mnie/src/index'
+import type { FinancialProvider, MethodMap } from '@mnie/types'
 import { createServerApp } from '../app'
 import type { ServerConfig } from '../config'
 import { createDb } from '../db'
-import { accountProfiles } from '../db/schema'
+import { accountProfiles, financialAccounts } from '../db/schema'
 import type { ProviderRegistry } from '../providers/registry'
 import { createApiKey } from '../security/api-keys'
+import {
+  bindApiKeyToVirtualAccount,
+  createVirtualAccount,
+  initializeVirtualAccounts,
+} from '../virtual-accounts'
 
 describe('WebSocket RPC boundaries', () => {
   const directory = mkdtempSync(join(tmpdir(), 'mnie-ws-'))
@@ -24,13 +28,52 @@ describe('WebSocket RPC boundaries', () => {
   }
   const db = createDb(config.databasePath)
   let server: ReturnType<typeof Bun.serve>
-  let workspace: MnieWorkspace
   let token: string
+  let apiKeyId: string
   let providers: ProviderRegistry
   let closeRuntime: () => Promise<void>
 
+  const connect = () =>
+    new Promise<{ socket: WebSocket; greeting: { methods: string[] } }>((resolve, reject) => {
+      const socket = new WebSocket(`ws://localhost:${server.port}/api/ws?key=${token}`)
+      socket.addEventListener(
+        'message',
+        (event) => {
+          try {
+            const greeting = JSON.parse(String(event.data)).result as {
+              connected: boolean
+              methods: string[]
+            }
+            resolve({ socket, greeting })
+          } catch (cause) {
+            reject(cause)
+          }
+        },
+        { once: true },
+      )
+      socket.addEventListener('error', () => reject(new Error('socket failed')))
+    })
+
+  const call = (socket: WebSocket, id: number, method: string, params: Record<string, unknown>) =>
+    new Promise<{ result?: unknown; error?: { message?: string } }>((resolve, reject) => {
+      const onMessage = (event: MessageEvent) => {
+        const message = JSON.parse(String(event.data)) as {
+          id?: number
+          result?: unknown
+          error?: { message?: string }
+        }
+        if (message.id === id) {
+          socket.removeEventListener('message', onMessage)
+          resolve(message)
+        }
+      }
+      socket.addEventListener('message', onMessage)
+      socket.addEventListener('error', () => reject(new Error('socket failed')), { once: true })
+      socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
+    })
+
   beforeAll(async () => {
-    ;({ token } = await createApiKey(db, 'integration', { scopes: ['read'] }))
+    ;({ token, id: apiKeyId } = await createApiKey(db, 'integration', { scopes: ['read'] }))
     const runtime = createServerApp(db, config, { backgroundJobs: false })
     providers = runtime.providers
     closeRuntime = runtime.close
@@ -39,49 +82,39 @@ describe('WebSocket RPC boundaries', () => {
       fetch: (request, bunServer) => runtime.app.fetch(request, { server: bunServer }),
       websocket: runtime.websocket,
     })
-    workspace = await connectMnie({
-      baseURL: `http://localhost:${server.port}`,
-      token,
-      WebSocket,
-    })
   })
 
   afterAll(async () => {
-    workspace.close()
     server.stop(true)
     await closeRuntime()
     rmSync(directory, { recursive: true, force: true })
   })
 
-  test('invokes workspace operations through WebSocket', async () => {
-    await expect(workspace.invoke('profiles.list', {})).resolves.toEqual([])
-    await expect(workspace.invoke('transaction-observations.list', {})).resolves.toEqual([])
+  test('greets with the caller-visible method list and serves portfolio reads', async () => {
+    const { socket, greeting } = await connect()
+    try {
+      expect(greeting.methods).toContain('rpc.methods')
+      expect(greeting.methods).toContain('portfolio.accounts.list')
+      expect(greeting.methods.some((method) => method.startsWith('admin.'))).toBe(false)
+      expect(await call(socket, 1, 'rpc.methods', {})).toMatchObject({ result: greeting.methods })
+      await expect(call(socket, 2, 'portfolio.accounts.list', {})).resolves.toMatchObject({
+        result: { accounts: [] },
+      })
+      const forbidden = await call(socket, 3, 'portfolio.ledger.observations.list', {})
+      expect(forbidden.error?.message).toBe('owner session is required')
+    } finally {
+      socket.close()
+    }
   })
 
-  test('does not expose owner admin operations to API keys', async () => {
-    const socket = new WebSocket(`ws://localhost:${server.port}/api/ws?key=${token}`)
-    const response = await new Promise<{ error?: { message?: string } }>((resolve, reject) => {
-      socket.addEventListener('open', () => {
-        socket.send(
-          JSON.stringify({
-            jsonrpc: '2.0',
-            id: 7,
-            method: 'admin.invoke',
-            params: { operation: 'profiles.list', input: {} },
-          }),
-        )
-      })
-      socket.addEventListener('message', (event) => {
-        const message = JSON.parse(String(event.data)) as {
-          id?: number
-          error?: { message?: string }
-        }
-        if (message.id === 7) resolve(message)
-      })
-      socket.addEventListener('error', () => reject(new Error('socket failed')))
-    })
-    socket.close()
-    expect(response.error?.message).toBe('owner session is required')
+  test('does not expose owner admin methods to API keys', async () => {
+    const { socket } = await connect()
+    try {
+      const response = await call(socket, 7, 'admin.providers.list', {})
+      expect(response.error?.message).toBe('owner session is required')
+    } finally {
+      socket.close()
+    }
   })
 
   test('does not expose removed HTTP application APIs or a duplicate WebSocket route', async () => {
@@ -118,18 +151,27 @@ describe('WebSocket RPC boundaries', () => {
       descriptor: { id: 'test-provider', name: 'Test provider' },
       accountId: 'test-account',
       capabilities: () => ['accounts:read'],
-      operations: () => ['accounts.list'],
+      methods: () => ['accounts.list', 'balances.list', 'market.issue.search'],
       checkAvailability: async () => ({ ok: true }),
-      invoke: async () => {
+      invoke: async (method: string) => {
         active += 1
         maximumActive = Math.max(maximumActive, active)
         await new Promise((resolve) => setTimeout(resolve, 10))
         active -= 1
-        return { items: [] }
+        return method === 'balances.list'
+          ? [
+              {
+                accountId: 'test-account',
+                type: 'current',
+                amount: { kind: 'money', money: { currency: 'JPY', value: '1000' } },
+                asOf: new Date(0).toISOString(),
+              },
+            ]
+          : { items: [] }
       },
       exportSession: () => ({}),
       close: () => {},
-    } as FinancialProvider<OperationMap>
+    } as FinancialProvider<MethodMap>
     const originalOpen = providers.open.bind(providers)
     providers.open = async (profileOrId, options) => {
       const profile =
@@ -143,13 +185,36 @@ describe('WebSocket RPC boundaries', () => {
       }
     }
     try {
-      const remote = workspace.profile(profileId)
-      await Promise.all([
-        remote.invoke('accounts.list', {}),
-        remote.invoke('accounts.list', {}),
-        remote.invoke('accounts.list', {}),
-      ])
-      expect(maximumActive).toBe(1)
+      const physicalAccountId = 'concurrency-physical-account'
+      await db.insert(financialAccounts).values({
+        id: physicalAccountId,
+        profileId,
+        connectorTypeId: 'test-provider',
+        institutionId: 'test-provider',
+        providerAccountId: 'test-account',
+        kind: 'brokerage',
+        createdAt: now,
+        updatedAt: now,
+      })
+      await initializeVirtualAccounts(db, physicalAccountId)
+      const { id: accountId } = await createVirtualAccount(db, {
+        physicalAccountId,
+        label: 'Concurrency account',
+        kind: 'agent',
+      })
+      await bindApiKeyToVirtualAccount(db, apiKeyId, accountId, 'read')
+      const { socket } = await connect()
+      try {
+        const results = await Promise.all([
+          call(socket, 11, 'account.market.issue.search', { account: accountId, query: 'test' }),
+          call(socket, 12, 'account.market.issue.search', { account: accountId, query: 'test' }),
+          call(socket, 13, 'account.market.issue.search', { account: accountId, query: 'test' }),
+        ])
+        for (const result of results) expect(result.error).toBeUndefined()
+        expect(maximumActive).toBe(1)
+      } finally {
+        socket.close()
+      }
     } finally {
       providers.open = originalOpen
     }

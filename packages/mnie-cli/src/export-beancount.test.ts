@@ -40,8 +40,8 @@ test('exports filtered transaction history as Beancount', async () => {
       connect: async (options) => {
         connectOptions = options
         return {
-          invoke: async (operation, input) => {
-            invokeCall = { operation, input }
+          call: async (method, params) => {
+            invokeCall = { operation: method, input: params }
             return { items: [transaction] }
           },
           close: () => {
@@ -58,12 +58,12 @@ test('exports filtered transaction history as Beancount', async () => {
   expect(resolvedProfileName).toBe('local')
   expect(connectOptions).toEqual({ baseURL: 'https://example.com', token: 'test-token' })
   expect(invokeCall).toEqual({
-    operation: 'history.list',
+    operation: 'portfolio.history.list',
     input: {
       kinds: ['transaction'],
       from: '2026-05-01',
       to: '2026-05-31',
-      profileIds: ['bank-main'],
+      profiles: ['bank-main'],
     },
   })
   expect(output).toContain('mnie-id: "tx-1"')
@@ -117,7 +117,7 @@ test('rejects a reversed date range before connecting', async () => {
   )
 })
 
-test('omits profileIds when profile-id is not supplied', async () => {
+test('omits profiles when profile-id is not supplied', async () => {
   let input: unknown
 
   await exportBeancount(
@@ -128,7 +128,7 @@ test('omits profileIds when profile-id is not supplied', async () => {
         apiKey: 'test-token',
       }),
       connect: async () => ({
-        invoke: async (_operation, request) => {
+        call: async (_method, request) => {
           input = request
           return { items: [] }
         },
@@ -143,6 +143,7 @@ test('omits profileIds when profile-id is not supplied', async () => {
     from: '2026-05-01',
     to: '2026-05-31',
   })
+  expect(input).not.toHaveProperty('profiles')
   expect(input).not.toHaveProperty('profileIds')
 })
 
@@ -169,7 +170,7 @@ test('closes the workspace when formatting fails', async () => {
           apiKey: 'test-token',
         }),
         connect: async () => ({
-          invoke: async () => ({ items: [pendingTransaction] }),
+          call: async () => ({ items: [pendingTransaction] }),
           close: () => {
             closed = true
           },
@@ -218,7 +219,7 @@ test('advertises the Beancount export in CLI help', async () => {
 
   expect(result.exitCode).toBe(0)
   expect(result.stdout).toContain(
-    'mnie export beancount --from <YYYY-MM-DD> --to <YYYY-MM-DD> [--profile <name>] [--profile-id <id>]',
+    'mnie export beancount --from <YYYY-MM-DD> --to <YYYY-MM-DD> [--profile <name>] [--account <id>]',
   )
 })
 

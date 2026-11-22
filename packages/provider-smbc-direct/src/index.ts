@@ -88,7 +88,7 @@ class SmbcDirectTwoFactorRequiredError extends Error {
 }
 
 /** Converts an authenticated SMBC Direct session to the provider-neutral API. */
-export const createProvider = (profile: SmbcDirectProfile): FinancialProvider<CommonOperations> => {
+export const createProvider = (profile: SmbcDirectProfile): FinancialProvider<CommonMethods> => {
   const accountId = `${profile.branchNo}-${profile.accountNo}`
   const accounts = async (): Promise<Page<Account>> => ({
     items: (await profile.getAccounts()).map((value) => ({
@@ -109,7 +109,7 @@ export const createProvider = (profile: SmbcDirectProfile): FinancialProvider<Co
       identity: { kind: 'stable-provider-id' },
     },
     capabilities: () => ['accounts:read', 'balances:read', 'transactions:read', 'transfers:read'],
-    operations: () => [
+    methods: () => [
       'accounts.list',
       'balances.list',
       'transactions.list',
@@ -131,8 +131,8 @@ export const createProvider = (profile: SmbcDirectProfile): FinancialProvider<Co
     invoke: async (name, request) => {
       if (name === 'accounts.list') return accounts() as never
       if (name === 'balances.list') {
-        const input = request as { accountId?: string }
-        if (input.accountId && input.accountId !== accountId) return [] as never
+        const input = request as { account?: string }
+        if (input.account && input.account !== accountId) return [] as never
         const value = await profile.getBalance()
         const result: Balance[] = [
           {
@@ -578,6 +578,9 @@ const createProfile = (
       ]
     },
     async getBalance() {
+      // A page transition consumes SMBC Direct's form state. Refresh it before
+      // requesting a balance so an imported session never reuses a consumed form.
+      await continueSession()
       const { token, formId } = topPageForms()
       const url = new URL('/ib/ajax/top/TPALTOPAjaxSavingBalance.smbc', context.baseURL)
       url.searchParams.set('_TOKEN', token)
@@ -870,7 +873,7 @@ export const connect = async (options: LoginWithPasskeyOptions = {}) => {
   return {
     qrurl: challenge.qrurl,
     url: challenge.url,
-    finished2fa: async (): Promise<FinancialProvider<CommonOperations>> =>
+    finished2fa: async (): Promise<FinancialProvider<CommonMethods>> =>
       createProvider(await challenge.finished2fa()),
   }
 }
@@ -959,7 +962,7 @@ export const createSmbcDirectClient = (options: SmbcDirectClientOptions): SmbcDi
 import type {
   Account,
   Balance,
-  CommonOperations,
+  CommonMethods,
   FinancialProvider,
   HistoryItem,
   HistoryListRequest,

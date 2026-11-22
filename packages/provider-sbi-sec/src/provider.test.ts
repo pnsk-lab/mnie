@@ -4,7 +4,7 @@ import type { SbiClientMethods } from './methods/types'
 import { createProviderFromClient } from './provider'
 
 const request = (overrides: Partial<InvestmentOrderRequest> = {}): InvestmentOrderRequest => ({
-  accountId: '12345678',
+  account: '12345678',
   instrumentId: '7203',
   instrumentVenue: 'XTKS',
   side: 'buy',
@@ -57,6 +57,7 @@ const client = (orderFlags: { cancelable?: boolean; correctable?: boolean } = {}
         current: async () => ({
           summary: { valuation: 1_000_000 },
           summaryWithoutDeposit: { valuation: 900_000 },
+          summaryDetails: [{ category: 'DOMESTIC_DEPOSIT', valuation: 123_456 }],
         }),
       },
       power: { buyingPower: async () => ({}) },
@@ -136,6 +137,8 @@ const client = (orderFlags: { cancelable?: boolean; correctable?: boolean } = {}
               side: 'buy',
               status: 'open',
               quantity: 100,
+              unexecutedQuantity: 100,
+              price: { currency: 'JPY', value: 2500, text: '2500' },
               ...orderFlags,
             },
           ],
@@ -164,11 +167,19 @@ describe('SBI provider-neutral order adapter', () => {
     const fake = client()
     const provider = createProviderFromClient(fake.value)
 
-    expect(provider.operations()).toContain('investments.orders.preview')
+    expect(provider.methods()).toContain('investments.orders.preview')
     await expect(provider.invoke('investments.orders.preview', request())).resolves.toEqual({
       estimatedAmount: { currency: 'JPY', value: '250000' },
       warnings: [],
       confirmationToken: 'confirmation',
+      projectedAssetChanges: [
+        {
+          asset: { kind: 'cash', currency: 'JPY' },
+          availableDelta: '-250000',
+          reservedDelta: '250000',
+          pendingDelta: '0',
+        },
+      ],
     })
     expect(fake.cashEstimate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -185,9 +196,9 @@ describe('SBI provider-neutral order adapter', () => {
   test('combines S-kabu instrument availability with odd-lot rules', async () => {
     const fake = client()
     const provider = createProviderFromClient(fake.value)
-    const availability = await provider.checkOperationAvailability?.({
-      operation: 'investments.orders.preview',
-      input: request({
+    const availability = await provider.checkMethodAvailability?.({
+      method: 'investments.orders.preview',
+      params: request({
         quantity: '1',
         execution: { priceType: 'market', timing: 'realtime', venue: 'STK' },
       }),
@@ -209,9 +220,9 @@ describe('SBI provider-neutral order adapter', () => {
   test('rejects unsupported S-kabu pricing instead of silently changing the order', async () => {
     const fake = client()
     const provider = createProviderFromClient(fake.value)
-    const availability = await provider.checkOperationAvailability?.({
-      operation: 'investments.orders.create',
-      input: request({
+    const availability = await provider.checkMethodAvailability?.({
+      method: 'investments.orders.create',
+      params: request({
         quantity: '1',
         execution: {
           priceType: 'limit',
@@ -246,7 +257,7 @@ describe('SBI provider-neutral order adapter', () => {
     const fake = client()
     const provider = createProviderFromClient(fake.value)
     await provider.invoke('investments.orders.cancel', {
-      accountId: '12345678',
+      account: '12345678',
       orderId: 'order-1',
       allowTransaction: true,
     })
@@ -265,15 +276,15 @@ describe('SBI provider-neutral order adapter', () => {
       client({ cancelable: false, correctable: false }).value,
     )
     await expect(
-      provider.checkOperationAvailability?.({
-        operation: 'investments.orders.cancel',
-        input: { orderId: 'order-1' },
+      provider.checkMethodAvailability?.({
+        method: 'investments.orders.cancel',
+        params: { orderId: 'order-1' },
       }),
     ).resolves.toMatchObject({ available: false, reason: 'PROVIDER_RESTRICTED' })
     await expect(
-      provider.checkOperationAvailability?.({
-        operation: 'investments.orders.replace',
-        input: { orderId: 'order-1' },
+      provider.checkMethodAvailability?.({
+        method: 'investments.orders.replace',
+        params: { orderId: 'order-1' },
       }),
     ).resolves.toMatchObject({ available: false, reason: 'PROVIDER_RESTRICTED' })
   })
@@ -281,24 +292,24 @@ describe('SBI provider-neutral order adapter', () => {
   test('preserves order, trade, and position detail through common operations', async () => {
     const provider = createProviderFromClient(client().value)
     const positions = await provider.invoke('investments.positions.list', {
-      accountId: '12345678',
+      account: '12345678',
       positionType: 'cash',
     })
     const position = await provider.invoke('investments.positions.get', {
-      accountId: '12345678',
+      account: '12345678',
       instrumentId: '7203',
       venue: 'XNAS',
       positionType: 'cash',
       accountType: 'specific',
     })
     const order = await provider.invoke('investments.orders.get', {
-      accountId: '12345678',
+      account: '12345678',
       orderId: 'order-1',
       instrumentId: '7203',
       venue: 'XNAS',
     })
     const trades = await provider.invoke('investments.trades.list', {
-      accountId: '12345678',
+      account: '12345678',
       venue: 'XNAS',
       limit: 50,
     })
@@ -328,7 +339,7 @@ describe('SBI provider-neutral order adapter', () => {
   test('reports request-specific operations unavailable when no request is supplied', async () => {
     const provider = createProviderFromClient(client().value)
     await expect(
-      provider.checkOperationAvailability?.({ operation: 'investments.orders.cancel' }),
+      provider.checkMethodAvailability?.({ method: 'investments.orders.cancel' }),
     ).resolves.toMatchObject({
       available: false,
       reason: 'PROVIDER_RESTRICTED',
@@ -339,10 +350,123 @@ describe('SBI provider-neutral order adapter', () => {
   test('returns static order rules when the UI asks before selecting an instrument', async () => {
     const provider = createProviderFromClient(client().value)
     await expect(
-      provider.checkOperationAvailability?.({ operation: 'investments.orders.preview' }),
+      provider.checkMethodAvailability?.({ method: 'investments.orders.preview' }),
     ).resolves.toMatchObject({
       available: true,
       orderRules: { sizing: [{ kind: 'quantity', minimum: '1', increment: '1' }] },
     })
+  })
+
+  test('declares the account isolation contract', () => {
+    const provider = createProviderFromClient(client().value)
+    expect(provider.accountIsolation).toEqual({
+      physicalCashIncludesReservations: true,
+      stableOrderReferences: true,
+      attributableSettlementEffects: true,
+      completeOpenOrderSnapshot: true,
+    })
+  })
+
+  test('reports the reservation-inclusive deposit as the current balance', async () => {
+    const provider = createProviderFromClient(client().value)
+    const balances = (await provider.invoke('balances.list', {
+      account: '12345678',
+    })) as Array<{ type: string; amount: { money: { currency: string; value: string } } }>
+    expect(balances).toContainEqual(
+      expect.objectContaining({
+        type: 'current',
+        amount: { kind: 'money', money: { currency: 'JPY', value: '123456' } },
+      }),
+    )
+  })
+
+  test('returns a complete open-order snapshot with attributable effects', async () => {
+    const provider = createProviderFromClient(client().value)
+    const snapshot = (await provider.invoke('investments.orders.open', {
+      account: '12345678',
+    })) as { items: Array<{ id: string; effects?: { referenceId: string } }>; complete?: boolean }
+    expect(snapshot.complete).toBe(true)
+    expect(snapshot.items).toHaveLength(1)
+    expect(snapshot.items[0]).toMatchObject({
+      id: 'order-1',
+      effects: {
+        referenceId: 'order-1',
+        changes: [
+          {
+            asset: { kind: 'cash', currency: 'JPY' },
+            availableDelta: '-250000',
+            reservedDelta: '250000',
+            pendingDelta: '0',
+          },
+        ],
+      },
+    })
+  })
+
+  test('normalizes the provider no-data code to an empty complete snapshot', async () => {
+    const fake = client()
+    fake.value.orders.inquiry.open = async () => ({
+      orders: [],
+      error: { code: 'ME0010' },
+    })
+    const provider = createProviderFromClient(fake.value)
+    await expect(
+      provider.invoke('investments.orders.open', { account: '12345678' }),
+    ).resolves.toEqual({ items: [], complete: true })
+  })
+
+  test('fails the snapshot on inquiry errors instead of assuming emptiness', async () => {
+    const fake = client()
+    fake.value.orders.inquiry.open = async () => ({
+      orders: [],
+      error: { code: 'E_0001' },
+    })
+    const provider = createProviderFromClient(fake.value)
+    await expect(
+      provider.invoke('investments.orders.open', { account: '12345678' }),
+    ).rejects.toThrow('E_0001')
+  })
+
+  test('resolves domestic order state with effects without the US detail endpoint', async () => {
+    const provider = createProviderFromClient(client().value)
+    const order = (await provider.invoke('investments.orders.get', {
+      account: '12345678',
+      orderId: 'order-1',
+      instrumentId: '7203',
+      venue: 'XTKS',
+    })) as { id: string; effects?: { referenceId: string } }
+    expect(order).toMatchObject({ id: 'order-1', effects: { referenceId: 'order-1' } })
+  })
+
+  test('confirms a cancellation with the released reservation as the final effect', async () => {
+    const fake = client()
+    let status = 'open'
+    fake.value.orders.inquiry.open = async () => ({
+      orders: [
+        {
+          id: 'order-1',
+          orderNumber: 'number-1',
+          orderSubNo: 'sub-1',
+          issue: { code: '7203', market: 'XTKS' as const, name: 'Toyota' },
+          side: 'buy' as const,
+          status: status as 'open' | 'cancelled',
+          quantity: 100,
+          unexecutedQuantity: status === 'open' ? 100 : 0,
+          price: { currency: 'JPY', value: 2500, text: '2500' },
+        },
+      ],
+    })
+    fake.placeCancel.mockImplementation(async () => {
+      status = 'cancelled'
+      return { accepted: true, orderId: 'order-1' }
+    })
+    const provider = createProviderFromClient(fake.value)
+    const result = (await provider.invoke('investments.orders.cancel', {
+      account: '12345678',
+      orderId: 'order-1',
+      allowTransaction: true,
+    })) as { id: string; status: string; confirmed?: boolean; effects?: { changes: unknown[] } }
+    expect(result).toMatchObject({ id: 'order-1', status: 'cancelled', confirmed: true })
+    expect(result.effects).toEqual({ referenceId: 'order-1', changes: [] })
   })
 })

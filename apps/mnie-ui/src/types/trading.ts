@@ -35,12 +35,6 @@ export type CashOrderTriggerZone = 'above' | 'below'
 export type ChartMode = 'line' | 'box'
 export type ChartRange = '1D' | '3D' | '3M' | '1Y' | 'ALL'
 
-export interface RpcMessage {
-  id: number
-  method: string
-  params?: unknown
-}
-
 export interface OrderPreview {
   issue: {
     code: string
@@ -59,17 +53,6 @@ export interface OrderPreview {
   estimatedAmount?: { currency: string; value: string }
   exchangeRate?: string
   expiresAt?: string
-}
-
-export interface JsonRpcResponse {
-  id?: number
-  method?: string
-  params?: unknown
-  result?: unknown
-  error?: {
-    message?: string
-    data?: { providerCode?: string }
-  }
 }
 
 export interface RealtimePricePoint {
@@ -141,7 +124,7 @@ export interface OrderRow {
   executedQuantity?: number | null
   price: number | null
   amount?: number | null
-  status: '注文中' | '約定済' | '取消済'
+  status: '注文中' | '約定済' | '取消済' | '結果確認中' | '取消確認中' | '一部約定' | '要照合'
   orderNumber?: string
   orderSubNo?: string
   tradeId?: string
@@ -150,6 +133,7 @@ export interface OrderRow {
   correctable?: boolean
   profileId?: string
   profileLabel?: string
+  accountLabel?: string
   providerId?: string
   providerName?: string
 }
@@ -189,8 +173,10 @@ export interface Position {
   profitLossRate: number
   type?: string
   accountType?: CashOrderAccountType | string
+  providerAccountId?: string
   profileId?: string
   profileLabel?: string
+  accountLabel?: string
   providerId?: string
   providerName?: string
 }
@@ -198,6 +184,7 @@ export interface Position {
 export interface ProviderPosition extends Position {
   profileId: string
   profileLabel: string
+  accountLabel?: string
   providerId: string
   providerName: string
   color: string

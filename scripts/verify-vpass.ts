@@ -255,7 +255,7 @@ async function main() {
   stage = 'transactions.list'
   const transactions = await provider.invoke('transactions.list', { from, to })
   const filtered = await provider.invoke('transactions.list', {
-    accountId: provider.accountId,
+    account: provider.accountId,
     from,
     to,
   })

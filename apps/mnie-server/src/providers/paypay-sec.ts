@@ -6,7 +6,7 @@ import {
   normalizePayPaySecOrigin,
   type PayPaySecSession,
 } from '@mnie/provider-paypay-sec'
-import type { FinancialProvider, OperationMap } from '@mnie/types'
+import type { FinancialProvider, MethodMap } from '@mnie/types'
 import type { ServerConfig } from '../config'
 import type { Db } from '../db'
 import { accountProfiles } from '../db/schema'
@@ -20,7 +20,7 @@ export const openPayPaySec = async (
   profileId: string,
   options: { forceLogin?: boolean } = {},
 ): Promise<{
-  provider: FinancialProvider<OperationMap>
+  provider: FinancialProvider<MethodMap>
   persist(): Promise<void>
 }> => {
   const [row] = await db
@@ -51,7 +51,7 @@ export const openPayPaySec = async (
   }
 
   return {
-    provider: provider as FinancialProvider<OperationMap>,
+    provider: provider as FinancialProvider<MethodMap>,
     persist: async () =>
       saveSecret(row.keyringAccount, {
         ...secret,

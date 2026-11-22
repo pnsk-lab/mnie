@@ -1,13 +1,9 @@
-import type {
-  AvailabilityCheckResult,
-  OperationAvailability,
-  ProviderAvailability,
-} from '@mnie/types'
+import type { AvailabilityCheckResult, MethodAvailability, ProviderAvailability } from '@mnie/types'
 import type { AccountProfile, ProviderRegistry } from './providers/registry'
 
 export interface CachedAvailability {
   result: AvailabilityCheckResult
-  operations: Record<string, OperationAvailability>
+  methods: Record<string, MethodAvailability>
   checkedAt: Date
 }
 

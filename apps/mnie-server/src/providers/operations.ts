@@ -1,37 +1,37 @@
 import type {
   FinancialProvider,
-  OperationAvailability,
-  OperationAvailabilityRequest,
-  OperationMap,
+  MethodAvailability,
+  MethodAvailabilityRequest,
+  MethodMap,
 } from '@mnie/types'
 
-export class ProviderOperationUnavailableError extends Error {
+export class ProviderMethodUnavailableError extends Error {
   constructor(
-    readonly operation: string,
-    readonly availability: Extract<OperationAvailability, { available: false }>,
+    readonly method: string,
+    readonly availability: Extract<MethodAvailability, { available: false }>,
   ) {
     super(
       typeof availability.message === 'string'
         ? availability.message
-        : `provider operation is unavailable: ${availability.reason}`,
+        : `provider method is unavailable: ${availability.reason}`,
     )
-    this.name = 'ProviderOperationUnavailableError'
+    this.name = 'ProviderMethodUnavailableError'
   }
 }
 
-export const operationAvailability = async (
-  provider: FinancialProvider<OperationMap>,
-  request: OperationAvailabilityRequest,
-): Promise<OperationAvailability> => {
-  if (!provider.operations().includes(request.operation)) {
+export const methodAvailability = async (
+  provider: FinancialProvider<MethodMap>,
+  request: MethodAvailabilityRequest,
+): Promise<MethodAvailability> => {
+  if (!provider.methods().includes(request.method)) {
     return {
       available: false,
       reason: 'OPERATION_UNSUPPORTED',
-      message: `provider does not advertise ${request.operation}`,
+      message: `provider does not advertise ${request.method}`,
     }
   }
-  if (!provider.checkOperationAvailability) return { available: true }
-  const availability = await provider.checkOperationAvailability(request)
+  if (!provider.checkMethodAvailability) return { available: true }
+  const availability = await provider.checkMethodAvailability(request)
   if (availability.available || typeof availability.message === 'string') return availability
   return {
     ...availability,
@@ -42,14 +42,14 @@ export const operationAvailability = async (
   }
 }
 
-export const invokeAvailableOperation = async (
-  provider: FinancialProvider<OperationMap>,
-  operation: string,
+export const invokeAvailableMethod = async (
+  provider: FinancialProvider<MethodMap>,
+  method: string,
   input: unknown,
 ) => {
-  const availability = await operationAvailability(provider, { operation, input })
+  const availability = await methodAvailability(provider, { method, params: input })
   if (!availability.available) {
-    throw new ProviderOperationUnavailableError(operation, availability)
+    throw new ProviderMethodUnavailableError(method, availability)
   }
-  return provider.invoke(operation, input ?? {})
+  return provider.invoke(method, input ?? {})
 }

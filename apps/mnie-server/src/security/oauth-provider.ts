@@ -9,8 +9,16 @@ import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js'
 import type { ServerConfig } from '../config'
 import type { AppBindings } from '../context'
 import type { Db } from '../db'
-import { apiKeys, oauthAuthorizationCodes, oauthClients, oauthRefreshTokens } from '../db/schema'
-import { createApiKey, type ApiKeySettings, verifyApiKey } from './api-keys'
+import {
+  apiKeys,
+  apiKeyVirtualAccounts,
+  apiKeyTradeUsage,
+  virtualOrderQuotes,
+  oauthAuthorizationCodes,
+  oauthClients,
+  oauthRefreshTokens,
+} from '../db/schema'
+import { createApiKeySync, type ApiKeySettings, verifyApiKey } from './api-keys'
 import { randomToken, sha256 } from './crypto'
 
 const CODE_TTL_MS = 10 * 60 * 1000
@@ -120,45 +128,53 @@ export const createOAuthServerProvider = (db: Db, config: ServerConfig): OAuthSe
     _codeVerifier,
     redirectUri,
     resource,
-  ) => {
-    const [code] = await db
-      .select()
-      .from(oauthAuthorizationCodes)
-      .where(eq(oauthAuthorizationCodes.code, authorizationCode))
-    if (!code || code.expiresAt <= new Date()) throw new Error('authorization code expired')
-    if (code.clientId !== client.client_id) throw new Error('authorization code client mismatch')
-    if (redirectUri && code.redirectUri !== redirectUri) throw new Error('redirect_uri mismatch')
-    await db
-      .delete(oauthAuthorizationCodes)
-      .where(eq(oauthAuthorizationCodes.code, authorizationCode))
+  ) =>
+    db.transaction((tx) => {
+      const code = tx
+        .select()
+        .from(oauthAuthorizationCodes)
+        .where(eq(oauthAuthorizationCodes.code, authorizationCode))
+        .get()
+      if (!code || code.expiresAt <= new Date()) throw new Error('authorization code expired')
+      if (code.clientId !== client.client_id) throw new Error('authorization code client mismatch')
+      if (redirectUri && code.redirectUri !== redirectUri) throw new Error('redirect_uri mismatch')
+      if (resource && code.resource && resource.href !== code.resource)
+        throw new Error('OAuth resource mismatch')
+      tx.delete(oauthAuthorizationCodes)
+        .where(eq(oauthAuthorizationCodes.code, authorizationCode))
+        .run()
+      const scopes = code.scopes
+      const key = createApiKeySync(db, `OAuth: ${client.client_name ?? client.client_id}`, {
+        ...((code.apiKeySettings ?? {}) as ApiKeySettings),
+        scopes,
+      })
+      tx.update(apiKeys)
+        .set({ expiresAt: new Date(Date.now() + ACCESS_TOKEN_TTL_SECONDS * 1000) })
+        .where(eq(apiKeys.id, key.id))
+        .run()
+      const refreshToken = `mnie_refresh_${randomToken()}`
+      const now = new Date()
+      tx.insert(oauthRefreshTokens)
+        .values({
+          tokenHash: sha256(refreshToken),
+          clientId: client.client_id,
+          apiKeyId: key.id,
+          scopes,
+          resource: resource?.href ?? code.resource,
+          createdAt: now,
+          expiresAt: new Date(now.getTime() + REFRESH_TOKEN_TTL_MS),
+        })
+        .run()
+      return {
+        access_token: key.token,
+        token_type: 'Bearer',
+        expires_in: ACCESS_TOKEN_TTL_SECONDS,
+        refresh_token: refreshToken,
+        scope: scopes.join(' '),
+      } satisfies OAuthTokens
+    }),
 
-    const scopes = code.scopes
-    const key = await createApiKey(db, `OAuth: ${client.client_name ?? client.client_id}`, {
-      ...((code.apiKeySettings ?? {}) as ApiKeySettings),
-      scopes,
-    })
-    const refreshToken = `mnie_refresh_${randomToken()}`
-    const now = new Date()
-    await db.insert(oauthRefreshTokens).values({
-      tokenHash: sha256(refreshToken),
-      clientId: client.client_id,
-      apiKeyId: key.id,
-      scopes,
-      resource: resource?.href ?? code.resource,
-      createdAt: now,
-      expiresAt: new Date(now.getTime() + REFRESH_TOKEN_TTL_MS),
-    })
-
-    return {
-      access_token: key.token,
-      token_type: 'Bearer',
-      expires_in: ACCESS_TOKEN_TTL_SECONDS,
-      refresh_token: refreshToken,
-      scope: scopes.join(' '),
-    } satisfies OAuthTokens
-  },
-
-  exchangeRefreshToken: async (client, refreshToken, scopes, _resource) => {
+  exchangeRefreshToken: async (client, refreshToken, scopes, resource) => {
     const [token] = await db
       .select()
       .from(oauthRefreshTokens)
@@ -171,9 +187,60 @@ export const createOAuthServerProvider = (db: Db, config: ServerConfig): OAuthSe
       )
     if (!token || token.expiresAt <= new Date()) throw new Error('refresh token expired')
 
-    const nextScopes = scopes ?? token.scopes
-    const newAccess = await createApiKey(db, `OAuth: ${client.client_name ?? client.client_id}`, {
-      scopes: nextScopes,
+    const { newAccess, nextScopes } = db.transaction((tx) => {
+      const grant = tx
+        .select()
+        .from(oauthRefreshTokens)
+        .where(eq(oauthRefreshTokens.tokenHash, token.tokenHash))
+        .get()
+      if (!grant || grant.revokedAt || grant.expiresAt <= new Date())
+        throw new Error('OAuth grant has been revoked')
+      const current = tx.select().from(apiKeys).where(eq(apiKeys.id, grant.apiKeyId)).get()
+      if (!current || current.revokedAt) throw new Error('OAuth grant has been revoked')
+      if (resource && resource.href !== grant.resource) throw new Error('OAuth resource mismatch')
+      const allowedScopes = grant.scopes.filter(
+        (scope) => current.scopes === null || current.scopes.includes(scope),
+      )
+      const nextScopes = scopes ?? allowedScopes
+      if (!nextScopes.length || nextScopes.some((scope) => !allowedScopes.includes(scope)))
+        throw new Error('refresh scope exceeds the current grant')
+      const bindings = tx
+        .select()
+        .from(apiKeyVirtualAccounts)
+        .where(eq(apiKeyVirtualAccounts.apiKeyId, current.id))
+        .all()
+      if (!bindings.length) throw new Error('OAuth grant has no assigned accounts')
+      const newAccess = createApiKeySync(db, current.label, {
+        scopes: nextScopes,
+        allowedMethods: current.allowedMethods,
+        maxTradesPerHour: current.maxTradesPerHour,
+        maxTradesPer6Hours: current.maxTradesPer6Hours,
+        maxTradesPerDay: current.maxTradesPerDay,
+        maxOrderPriceJpy: current.maxOrderPriceJpy,
+        maxOrderAmountJpy: current.maxOrderAmountJpy,
+        accountBindings: bindings.map((binding) => ({
+          accountId: binding.virtualAccountId,
+          role: binding.role,
+        })),
+      })
+      for (const usage of tx
+        .select()
+        .from(apiKeyTradeUsage)
+        .where(eq(apiKeyTradeUsage.apiKeyId, current.id))
+        .all())
+        tx.insert(apiKeyTradeUsage)
+          .values({ ...usage, apiKeyId: newAccess.id })
+          .run()
+      tx.update(apiKeys)
+        .set({ expiresAt: new Date(Date.now() + ACCESS_TOKEN_TTL_SECONDS * 1000) })
+        .where(eq(apiKeys.id, newAccess.id))
+        .run()
+      tx.update(apiKeys).set({ revokedAt: new Date() }).where(eq(apiKeys.id, current.id)).run()
+      tx.update(oauthRefreshTokens)
+        .set({ apiKeyId: newAccess.id })
+        .where(eq(oauthRefreshTokens.tokenHash, grant.tokenHash))
+        .run()
+      return { newAccess, nextScopes }
     })
     return {
       access_token: newAccess.token,
@@ -190,19 +257,45 @@ export const createOAuthServerProvider = (db: Db, config: ServerConfig): OAuthSe
     return {
       token,
       clientId: apiKey.id,
-      scopes: apiKey.scopes?.length ? apiKey.scopes : [...DEFAULT_SCOPES],
-      expiresAt: Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL_SECONDS,
+      scopes: apiKey.scopes ?? ['read', 'trade'],
+      expiresAt: apiKey.expiresAt ? Math.floor(apiKey.expiresAt.getTime() / 1000) : undefined,
     } satisfies AuthInfo
   },
 
-  revokeToken: async (_client, request) => {
-    await db
-      .update(apiKeys)
-      .set({ revokedAt: new Date() })
-      .where(eq(apiKeys.tokenHash, sha256(request.token)))
-    await db
-      .update(oauthRefreshTokens)
-      .set({ revokedAt: new Date() })
-      .where(eq(oauthRefreshTokens.tokenHash, sha256(request.token)))
+  revokeToken: async (client, request) => {
+    db.transaction((tx) => {
+      const hash = sha256(request.token)
+      const access = tx.select().from(apiKeys).where(eq(apiKeys.tokenHash, hash)).get()
+      const grant =
+        tx
+          .select()
+          .from(oauthRefreshTokens)
+          .where(
+            and(
+              eq(oauthRefreshTokens.clientId, client.client_id),
+              eq(oauthRefreshTokens.tokenHash, hash),
+            ),
+          )
+          .get() ??
+        (access
+          ? tx
+              .select()
+              .from(oauthRefreshTokens)
+              .where(
+                and(
+                  eq(oauthRefreshTokens.clientId, client.client_id),
+                  eq(oauthRefreshTokens.apiKeyId, access.id),
+                ),
+              )
+              .get()
+          : undefined)
+      if (!grant) return
+      tx.update(oauthRefreshTokens)
+        .set({ revokedAt: new Date() })
+        .where(eq(oauthRefreshTokens.tokenHash, grant.tokenHash))
+        .run()
+      tx.update(apiKeys).set({ revokedAt: new Date() }).where(eq(apiKeys.id, grant.apiKeyId)).run()
+      tx.delete(virtualOrderQuotes).where(eq(virtualOrderQuotes.principal, grant.apiKeyId)).run()
+    })
   },
 })

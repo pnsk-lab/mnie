@@ -1,5 +1,5 @@
 import type { Amount, Page, PageRequest, Transaction } from './financial'
-import type { FinancialAccount, TransactionObservation } from './observations'
+import type { TransactionObservation } from './observations'
 
 export type EconomicEventKind =
   | 'transfer'
@@ -119,7 +119,7 @@ export interface EconomicEventView {
 }
 
 export interface EventsListRequest extends PageRequest {
-  accountId?: string
+  financialAccountId?: string
   from?: string
   to?: string
   states?: EconomicEvent['state'][]
@@ -161,21 +161,27 @@ export interface EnrichmentProvider {
   >
 }
 
-export type ReconciliationOperations = {
-  'transaction-observations.list': {
+/** Server-side ledger methods, exposed on the wire under `portfolio.ledger.*`. */
+export type LedgerMethods = {
+  'ledger.observations.list': {
     request: Record<string, never>
     response: TransactionObservation[]
   }
-  'financial-accounts.list': { request: Record<string, never>; response: FinancialAccount[] }
-  'events.list': { request: EventsListRequest; response: Page<EconomicEventView> }
-  'events.get': { request: { eventId: string }; response: EconomicEventView }
-  'reconciliation.proposals.list': {
+  'ledger.events.list': { request: EventsListRequest; response: Page<EconomicEventView> }
+  'ledger.events.get': { request: { eventId: string }; response: EconomicEventView }
+  'ledger.reconciliation.proposals.list': {
     request: ReconciliationProposalRequest
     response: Page<ReconciliationProposal>
   }
-  'reconciliation.confirm': { request: { proposalId: string }; response: EconomicEventView }
-  'reconciliation.reject': { request: { proposalId: string; reason?: string }; response: void }
-  'account-links.list': { request: Record<string, never>; response: AccountLink[] }
-  'account-links.upsert': { request: AccountLinkInput; response: AccountLink }
-  'account-links.delete': { request: { id: string }; response: void }
+  'ledger.reconciliation.confirm': {
+    request: { proposalId: string }
+    response: EconomicEventView
+  }
+  'ledger.reconciliation.reject': {
+    request: { proposalId: string; reason?: string }
+    response: void
+  }
+  'ledger.account-links.list': { request: Record<string, never>; response: AccountLink[] }
+  'ledger.account-links.upsert': { request: AccountLinkInput; response: AccountLink }
+  'ledger.account-links.delete': { request: { id: string }; response: void }
 }

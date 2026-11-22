@@ -1,6 +1,7 @@
 import type {
   Account,
   Balance,
+  FinancialAssetChange,
   HistoryItem,
   HistoryListRequest,
   InvestmentOrder,
@@ -204,12 +205,13 @@ export const createProvider = (
   runtime: PayPaySecProviderRuntimeOptions = {},
 ): PayPaySecProvider => {
   const account = accountFor(client)
-  const accountMatches = (accountId: string | undefined) => !accountId || accountId === account.id
+  const accountMatches = (requested: string | undefined) => !requested || requested === account.id
   const instrumentIndex = new Map<
     string,
     { name: string; market: PayPaySecMarket; code?: string; imageURL?: string }
   >()
   const positionIndex = new Map<string, PayPaySecPosition>()
+  const projectedChanges = new Map<string, FinancialAssetChange[]>()
   const rememberInstruments = (
     instruments: Awaited<ReturnType<PayPaySecClient['market']['instruments']['list']>>,
   ) => {
@@ -259,7 +261,7 @@ export const createProvider = (
       'investments:read',
       'investments:trade',
     ],
-    operations: () => [
+    methods: () => [
       'accounts.list',
       'balances.list',
       'assets.valuation.get',
@@ -280,13 +282,13 @@ export const createProvider = (
         return { ok: false, message, reason: 'UNKNOWN' }
       }
     },
-    checkOperationAvailability: async ({ operation, input }) => {
-      if (operation !== 'investments.orders.preview' && operation !== 'investments.orders.create') {
+    checkMethodAvailability: async ({ method, params }) => {
+      if (method !== 'investments.orders.preview' && method !== 'investments.orders.create') {
         return { available: true }
       }
       try {
-        if (operation === 'investments.orders.create') {
-          const request = input as Partial<InvestmentOrderCreateRequest> | undefined
+        if (method === 'investments.orders.create') {
+          const request = params as Partial<InvestmentOrderCreateRequest> | undefined
           const confirmation = request?.confirmationToken
             ? client.orders.confirmation(request.confirmationToken)
             : undefined
@@ -304,11 +306,11 @@ export const createProvider = (
           }
         }
 
-        const request = input as Partial<InvestmentOrderRequest> | undefined
+        const request = params as Partial<InvestmentOrderRequest> | undefined
         if (!request?.instrumentId || !request.side) {
           return { available: true, orderRules: amountOrderRules }
         }
-        if (!accountMatches(request.accountId)) {
+        if (!accountMatches(request.account)) {
           return {
             available: false,
             reason: 'PROVIDER_RESTRICTED',
@@ -357,8 +359,8 @@ export const createProvider = (
     invoke: async (name, request) => {
       if (name === 'accounts.list') return { items: [account] } as Page<Account> as never
       if (name === 'balances.list') {
-        const input = request as { accountId?: string }
-        if (!accountMatches(input.accountId)) return [] as never
+        const input = request as { account?: string }
+        if (!accountMatches(input.account)) return [] as never
         const value = await client.account.valuation()
         const asOf = new Date().toISOString()
         const balances: Balance[] = [
@@ -379,8 +381,8 @@ export const createProvider = (
         return balances as never
       }
       if (name === 'assets.valuation.get') {
-        const input = request as { accountId?: string }
-        if (!accountMatches(input.accountId)) {
+        const input = request as { account?: string }
+        if (!accountMatches(input.account)) {
           throw new PayPaySecError('asset valuation account was not found', 'ACCOUNT_NOT_FOUND')
         }
         const value = await client.account.valuation()
@@ -394,8 +396,8 @@ export const createProvider = (
         } as never
       }
       if (name === 'investments.positions.list') {
-        const input = request as { accountId?: string; positionType?: 'cash' | 'margin' }
-        if (!accountMatches(input.accountId) || input.positionType === 'margin') {
+        const input = request as { account?: string; positionType?: 'cash' | 'margin' }
+        if (!accountMatches(input.account) || input.positionType === 'margin') {
           return { items: [] } as never
         }
         const positions = (
@@ -434,8 +436,8 @@ export const createProvider = (
         } as Page<InvestmentPosition> as never
       }
       if (name === 'investments.orders.list' || name === 'transactions.list') {
-        const input = request as { accountId?: string; from?: string; to?: string; status?: string }
-        if (!accountMatches(input.accountId)) return { items: [] } as never
+        const input = request as { account?: string; from?: string; to?: string; status?: string }
+        if (!accountMatches(input.account)) return { items: [] } as never
         if (input.from || input.to) {
           throw new PayPaySecError(
             'PayPay Securities date-range history is not available in the observed API',
@@ -473,7 +475,7 @@ export const createProvider = (
           )
         }
         const transactions = await createProvider(client).invoke('transactions.list', {
-          accountId: input.accountId,
+          account: input.account,
           from: input.from,
           to: input.to,
         })
@@ -542,7 +544,7 @@ export const createProvider = (
       }
       if (name === 'investments.orders.preview') {
         const input = request as InvestmentOrderRequest
-        if (!accountMatches(input.accountId)) {
+        if (!accountMatches(input.account)) {
           throw new PayPaySecError('order account was not found', 'ACCOUNT_NOT_FOUND')
         }
         if (!input.instrumentId) {
@@ -567,6 +569,41 @@ export const createProvider = (
                 subClientSeqNo: position?.subClientSeqNo ?? '',
                 ...(input.sellAll ? { mode: 'all' as const } : { mode: 'amount' as const, amount }),
               })
+        const projectedAssetChanges: FinancialAssetChange[] =
+          input.side === 'buy'
+            ? [
+                {
+                  asset: { kind: 'cash', currency: 'JPY' },
+                  availableDelta: `-${preview.amount}`,
+                  reservedDelta: preview.amount,
+                  pendingDelta: '0',
+                },
+              ]
+            : [
+                {
+                  asset: {
+                    kind: 'security',
+                    instrumentId: input.instrumentId,
+                    venue:
+                      position?.country ??
+                      (await listedInstrument(input.instrumentId))?.market ??
+                      '',
+                    positionType: 'cash',
+                    ...(input.accountType ? { accountType: input.accountType } : {}),
+                  },
+                  availableDelta: `-${preview.quantity}`,
+                  reservedDelta: preview.quantity,
+                  pendingDelta: '0',
+                },
+              ]
+        if (
+          projectedAssetChanges.some(
+            (change) => change.asset.kind === 'security' && !change.asset.venue,
+          )
+        ) {
+          throw new PayPaySecError('security venue could not be resolved', 'INVALID_ARGUMENT')
+        }
+        projectedChanges.set(preview.confirmationId, projectedAssetChanges)
         return {
           estimatedAmount: { currency: 'JPY', value: preview.amount },
           quantity: preview.quantity,
@@ -575,6 +612,7 @@ export const createProvider = (
           expiresAt: preview.expiresAt,
           warnings: preview.warnings,
           confirmationToken: preview.confirmationId,
+          projectedAssetChanges,
         } as InvestmentOrderPreview as never
       }
       if (name === 'investments.orders.create') {
@@ -603,6 +641,14 @@ export const createProvider = (
             allowTransaction: true,
           })
         }
+        const changes = projectedChanges.get(input.confirmationToken)
+        if (!changes) {
+          throw new PayPaySecError(
+            'order preview asset changes are missing or expired',
+            'INVALID_CONFIRMATION',
+          )
+        }
+        projectedChanges.delete(input.confirmationToken)
         return {
           accountId: account.id,
           instrumentId: receipt.brandId,
@@ -610,6 +656,10 @@ export const createProvider = (
           side: receipt.side,
           amount: { currency: 'JPY', value: receipt.amount },
           message: receipt.message,
+          effects: {
+            referenceId: input.confirmationToken,
+            changes,
+          },
         } as InvestmentOrderReceipt as never
       }
       throw new PayPaySecError(

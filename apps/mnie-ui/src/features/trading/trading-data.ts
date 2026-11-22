@@ -571,6 +571,7 @@ export const positionFromApi = (value: unknown): Position | null => {
           ? '信用'
           : (lotTypeLabels[lotType] ?? (accountType ? accountTypeLabel(accountType) : '現物')),
       accountType: accountType || undefined,
+      providerAccountId: textValue(item.accountId) || undefined,
     }
   }
   const issue = issueFrom(item.issue)
@@ -600,7 +601,11 @@ export const positionFromApi = (value: unknown): Position | null => {
 }
 
 const orderStatusText = (status: string): OrderRow['status'] => {
-  if (status === 'open') return '注文中'
+  if (status === 'submission_unknown' || status === 'submitting') return '結果確認中'
+  if (status === 'cancel_pending') return '取消確認中'
+  if (status === 'partially_filled') return '一部約定'
+  if (status === 'reconciliation_required') return '要照合'
+  if (status === 'open' || status === 'replace_pending') return '注文中'
   if (status === 'cancelled' || status === 'expired' || status === 'rejected') return '取消済'
   return '約定済'
 }

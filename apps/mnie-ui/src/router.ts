@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 const RouteStub = { template: '<span />' }
 
-export const routeNames = ['portfolio', 'trade', 'history', 'settings'] as const
+export const routeNames = ['portfolio', 'trade', 'history', 'accounts', 'settings'] as const
 export type RouteName = (typeof routeNames)[number]
 
 export const router = createRouter({
@@ -12,6 +12,16 @@ export const router = createRouter({
     { path: '/portfolio', name: 'portfolio', component: RouteStub },
     { path: '/trade/:id?', name: 'trade', component: RouteStub },
     { path: '/history', name: 'history', component: RouteStub },
+    {
+      path: '/accounts/:id?/:mode(transfer)?',
+      name: 'accounts',
+      component: RouteStub,
+    },
+    {
+      path: '/accounts/physical/:physicalId',
+      name: 'accountsPhysical',
+      component: RouteStub,
+    },
     { path: '/api-keys', redirect: '/settings/api-keys' },
     { path: '/settings', redirect: '/settings/api-keys' },
     {

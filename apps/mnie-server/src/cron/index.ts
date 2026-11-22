@@ -1,3 +1,6 @@
+import { syncAccountOrders } from '../account-sync'
+import { PhysicalAccountGateway } from '../physical-account-gateway'
+import { financialAccounts, virtualOrders } from '../db/schema'
 import type { ServerConfig } from '../config'
 import type { Db } from '../db'
 import { fetchAssetValuation, saveAssetValuation } from '../assets'
@@ -83,10 +86,13 @@ export const createCronSystem = (
 
   const refreshAvailability = async () => {
     for (const profile of await listProfiles(providers)) {
+      // Mobile Suica checks availability immediately before its hourly asset refresh.
+      // Avoid opening its usage-history page from this separate ten-minute job.
+      if (profile.provider === 'mobile-suica') continue
       const availability = await checkProfileAvailability(providers, profile)
       availabilityCache.set(profile.id, {
         result: availability.connection,
-        operations: availability.operations,
+        methods: availability.methods,
         checkedAt: new Date(availability.checkedAt),
       })
     }
@@ -104,7 +110,7 @@ export const createCronSystem = (
         const availability = await providers.availability(profile)
         availabilityCache.set(profile.id, {
           result: availability.connection,
-          operations: availability.operations,
+          methods: availability.methods,
           checkedAt: new Date(availability.checkedAt),
         })
         if (!availability.connection.ok) {
@@ -120,16 +126,37 @@ export const createCronSystem = (
   const updateAssets = async () => {
     const errors: string[] = []
     for (const profile of await listProfiles(providers)) {
-      const availability = availabilityCache.get(profile.id)
-      if (!availability?.result.ok) continue
       const interval = providers.assetRefreshIntervalMs(profile)
       if (!interval) continue
       const previous = lastAssetRuns.get(profile.id) ?? 0
       if (Date.now() - previous < interval) continue
+      const cachedAvailability = availabilityCache.get(profile.id)
+      if (profile.provider !== 'mobile-suica' && !cachedAvailability?.result.ok) continue
       lastAssetRuns.set(profile.id, Date.now())
       try {
+        if (profile.provider === 'mobile-suica') {
+          const current = await checkProfileAvailability(providers, profile)
+          availabilityCache.set(profile.id, {
+            result: current.connection,
+            methods: current.methods,
+            checkedAt: new Date(current.checkedAt),
+          })
+          if (!current.connection.ok) {
+            errors.push(`${profile.label}: ${errorMessage(current.connection.message)}`)
+            continue
+          }
+        }
         const valuation = await fetchAssetValuation(providers, profile)
         await saveAssetValuation(db, profile, valuation)
+        const gateway = new PhysicalAccountGateway(providers)
+        try {
+          for (const account of (await db.select().from(financialAccounts)).filter(
+            (item) => item.profileId === profile.id,
+          ))
+            await syncAccountOrders(db, gateway, account.id)
+        } finally {
+          await gateway.close()
+        }
       } catch (cause) {
         errors.push(`${profile.label}: ${errorMessage(cause)}`)
       }
@@ -138,6 +165,19 @@ export const createCronSystem = (
   }
 
   const reconcile = async () => {
+    const gateway = new PhysicalAccountGateway(providers)
+    try {
+      const pending = new Set(
+        (await db.select().from(virtualOrders))
+          .filter((order) => !['filled', 'cancelled', 'rejected', 'expired'].includes(order.state))
+          .map((order) => order.physicalAccountId),
+      )
+      for (const account of await db.select().from(financialAccounts))
+        if (pending.has(account.id)) await syncAccountOrders(db, gateway, account.id)
+    } finally {
+      await gateway.close()
+    }
+
     while (await runQueuedReconciliation(db)) {
       // Drain queued ranges before the next cron interval.
     }

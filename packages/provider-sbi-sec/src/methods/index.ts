@@ -2053,6 +2053,13 @@ const parseCashPositions = (
     const accountInformation = reader.text(20)
 
     const marketValue = yen(valuationPriceText)
+    const quantity = parseNumber(quantityText)
+    // SBI returns the acquisition unit price in priceText (for example "428.0"),
+    // the total acquisition cost in purchasePriceText, and the total market
+    // value in valuationPriceText. Derive the per-share market price from the
+    // totals; priceText must not be exposed as the current price.
+    const perShareMarketValue =
+      marketValue.value != null && quantity ? marketValue.value / quantity : null
     const position: CashPosition = {
       issue: {
         code,
@@ -2063,15 +2070,19 @@ const parseCashPositions = (
       depositType: mapDepositType(depositTypeCode),
       depositTypeCode: emptyToUndefined(depositTypeCode),
       depositTypeText: emptyToUndefined(depositTypeText),
-      quantity: parseNumber(quantityText),
-      availableQuantity: subtractNullable(
-        parseNumber(quantityText),
-        parseNumberFromParentheses(unactualyQuantity),
-      ),
+      quantity,
+      availableQuantity: subtractNullable(quantity, parseNumberFromParentheses(unactualyQuantity)),
       unexecutedOrderQuantity: parseNumberFromParentheses(unactualyQuantity),
-      averagePrice: yen(purchasePriceText),
+      averagePrice: yen(priceText),
       purchasePrice: yen(purchasePriceText),
-      currentPrice: yen(priceText),
+      currentPrice:
+        perShareMarketValue == null
+          ? undefined
+          : {
+              value: perShareMarketValue,
+              text: String(perShareMarketValue),
+              currency: 'JPY',
+            },
       priceText: emptyToUndefined(priceText),
       marketValue,
       presentValueFlag: emptyToUndefined(presentValueFlag),

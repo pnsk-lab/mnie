@@ -18,7 +18,7 @@ import { connectMnie } from '@repo/client-mnie'
 
 const workspace = await connectMnie({ baseURL, token })
 const valuation = await workspace.invoke('portfolio.valuation.get', { baseCurrency: 'JPY' })
-const positions = await workspace.profile('sbi_xxx').invoke('investments.positions.list', {})
+const positions = await workspace.account('acct_xxx').invoke('investments.positions.list', {})
 ```
 
 Individual profiles implement `FinancialProvider`; cross-profile aggregation implements
@@ -28,11 +28,13 @@ Individual profiles implement `FinancialProvider`; cross-profile aggregation imp
 
 Connect a Streamable HTTP MCP client to `/api/mcp` on your Mnie server origin.
 The legacy `/mcp` path is also supported. Authenticate through OAuth or an
-`Authorization: Bearer <API_KEY>` header. API keys retain their OAuth scopes and trade limits; owner administration requires an owner session.
+`Authorization: Bearer <API_KEY>` header. API keys retain their account bindings,
+OAuth scopes, and trade limits; owner administration requires an owner session.
 
 Start with `mnie-workspace-operations`, then use `mnie-workspace-invoke` with
-`operation: "profiles.list"`. Pass a returned profile ID to `mnie-profile-operations`
-and `mnie-profile-invoke`. MCP uses the same operations as WebSocket RPC.
+`operation: "accounts.list"`. Pass a returned account ID to `mnie-account-operations`
+and `mnie-account-invoke`. MCP uses the same operations as WebSocket RPC;
+`history.list` currently returns virtual account activity, not bank statements.
 
 ## Apps
 

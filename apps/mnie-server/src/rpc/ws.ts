@@ -5,7 +5,13 @@ import type { Db } from '../db'
 import type { JsonRpcRequest } from './protocol'
 import { rpcError, rpcResult } from './protocol'
 import type { AdminRpcService } from './admin'
-import { closeOpenProvider, handleRpc, RPC_METHODS, type RpcSocketState } from './handler'
+import {
+  callerMethods,
+  closeOpenProvider,
+  handleRpc,
+  usesSessionState,
+  type RpcSocketState,
+} from './handler'
 
 const send = (ws: WSContext, payload: unknown) => ws.send(JSON.stringify(payload))
 
@@ -30,15 +36,17 @@ export const createRpcWebSocket = (db: Db, providers: ProviderRegistry, admin: A
       let queue = Promise.resolve()
       return {
         onOpen(_event, ws) {
-          send(ws, rpcResult(null, { connected: true, methods: RPC_METHODS }))
+          send(ws, rpcResult(null, { connected: true, methods: callerMethods(state) }))
         },
         onMessage(event, ws) {
           const data = String(event.data)
-          queue = queue.then(async () => {
-            let request: JsonRpcRequest | undefined
+          let request: JsonRpcRequest | undefined
+          try {
+            request = JSON.parse(data) as JsonRpcRequest
+          } catch {}
+          const task = async () => {
             try {
-              request = JSON.parse(data) as JsonRpcRequest
-              send(ws, await handleRpc(db, providers, admin, state, request))
+              send(ws, await handleRpc(db, providers, admin, state, request!))
             } catch (cause) {
               send(
                 ws,
@@ -49,8 +57,12 @@ export const createRpcWebSocket = (db: Db, providers: ProviderRegistry, admin: A
                 ),
               )
             }
-          })
-          return queue
+          }
+          if (request && usesSessionState(String(request.method))) {
+            queue = queue.then(task)
+            return queue
+          }
+          return task()
         },
         async onClose() {
           await queue

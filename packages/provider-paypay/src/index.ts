@@ -36,7 +36,7 @@ const payPayAccount = (profile: PayPayProfile): Account => ({
 })
 
 /** Converts an authenticated PayPay session to the provider-neutral API. */
-export const createProvider = (profile: PayPayProfile): FinancialProvider<CommonOperations> => {
+export const createProvider = (profile: PayPayProfile): FinancialProvider<CommonMethods> => {
   const accounts = async (): Promise<Page<Account>> => ({ items: [payPayAccount(profile)] })
   const balances = async (): Promise<Balance[]> => {
     const balance = await profile.getBalance()
@@ -71,7 +71,7 @@ export const createProvider = (profile: PayPayProfile): FinancialProvider<Common
       identity: { kind: 'stable-provider-id' },
     },
     capabilities: () => ['accounts:read', 'balances:read'],
-    operations: () => ['accounts.list', 'balances.list'],
+    methods: () => ['accounts.list', 'balances.list'],
     checkAvailability: async () => {
       try {
         await profile.getBalance()
@@ -83,8 +83,8 @@ export const createProvider = (profile: PayPayProfile): FinancialProvider<Common
     invoke: async (name, request) => {
       if (name === 'accounts.list') return accounts() as never
       if (name === 'balances.list') {
-        const input = request as { accountId?: string }
-        if (input.accountId && input.accountId !== profile.accountId) return [] as never
+        const input = request as { account?: string }
+        if (input.account && input.account !== profile.accountId) return [] as never
         return balances() as never
       }
       throw new Error(`unsupported PayPay operation: ${name}`)
@@ -251,7 +251,7 @@ export const login = async (options: PayPayLoginOptions = {}): Promise<PayPayPro
 /** Connects to PayPay and returns the provider-neutral financial interface. */
 export const connect = async (
   options: PayPayLoginOptions = {},
-): Promise<FinancialProvider<CommonOperations>> => createProvider(await login(options))
+): Promise<FinancialProvider<CommonMethods>> => createProvider(await login(options))
 
 /** Restores a profile from a value returned by `profile.session.export()`. */
 export const importSession = async (session: PayPaySession): Promise<PayPayProfile> =>
@@ -293,4 +293,4 @@ export const createPayPayClient = (options: {
     importSession,
   }
 }
-import type { Account, Balance, CommonOperations, FinancialProvider, Page } from '@mnie/types'
+import type { Account, Balance, CommonMethods, FinancialProvider, Page } from '@mnie/types'

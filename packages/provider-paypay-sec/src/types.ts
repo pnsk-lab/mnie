@@ -298,11 +298,11 @@ export interface PayPaySecClient {
 }
 
 export type PayPaySecOperations = Pick<
-  import('@mnie/types').CommonOperations,
+  import('@mnie/types').CommonMethods,
   'accounts.list' | 'balances.list' | 'assets.valuation.get' | 'transactions.list' | 'history.list'
 > &
   Pick<
-    import('@mnie/types').InvestmentOperations,
+    import('@mnie/types').InvestmentMethods,
     | 'investments.positions.list'
     | 'investments.orders.list'
     | 'investments.orders.preview'

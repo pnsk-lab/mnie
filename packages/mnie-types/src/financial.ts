@@ -35,6 +35,74 @@ export interface ProfileDescriptor {
 
 export type ProviderCategory = 'brokerage' | 'bank' | 'transit' | 'pension' | 'other'
 
+export type ConnectionId = string & { readonly __brand: 'ConnectionId' }
+export type PhysicalAccountId = string & { readonly __brand: 'PhysicalAccountId' }
+export type FinancialAccountId = string & { readonly __brand: 'FinancialAccountId' }
+export type VirtualAccountId = FinancialAccountId & { readonly __virtual: true }
+export type VirtualOrderId = string & { readonly __brand: 'VirtualOrderId' }
+export type VirtualQuoteId = string & { readonly __brand: 'VirtualQuoteId' }
+
+export interface PublicFinancialAccount {
+  id: FinancialAccountId
+  implementation: 'virtual-brokerage' | 'passthrough-readonly'
+  category: ProviderCategory
+  provider?: string
+  label: string
+  kind: 'personal' | 'agent' | 'system'
+  status: 'active' | 'frozen' | 'reconciliation_required' | 'closed'
+  capabilities: readonly string[]
+  permissions: { read: boolean; trade: boolean; manage: boolean }
+  color?: string
+  icon?: string
+  version: number
+}
+
+export interface VirtualAccountAsset {
+  accountId: FinancialAccountId
+  assetKey: string
+  assetKind: 'cash' | 'security'
+  available: string
+  reserved: string
+  pending: string
+  version: number
+  updatedAt: string
+}
+
+export type FinancialAssetReference =
+  | { kind: 'cash'; currency: string }
+  | {
+      kind: 'security'
+      instrumentId: string
+      venue: string
+      positionType: 'cash'
+      accountType?: string
+    }
+
+/** Provider-reported physical asset change. Workspace applies it to a virtual account. */
+export interface FinancialAssetChange {
+  asset: FinancialAssetReference
+  availableDelta: string
+  reservedDelta: string
+  pendingDelta: string
+}
+
+export interface FinancialOperationEffects {
+  /** Stable provider-side reference, normally an order ID. */
+  referenceId: string
+  changes: FinancialAssetChange[]
+  /** Provider references whose still-active changes this operation reverses. */
+  reversesReferenceIds?: string[]
+}
+
+export interface FinancialOperationEffectResult {
+  effects?: FinancialOperationEffects
+  /**
+   * When true on a cancellation result, the provider confirmed the order
+   * reached a terminal state and any reported effects are final.
+   */
+  confirmed?: boolean
+}
+
 export interface Money {
   /** ISO 4217 currency code. */
   currency: string
@@ -222,7 +290,7 @@ export interface PageRequest {
 }
 
 export interface DateRangeRequest extends PageRequest {
-  accountId?: string
+  account?: string
   from?: string
   to?: string
 }
@@ -309,7 +377,7 @@ export interface InvestmentTrade {
 }
 
 export interface InvestmentOrderRequest {
-  accountId: string
+  account: string
   instrumentId: string
   /** Listing venue when it differs from the execution venue (for example odd-lot routes). */
   instrumentVenue?: string
@@ -411,15 +479,19 @@ export interface InvestmentOrderPreview {
   expiresAt?: string
   warnings: string[]
   confirmationToken?: string
+  /** Expected physical changes if this preview is submitted successfully. */
+  projectedAssetChanges?: FinancialAssetChange[]
 }
 
 export interface InvestmentOrderPlacement extends InvestmentOrderRequest {
+  idempotencyKey?: string
   confirmationToken?: string
   allowTransaction: true
 }
 
 export interface InvestmentOrderChangeRequest {
-  accountId: string
+  idempotencyKey?: string
+  account: string
   orderId: string
   quantity?: string
   limitPrice?: Money
@@ -428,7 +500,8 @@ export interface InvestmentOrderChangeRequest {
 }
 
 export interface InvestmentOrderCancelRequest {
-  accountId: string
+  idempotencyKey?: string
+  account: string
   orderId: string
   confirmationToken?: string
   allowTransaction: true
@@ -436,11 +509,13 @@ export interface InvestmentOrderCancelRequest {
 
 /** Confirmation-only placement used by providers that retain the preview server-side. */
 export interface InvestmentOrderCreateRequest {
+  /** Required by the Mnie workspace order coordinator. */
+  idempotencyKey?: string
   confirmationToken: string
   allowTransaction: true
 }
 
-export interface InvestmentOrderReceipt {
+export interface InvestmentOrderReceipt extends FinancialOperationEffectResult {
   id?: string
   accountId: string
   instrumentId: string
@@ -459,7 +534,7 @@ export interface InvestmentInstrument {
   price?: Money
 }
 
-export interface InvestmentOrder {
+export interface InvestmentOrder extends FinancialOperationEffectResult {
   id: string
   accountId: string
   instrumentId: string
@@ -481,14 +556,14 @@ export interface InvestmentOrder {
   accountInformation?: string
 }
 
-export type InvestmentOperations = {
-  'investments.positions.list': OperationDefinition<
-    PageRequest & { accountId?: string; positionType?: 'cash' | 'margin' },
+export type InvestmentMethods = {
+  'investments.positions.list': MethodDefinition<
+    PageRequest & { account?: string; positionType?: 'cash' | 'margin' },
     Page<InvestmentPosition>
   >
-  'investments.positions.get': OperationDefinition<
+  'investments.positions.get': MethodDefinition<
     {
-      accountId?: string
+      account?: string
       instrumentId: string
       venue: string
       positionType?: 'cash' | 'margin'
@@ -496,37 +571,42 @@ export type InvestmentOperations = {
     },
     InvestmentPosition
   >
-  'investments.orders.preview': OperationDefinition<InvestmentOrderRequest, InvestmentOrderPreview>
-  'investments.orders.create': OperationDefinition<
+  'investments.orders.preview': MethodDefinition<InvestmentOrderRequest, InvestmentOrderPreview>
+  'investments.orders.create': MethodDefinition<
     InvestmentOrderPlacement | InvestmentOrderCreateRequest,
     InvestmentOrder | InvestmentOrderReceipt
   >
-  'investments.orders.replace.preview': OperationDefinition<
+  'investments.orders.replace.preview': MethodDefinition<
     InvestmentOrderChangeRequest,
     InvestmentOrderPreview
   >
-  'investments.orders.replace': OperationDefinition<InvestmentOrderChangeRequest, InvestmentOrder>
-  'investments.orders.cancel': OperationDefinition<InvestmentOrderCancelRequest, InvestmentOrder>
-  'investments.instruments.search': OperationDefinition<
+  'investments.orders.replace': MethodDefinition<InvestmentOrderChangeRequest, InvestmentOrder>
+  'investments.orders.cancel': MethodDefinition<InvestmentOrderCancelRequest, InvestmentOrder>
+  'investments.instruments.search': MethodDefinition<
     { query?: string; market?: string },
     Page<InvestmentInstrument>
   >
-  'investments.instruments.get': OperationDefinition<{ instrumentId: string }, InvestmentInstrument>
-  'investments.orders.list': OperationDefinition<
-    PageRequest & { accountId?: string; status?: InvestmentOrder['status'] },
+  'investments.instruments.get': MethodDefinition<{ instrumentId: string }, InvestmentInstrument>
+  'investments.orders.list': MethodDefinition<
+    PageRequest & { account?: string; status?: InvestmentOrder['status'] },
     Page<InvestmentOrder>
   >
-  'investments.orders.get': OperationDefinition<
+  /** Complete snapshot of open broker orders. `complete` must be true for isolation. */
+  'investments.orders.open': MethodDefinition<
+    { account?: string },
+    { items: InvestmentOrder[]; complete?: boolean }
+  >
+  'investments.orders.get': MethodDefinition<
     {
-      accountId?: string
+      account?: string
       orderId: string
       instrumentId?: string
       venue: string
     },
     InvestmentOrder
   >
-  'investments.trades.list': OperationDefinition<
-    PageRequest & { accountId?: string; venue?: string },
+  'investments.trades.list': MethodDefinition<
+    PageRequest & { account?: string; venue?: string },
     Page<InvestmentTrade>
   >
 }
@@ -583,50 +663,37 @@ export interface PensionHistoricalAssets {
 }
 
 /** Provider-neutral operations for defined-contribution pension accounts. */
-export type PensionOperations = {
-  'pension.participant.get': OperationDefinition<Record<string, never>, PensionParticipant>
-  'pension.assets.current.get': OperationDefinition<Record<string, never>, PensionCurrentAssets>
-  'pension.contribution.get': OperationDefinition<Record<string, never>, PensionContribution>
-  'pension.assets.history.list': OperationDefinition<Record<string, never>, PensionHistoricalAssets>
+export type PensionMethods = {
+  'pension.participant.get': MethodDefinition<Record<string, never>, PensionParticipant>
+  'pension.assets.current.get': MethodDefinition<Record<string, never>, PensionCurrentAssets>
+  'pension.contribution.get': MethodDefinition<Record<string, never>, PensionContribution>
+  'pension.assets.history.list': MethodDefinition<Record<string, never>, PensionHistoricalAssets>
 }
 
-export interface OperationDefinition<Request, Response> {
+export interface MethodDefinition<Request, Response> {
   request: Request
   response: Response
 }
 
-export type OperationMap = Record<string, OperationDefinition<unknown, unknown>>
+export type MethodMap = Record<string, MethodDefinition<unknown, unknown>>
 
 /** Operations shared by all financial providers when they advertise the matching capability. */
-export type CommonOperations = {
-  'accounts.list': OperationDefinition<PageRequest, Page<Account>>
-  'balances.list': OperationDefinition<{ accountId?: string }, Balance[]>
-  'assets.valuation.get': OperationDefinition<{ accountId?: string }, AssetValuation>
-  'transactions.list': OperationDefinition<DateRangeRequest, Page<Transaction>>
-  'history.list': OperationDefinition<HistoryListRequest, Page<HistoryItem>>
-  'transfers.recipients.list': OperationDefinition<PageRequest, Page<TransferRecipient>>
+export type CommonMethods = {
+  'accounts.list': MethodDefinition<PageRequest, Page<Account>>
+  'balances.list': MethodDefinition<{ account?: string }, Balance[]>
+  'assets.valuation.get': MethodDefinition<{ account?: string }, AssetValuation>
+  'transactions.list': MethodDefinition<DateRangeRequest, Page<Transaction>>
+  'history.list': MethodDefinition<HistoryListRequest, Page<HistoryItem>>
+  'transfers.recipients.list': MethodDefinition<PageRequest, Page<TransferRecipient>>
 }
 
-export type FinancialOperations = CommonOperations & InvestmentOperations & PensionOperations
+export type ProviderMethods = CommonMethods & InvestmentMethods & PensionMethods
 
-export type WorkspaceOperations = {
-  'profiles.list': OperationDefinition<{}, ProfileDescriptor[]>
-  'history.list': OperationDefinition<
-    HistoryListRequest & { profileIds?: string[] },
-    HistoryListResult
-  >
-  'portfolio.valuation.get': OperationDefinition<
-    { baseCurrency: string; profileIds?: string[] },
-    PortfolioValuation
-  >
-  'portfolio.overview.get': OperationDefinition<{}, PortfolioOverview>
-} & ReconciliationOperations
-
-export type OperationName<Operations> = Extract<keyof Operations, string>
-export type OperationRequest<Operations, Name extends OperationName<Operations>> =
-  Operations[Name] extends OperationDefinition<infer Request, unknown> ? Request : never
-export type OperationResponse<Operations, Name extends OperationName<Operations>> =
-  Operations[Name] extends OperationDefinition<unknown, infer Response> ? Response : never
+export type MethodName<Methods> = Extract<keyof Methods, string>
+export type MethodRequest<Methods, Name extends MethodName<Methods>> =
+  Methods[Name] extends MethodDefinition<infer Request, unknown> ? Request : never
+export type MethodResponse<Methods, Name extends MethodName<Methods>> =
+  Methods[Name] extends MethodDefinition<unknown, infer Response> ? Response : never
 
 export type AvailabilityFailureReason =
   | 'CAPTCHA_REQUIRED'
@@ -643,12 +710,12 @@ export type AvailabilityCheckResult =
   | { ok: true }
   | { ok: false; message: unknown; reason: AvailabilityFailureReason }
 
-export interface OperationAvailabilityRequest {
-  operation: string
-  input?: unknown
+export interface MethodAvailabilityRequest {
+  method: string
+  params?: unknown
 }
 
-export type OperationAvailability =
+export type MethodAvailability =
   | {
       available: true
       /** Present for investment order operations when known by the provider. */
@@ -666,7 +733,7 @@ export type OperationAvailability =
 
 export interface ProviderAvailability {
   connection: AvailabilityCheckResult
-  operations: Record<string, OperationAvailability>
+  methods: Record<string, MethodAvailability>
   checkedAt: string
 }
 
@@ -674,41 +741,33 @@ export interface ProviderAvailability {
  * The public contract of every provider. Provider-specific login is allowed,
  * but an authenticated provider exposes only this common invocation surface.
  */
-export interface FinancialProvider<Operations = CommonOperations> {
+export interface FinancialProvider<Methods = CommonMethods> {
   readonly descriptor: ProviderDescriptor
   readonly accountId: string
+  /** Required before the server can safely offer trading through virtual accounts. */
+  readonly accountIsolation?: {
+    physicalCashIncludesReservations: true
+    stableOrderReferences: true
+    attributableSettlementEffects: true
+    completeOpenOrderSnapshot: true
+  }
   readonly transactionObservationPolicy?: TransactionObservationPolicy
   capabilities(): readonly Capability[]
-  operations(): readonly OperationName<Operations>[]
+  methods(): readonly MethodName<Methods>[]
   /**
    * Verifies that the authenticated profile can still make an authenticated request.
    * Returns the provider failure message instead of throwing when unavailable.
    */
   checkAvailability(): Promise<AvailabilityCheckResult>
   /**
-   * Checks an operation against provider-, account-, instrument-, and market-specific rules.
-   * Providers may omit this method; callers then derive availability from operations().
+   * Checks a method against provider-, account-, instrument-, and market-specific rules.
+   * Providers may omit this method; callers then derive availability from methods().
    */
-  checkOperationAvailability?(request: OperationAvailabilityRequest): Promise<OperationAvailability>
-  invoke<Name extends OperationName<Operations>>(
+  checkMethodAvailability?(request: MethodAvailabilityRequest): Promise<MethodAvailability>
+  invoke<Name extends MethodName<Methods>>(
     name: Name,
-    request: OperationRequest<Operations, Name>,
-  ): Promise<OperationResponse<Operations, Name>>
+    request: MethodRequest<Methods, Name>,
+  ): Promise<MethodResponse<Methods, Name>>
   exportSession(): unknown
   close(): void | Promise<void>
 }
-
-export interface FinancialWorkspace<
-  Operations = WorkspaceOperations,
-  ProviderOperations = OperationMap,
-> {
-  operations(): readonly OperationName<Operations>[] | Promise<readonly OperationName<Operations>[]>
-  profiles(): Promise<ProfileDescriptor[]>
-  profile(profileId: string): FinancialProvider<ProviderOperations>
-  invoke<Name extends OperationName<Operations>>(
-    name: Name,
-    request: OperationRequest<Operations, Name>,
-  ): Promise<OperationResponse<Operations, Name>>
-  close(): void | Promise<void>
-}
-import type { ReconciliationOperations } from './reconciliation'

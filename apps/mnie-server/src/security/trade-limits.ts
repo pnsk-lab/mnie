@@ -1,3 +1,4 @@
+import { canonicalDecimal, compareDecimal, multiplyDecimal } from '../virtual-accounts'
 import { and, eq } from 'drizzle-orm'
 import type { Db } from '../db'
 import { apiKeyTradeUsage, apiKeys } from '../db/schema'
@@ -7,6 +8,7 @@ type WindowName = '1h' | '6h' | '1d'
 interface TradeLimitInput {
   apiKeyId: string
   params: unknown
+  operation?: string
 }
 
 export const isTransactionOperation = (operation: string, input?: unknown) => {
@@ -26,76 +28,59 @@ const windowBucket = (date: Date, window: WindowName) => {
   return `${year}-${month}-${day}T${String(bucketHour).padStart(2, '0')}`
 }
 
-const numberFromParams = (params: unknown, key: string) => {
-  if (!params || typeof params !== 'object' || Array.isArray(params)) return undefined
-  const value = (params as Record<string, unknown>)[key]
-  if (value === undefined || value === null || value === '') return undefined
-  const number = Number(value)
-  return Number.isFinite(number) ? number : undefined
-}
-
 const record = (value: unknown) =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined
-
+const decimal = (value: unknown) =>
+  value === undefined || value === null || value === ''
+    ? undefined
+    : canonicalDecimal(String(value))
 const money = (value: unknown) => {
   const input = record(value)
   if (!input) return undefined
-  const amount = Number(input.value)
+  const valueText = decimal(input.value)
   const currency = typeof input.currency === 'string' ? input.currency : undefined
-  return currency && Number.isFinite(amount) ? { currency, value: amount } : undefined
+  return valueText !== undefined && currency ? { currency, value: valueText } : undefined
 }
-
 const assertPriceLimits = (
   params: unknown,
-  settings: {
-    maxOrderPriceJpy: number | null
-    maxOrderAmountJpy: number | null
-  },
+  settings: { maxOrderPriceJpy: number | null; maxOrderAmountJpy: number | null },
 ) => {
   const input = record(params)
   const directAmount = money(input?.amount)
   const execution = record(input?.execution)
-  const structuredPrice = money(execution?.limitPrice)
-  const legacyPrice = numberFromParams(params, 'price')
-  const price = structuredPrice?.value ?? legacyPrice
-  const quantity = numberFromParams(params, 'quantity')
-
-  if (directAmount && directAmount.value <= 0) throw new Error('order amount must be positive')
-  if (price != null && price <= 0) throw new Error('order price must be positive')
-  if (quantity != null && quantity <= 0) throw new Error('order quantity must be positive')
-
+  const structuredPrice = money(input?.limitPrice ?? execution?.limitPrice)
+  const price = structuredPrice?.value ?? decimal(input?.price)
+  const quantity = decimal(input?.quantity)
+  if (directAmount && compareDecimal(directAmount.value, '0') <= 0)
+    throw new Error('order amount must be positive')
+  if (price !== undefined && compareDecimal(price, '0') <= 0)
+    throw new Error('order price must be positive')
+  if (quantity !== undefined && compareDecimal(quantity, '0') <= 0)
+    throw new Error('order quantity must be positive')
   if (
-    (settings.maxOrderPriceJpy != null || settings.maxOrderAmountJpy != null) &&
+    (settings.maxOrderPriceJpy !== null || settings.maxOrderAmountJpy !== null) &&
     ((directAmount && directAmount.currency !== 'JPY') ||
       (structuredPrice && structuredPrice.currency !== 'JPY'))
-  ) {
+  )
     throw new Error('JPY trade limits require an explicit currency conversion for this order')
+  if (settings.maxOrderPriceJpy !== null) {
+    if (price === undefined) throw new Error('order price limit requires a bounded unit price')
+    if (compareDecimal(price, String(settings.maxOrderPriceJpy)) > 0)
+      throw new Error(`order price exceeds API key limit (${settings.maxOrderPriceJpy} JPY)`)
   }
-
-  if (settings.maxOrderPriceJpy != null && price != null && price > settings.maxOrderPriceJpy) {
-    throw new Error(`order price exceeds API key limit (${settings.maxOrderPriceJpy} JPY)`)
-  }
-
-  if (settings.maxOrderAmountJpy == null) return
-  if (directAmount) {
-    if (directAmount.value > settings.maxOrderAmountJpy) {
-      throw new Error(`order amount exceeds API key limit (${settings.maxOrderAmountJpy} JPY)`)
-    }
-    return
-  }
-  if (price == null || quantity == null) {
+  if (settings.maxOrderAmountJpy === null) return
+  const amount =
+    directAmount?.value ??
+    (price !== undefined && quantity !== undefined ? multiplyDecimal(price, quantity) : undefined)
+  if (amount === undefined)
     throw new Error('order amount limit requires an amount or a price and quantity')
-  }
-
-  const amount = price * quantity
-  if (amount > settings.maxOrderAmountJpy) {
+  if (compareDecimal(amount, String(settings.maxOrderAmountJpy)) > 0)
     throw new Error(`order amount exceeds API key limit (${settings.maxOrderAmountJpy} JPY)`)
-  }
 }
 
-const checkAndConsumeWindow = async (
+const checkAndConsumeWindow = (
   db: Db,
   apiKeyId: string,
   window: WindowName,
@@ -109,49 +94,48 @@ const checkAndConsumeWindow = async (
     eq(apiKeyTradeUsage.window, window),
     eq(apiKeyTradeUsage.hourBucket, hourBucket),
   )
-  const [usage] = await db.select().from(apiKeyTradeUsage).where(where).limit(1)
+  const usage = db.select().from(apiKeyTradeUsage).where(where).get()
   const currentCount = usage?.tradeCount ?? 0
   if (currentCount >= limit) throw new Error(`${window} trade limit exceeded for API key`)
-
-  if (usage) {
-    await db
-      .update(apiKeyTradeUsage)
+  if (usage)
+    db.update(apiKeyTradeUsage)
       .set({ tradeCount: currentCount + 1, updatedAt: now })
       .where(where)
-    return
-  }
-
-  await db.insert(apiKeyTradeUsage).values({
-    apiKeyId,
-    window,
-    hourBucket,
-    tradeCount: 1,
-    updatedAt: now,
-  })
+      .run()
+  else
+    db.insert(apiKeyTradeUsage)
+      .values({ apiKeyId, window, hourBucket, tradeCount: 1, updatedAt: now })
+      .run()
 }
 
-export const assertAndConsumeApiKeyTradeLimits = async ({
+export const consumeApiKeyTradeLimitsSync = ({
   db,
   apiKeyId,
   params,
-}: TradeLimitInput & { db: Db }) => {
-  const [key] = await db.select().from(apiKeys).where(eq(apiKeys.id, apiKeyId)).limit(1)
-  if (!key || key.revokedAt) throw new Error('API key is not active')
-
-  assertPriceLimits(params, {
-    maxOrderPriceJpy: key.maxOrderPriceJpy,
-    maxOrderAmountJpy: key.maxOrderAmountJpy,
+  operation,
+}: TradeLimitInput & { db: Db }) =>
+  db.transaction(() => {
+    const key = db.select().from(apiKeys).where(eq(apiKeys.id, apiKeyId)).get()
+    if (!key || key.revokedAt || (key.expiresAt && key.expiresAt <= new Date()))
+      throw new Error('API key is not active')
+    if (operation !== 'investments.orders.cancel')
+      assertPriceLimits(params, {
+        maxOrderPriceJpy: key.maxOrderPriceJpy,
+        maxOrderAmountJpy: key.maxOrderAmountJpy,
+      })
+    const now = new Date()
+    checkAndConsumeWindow(db, apiKeyId, '1h', key.maxTradesPerHour, now)
+    checkAndConsumeWindow(db, apiKeyId, '6h', key.maxTradesPer6Hours, now)
+    checkAndConsumeWindow(db, apiKeyId, '1d', key.maxTradesPerDay, now)
   })
 
-  const now = new Date()
-  await checkAndConsumeWindow(db, apiKeyId, '1h', key.maxTradesPerHour, now)
-  await checkAndConsumeWindow(db, apiKeyId, '6h', key.maxTradesPer6Hours, now)
-  await checkAndConsumeWindow(db, apiKeyId, '1d', key.maxTradesPerDay, now)
-}
+export const assertAndConsumeApiKeyTradeLimits = async (input: TradeLimitInput & { db: Db }) =>
+  consumeApiKeyTradeLimitsSync(input)
 
 export const assertApiKeyMethodAllowed = async (db: Db, apiKeyId: string, method: string) => {
   const [key] = await db.select().from(apiKeys).where(eq(apiKeys.id, apiKeyId)).limit(1)
-  if (!key || key.revokedAt) throw new Error('API key is not active')
+  if (!key || key.revokedAt || (key.expiresAt && key.expiresAt <= new Date()))
+    throw new Error('API key is not active')
   if (key.allowedMethods === null || key.allowedMethods === undefined) return
   if (key.allowedMethods.includes(method)) return
   throw new Error(`API key is not allowed to call ${method}`)

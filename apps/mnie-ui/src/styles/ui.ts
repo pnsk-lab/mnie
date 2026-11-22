@@ -17,7 +17,7 @@ export const ui = {
   themeToggle:
     'grid min-h-12 min-w-12 place-items-center rounded-full text-fg-secondary transition hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-soft lg:min-h-14 lg:min-w-0',
   workspace:
-    'order-1 flex min-h-0 min-w-0 flex-col gap-5 overflow-y-auto px-4 pt-4 pb-5 sm:px-6 sm:pt-6 lg:order-none lg:gap-7 lg:px-8 lg:pt-8 lg:pb-8',
+    'order-1 flex min-h-0 min-w-0 flex-col gap-5 overflow-y-auto [scrollbar-gutter:stable] px-4 pt-4 pb-5 sm:px-6 sm:pt-6 lg:order-none lg:gap-7 lg:px-8 lg:pt-8 lg:pb-8',
   oauthWorkspace:
     'flex min-h-dvh min-w-0 items-start justify-center overflow-y-auto overflow-x-hidden px-4 py-5 sm:px-6 sm:py-8',
   topbar: 'flex shrink-0 flex-wrap items-center justify-between gap-4',

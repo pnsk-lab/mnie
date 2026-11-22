@@ -1,9 +1,16 @@
 import { and, eq, isNull } from 'drizzle-orm'
 import type { Db } from '../db'
-import { apiKeys } from '../db/schema'
+import {
+  apiKeys,
+  apiKeyVirtualAccounts,
+  virtualAccounts,
+  accountAudit,
+  virtualOrderQuotes,
+} from '../db/schema'
 import { randomId, randomToken, sha256 } from './crypto'
 
 export interface ApiKeySettings {
+  accountBindings?: Array<{ accountId: string; role: 'read' | 'trade' }>
   maxTradesPerHour?: number | null
   maxTradesPer6Hours?: number | null
   maxTradesPerDay?: number | null
@@ -16,7 +23,8 @@ export interface ApiKeySettings {
 const normalizeLimit = (value: unknown) => {
   if (value === undefined || value === null || value === '') return null
   const number = Number(value)
-  if (!Number.isFinite(number) || number < 0) throw new Error('limit must be a positive number')
+  if (!Number.isSafeInteger(number) || number < 0)
+    throw new Error('limit must be a positive number')
   return Math.floor(number)
 }
 
@@ -27,21 +35,12 @@ export const normalizeApiKeySettings = (settings: ApiKeySettings = {}) => ({
   maxOrderPriceJpy: normalizeLimit(settings.maxOrderPriceJpy),
   maxOrderAmountJpy: normalizeLimit(settings.maxOrderAmountJpy),
   allowedMethods:
-    settings.allowedMethods === undefined
-      ? null
-      : settings.allowedMethods?.length
-        ? [...new Set(settings.allowedMethods)].sort()
-        : null,
-  scopes:
-    settings.scopes === undefined
-      ? null
-      : settings.scopes?.length
-        ? [...new Set(settings.scopes)].sort()
-        : null,
+    settings.allowedMethods == null ? null : [...new Set(settings.allowedMethods)].sort(),
+  scopes: settings.scopes == null ? null : [...new Set(settings.scopes)].sort(),
 })
 
-export const listApiKeys = async (db: Db) =>
-  db
+export const listApiKeys = async (db: Db) => {
+  const rows = await db
     .select({
       id: apiKeys.id,
       label: apiKeys.label,
@@ -55,12 +54,71 @@ export const listApiKeys = async (db: Db) =>
       createdAt: apiKeys.createdAt,
       lastUsedAt: apiKeys.lastUsedAt,
       revokedAt: apiKeys.revokedAt,
+      expiresAt: apiKeys.expiresAt,
     })
     .from(apiKeys)
     .where(isNull(apiKeys.revokedAt))
     .orderBy(apiKeys.createdAt)
+  const bindings = await db.select().from(apiKeyVirtualAccounts)
+  return rows.map((row) => ({
+    ...row,
+    accountBindings: bindings
+      .filter((binding) => binding.apiKeyId === row.id)
+      .map((binding) => ({ accountId: binding.virtualAccountId, role: binding.role })),
+  }))
+}
 
-export const createApiKey = async (db: Db, label: string, settings: ApiKeySettings = {}) => {
+export const validateAccountBindings = (
+  db: Db,
+  bindings: ApiKeySettings['accountBindings'] = [],
+) => {
+  if (!Array.isArray(bindings)) throw new Error('accountBindings must be an array')
+  if (new Set(bindings.map((binding) => binding.accountId)).size !== bindings.length)
+    throw new Error('duplicate account binding')
+  if (bindings.some((binding) => binding.role === 'trade') && bindings.length !== 1)
+    throw new Error('a trade key requires exactly one account')
+  for (const binding of bindings) {
+    if (!['read', 'trade'].includes(binding.role)) throw new Error('invalid account role')
+    const account = db
+      .select()
+      .from(virtualAccounts)
+      .where(eq(virtualAccounts.id, binding.accountId))
+      .get()
+    if (!account || account.kind === 'system' || account.status === 'closed')
+      throw new Error('account not found')
+  }
+  return bindings
+}
+
+const writeBindings = (
+  db: Db,
+  id: string,
+  bindings: NonNullable<ApiKeySettings['accountBindings']>,
+) => {
+  db.delete(apiKeyVirtualAccounts).where(eq(apiKeyVirtualAccounts.apiKeyId, id)).run()
+  db.delete(virtualOrderQuotes).where(eq(virtualOrderQuotes.principal, id)).run()
+  for (const binding of bindings) {
+    db.insert(apiKeyVirtualAccounts)
+      .values({
+        apiKeyId: id,
+        virtualAccountId: binding.accountId,
+        role: binding.role,
+        createdAt: new Date(),
+      })
+      .run()
+    db.insert(accountAudit)
+      .values({
+        id: randomId('audit'),
+        accountId: binding.accountId,
+        event: 'access.updated',
+        detail: { apiKeyId: id, role: binding.role },
+        createdAt: new Date(),
+      })
+      .run()
+  }
+}
+
+export const createApiKeySync = (db: Db, label: string, settings: ApiKeySettings = {}) => {
   const token = `mnie_${randomToken()}`
   const now = new Date()
   const row = {
@@ -70,16 +128,34 @@ export const createApiKey = async (db: Db, label: string, settings: ApiKeySettin
     ...normalizeApiKeySettings(settings),
     createdAt: now,
   }
-  await db.insert(apiKeys).values(row)
+  const bindings = validateAccountBindings(db, settings.accountBindings)
+  db.transaction(() => {
+    db.insert(apiKeys).values(row).run()
+    writeBindings(db, row.id, bindings)
+  })
   return { ...row, token, tokenHash: undefined }
 }
 
+export const createApiKey = async (...args: Parameters<typeof createApiKeySync>) =>
+  createApiKeySync(...args)
+
 export const updateApiKeySettings = async (db: Db, id: string, settings: ApiKeySettings) => {
-  await db.update(apiKeys).set(normalizeApiKeySettings(settings)).where(eq(apiKeys.id, id))
+  const bindings =
+    settings.accountBindings === undefined
+      ? undefined
+      : validateAccountBindings(db, settings.accountBindings)
+  db.transaction(() => {
+    db.update(apiKeys).set(normalizeApiKeySettings(settings)).where(eq(apiKeys.id, id)).run()
+    db.delete(virtualOrderQuotes).where(eq(virtualOrderQuotes.principal, id)).run()
+    if (bindings) writeBindings(db, id, bindings)
+  })
 }
 
 export const revokeApiKey = async (db: Db, id: string) => {
-  await db.update(apiKeys).set({ revokedAt: new Date() }).where(eq(apiKeys.id, id))
+  db.transaction(() => {
+    db.update(apiKeys).set({ revokedAt: new Date() }).where(eq(apiKeys.id, id)).run()
+    db.delete(virtualOrderQuotes).where(eq(virtualOrderQuotes.principal, id)).run()
+  })
 }
 
 export const verifyApiKey = async (db: Db, token: string) => {
@@ -89,7 +165,7 @@ export const verifyApiKey = async (db: Db, token: string) => {
     .from(apiKeys)
     .where(and(eq(apiKeys.tokenHash, tokenHash), isNull(apiKeys.revokedAt)))
     .limit(1)
-  if (!row) return undefined
+  if (!row || (row.expiresAt && row.expiresAt <= new Date())) return undefined
   await db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, row.id))
   return row
 }

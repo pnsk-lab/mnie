@@ -1,11 +1,14 @@
 import type {
   Account,
   Balance,
-  CommonOperations,
+  CommonMethods,
+  FinancialAssetChange,
+  FinancialAssetReference,
+  FinancialOperationEffects,
   FinancialProvider,
   HistoryItem,
   HistoryListRequest,
-  InvestmentOperations,
+  InvestmentMethods,
   InvestmentOrder,
   InvestmentOrderCancelRequest,
   InvestmentOrderChangeRequest,
@@ -15,7 +18,7 @@ import type {
   InvestmentOrderRules,
   InvestmentPosition,
   InvestmentTrade,
-  OperationDefinition,
+  MethodDefinition,
   Page,
   Transaction,
 } from '@mnie/types'
@@ -30,6 +33,7 @@ import type {
   OrderCancelOptions,
   OrderCorrectionOptions,
 } from './operations'
+import { isUsMarket } from './markets'
 import { loginWithPasskey } from './session'
 import type {
   Board,
@@ -46,13 +50,13 @@ import type {
   TradeRecord,
 } from './types'
 
-export type SbiSecOperations = CommonOperations &
-  InvestmentOperations & {
-    'market.index.major': OperationDefinition<Record<string, never>, MarketIndex[]>
-    'market.issue.chart': OperationDefinition<IssueChartOptions, IssueChart>
-    'market.issue.search': OperationDefinition<IssueSearchOptions, IssueSearchResult>
-    'market.issue.suggest': OperationDefinition<IssueSearchOptions, IssueSearchResult>
-    'market.issue.board': OperationDefinition<IssueOptions, Board>
+export type SbiSecOperations = CommonMethods &
+  InvestmentMethods & {
+    'market.index.major': MethodDefinition<Record<string, never>, MarketIndex[]>
+    'market.issue.chart': MethodDefinition<IssueChartOptions, IssueChart>
+    'market.issue.search': MethodDefinition<IssueSearchOptions, IssueSearchResult>
+    'market.issue.suggest': MethodDefinition<IssueSearchOptions, IssueSearchResult>
+    'market.issue.board': MethodDefinition<IssueOptions, Board>
   }
 
 const money = (value: { currency: string; value: number | null } | undefined) =>
@@ -95,7 +99,7 @@ const sbiMarket = (value: string | undefined, name: string): MarketCode => {
   ) {
     return value
   }
-  throw new Error(`${name} is not a supported SBI Securities market`)
+  throw new Error(`${name} is not a supported SBI Securities market: ${JSON.stringify(value)}`)
 }
 
 const priceCondition = (request: InvestmentOrderRequest): CashOrderPriceCondition => {
@@ -200,11 +204,47 @@ const ifdOrderInput = (request: InvestmentOrderRequest): IfdOrderOptions => {
 
 const commonPreview = (
   preview: Awaited<ReturnType<SbiClientMethods['orders']['cash']['estimate']>>,
+  request: InvestmentOrderRequest,
 ): InvestmentOrderPreview => ({
   estimatedAmount: money(preview.estimatedAmount),
   warnings: [...preview.warnings, ...(preview.message ? [preview.message] : [])],
   confirmationToken: preview.confirmationId,
+  projectedAssetChanges: orderReservationChanges(request, money(preview.estimatedAmount)),
 })
+
+const orderReservationChanges = (
+  request: InvestmentOrderRequest,
+  estimatedAmount?: { currency: string; value: string },
+): FinancialAssetChange[] => {
+  if (request.side === 'buy') {
+    if (!estimatedAmount) throw new Error('provider did not return the estimated order amount')
+    return [
+      {
+        asset: { kind: 'cash', currency: estimatedAmount.currency },
+        availableDelta: `-${estimatedAmount.value}`,
+        reservedDelta: estimatedAmount.value,
+        pendingDelta: '0',
+      },
+    ]
+  }
+  if (!request.quantity) throw new Error('sell order quantity is required')
+  const venue = request.instrumentVenue ?? request.execution?.venue
+  if (!venue) throw new Error('sell order venue is required')
+  return [
+    {
+      asset: {
+        kind: 'security',
+        instrumentId: request.instrumentId,
+        venue,
+        positionType: 'cash',
+        ...(request.accountType ? { accountType: request.accountType } : {}),
+      },
+      availableDelta: `-${request.quantity}`,
+      reservedDelta: request.quantity,
+      pendingDelta: '0',
+    },
+  ]
+}
 
 const commonReceipt = (
   request: InvestmentOrderRequest,
@@ -347,12 +387,105 @@ const commonTrade = (record: TradeRecord, accountId: string): InvestmentTrade =>
 })
 
 /**
+ * Computes the cumulative asset effects attributable to a broker order.
+ * Returns undefined when the reserved or settled amounts cannot be derived
+ * exactly (for example, an unexecuted market buy has no bounded reservation),
+ * so callers must not fall back to estimates.
+ */
+const orderEffects = (order: Order): FinancialOperationEffects | undefined => {
+  if (!order.id) return undefined
+  const executed = order.executedQuantity ?? 0
+  // Terminal orders keep only their settled part; any remaining quantity is released.
+  const terminal =
+    order.status === 'executed' ||
+    order.status === 'cancelled' ||
+    order.status === 'expired' ||
+    order.status === 'rejected'
+  const unexecuted = terminal
+    ? 0
+    : (order.unexecutedQuantity ?? Math.max((order.quantity ?? 0) - executed, 0))
+  const fees = (order.commission?.value ?? 0) + (order.tax?.value ?? 0)
+  const security: FinancialAssetReference = {
+    kind: 'security',
+    instrumentId: order.issue.code,
+    venue: order.issue.market ?? '',
+    positionType: 'cash',
+    ...(order.accountType ? { accountType: order.accountType } : {}),
+  }
+  const cash: FinancialAssetReference = { kind: 'cash', currency: 'JPY' }
+  const changes: FinancialAssetChange[] = []
+  if (order.side === 'buy') {
+    const reserved =
+      unexecuted > 0 ? (order.price?.value == null ? undefined : unexecuted * order.price.value) : 0
+    const spent =
+      executed > 0
+        ? order.executedPrice?.value == null
+          ? undefined
+          : executed * order.executedPrice.value + fees
+        : 0
+    if (reserved === undefined || spent === undefined) return undefined
+    if (reserved + spent > 0)
+      changes.push({
+        asset: cash,
+        availableDelta: `-${reserved + spent}`,
+        reservedDelta: String(reserved),
+        pendingDelta: '0',
+      })
+    if (executed > 0)
+      changes.push({
+        asset: security,
+        availableDelta: String(executed),
+        reservedDelta: '0',
+        pendingDelta: '0',
+      })
+    return { referenceId: order.id, changes }
+  }
+  const total = executed + unexecuted
+  if (total > 0)
+    changes.push({
+      asset: security,
+      availableDelta: `-${total}`,
+      reservedDelta: String(unexecuted),
+      pendingDelta: '0',
+    })
+  if (executed > 0 && order.executedPrice?.value != null)
+    changes.push({
+      asset: cash,
+      availableDelta: String(executed * order.executedPrice.value - fees),
+      reservedDelta: '0',
+      pendingDelta: '0',
+    })
+  return { referenceId: order.id, changes }
+}
+
+/** Copies today's execution price and fees onto a matching order row. */
+const mergeExecutionDetails = (order: Order, execution?: Order): Order =>
+  execution
+    ? {
+        ...order,
+        executedPrice: order.executedPrice ?? execution.executedPrice,
+        commission: order.commission ?? execution.commission,
+        tax: order.tax ?? execution.tax,
+        daytradeTotal: order.daytradeTotal ?? execution.daytradeTotal,
+      }
+    : order
+
+const withOrderEffects = (order: InvestmentOrder, source: Order): InvestmentOrder => {
+  const effects = orderEffects(source)
+  return effects ? { ...order, effects } : order
+}
+
+const matchesOrderId = (order: Order, orderId: string) =>
+  order.id === orderId || order.orderSubNo === orderId || order.orderNumber === orderId
+
+/**
  * Adapts SBI Securities' transport implementation to the provider-neutral
  * financial API. SBI-specific methods deliberately remain internal here.
  */
 export const createProviderFromClient = (
   client: SbiClientMethods,
 ): FinancialProvider<SbiSecOperations> => {
+  const projectedChanges = new Map<string, FinancialAssetChange[]>()
   const profile = client.session.profile
   const account = async (): Promise<Account> => {
     const value = await profile()
@@ -368,6 +501,12 @@ export const createProviderFromClient = (
   return {
     descriptor: { id: 'sbi-sec', name: 'SBI Securities' },
     accountId: 'primary',
+    accountIsolation: {
+      physicalCashIncludesReservations: true,
+      stableOrderReferences: true,
+      attributableSettlementEffects: true,
+      completeOpenOrderSnapshot: true,
+    },
     transactionObservationPolicy: {
       accountKind: 'brokerage',
       institutionId: 'sbi-sec',
@@ -381,7 +520,7 @@ export const createProviderFromClient = (
       'investments:read',
       'investments:trade',
     ],
-    operations: () => [
+    methods: () => [
       'accounts.list',
       'balances.list',
       'assets.valuation.get',
@@ -391,6 +530,7 @@ export const createProviderFromClient = (
       'investments.positions.get',
       'investments.orders.list',
       'investments.orders.get',
+      'investments.orders.open',
       'investments.trades.list',
       'investments.orders.preview',
       'investments.orders.create',
@@ -411,31 +551,35 @@ export const createProviderFromClient = (
         return { ok: false, message, reason: 'UNKNOWN' }
       }
     },
-    checkOperationAvailability: async ({ operation, input }) => {
-      const advertised = createProviderFromClient(client).operations() as readonly string[]
-      if (!advertised.includes(operation)) {
+    checkMethodAvailability: async ({ method, params }) => {
+      const advertised = createProviderFromClient(client).methods() as readonly string[]
+      if (!advertised.includes(method)) {
         return {
           available: false,
           reason: 'OPERATION_UNSUPPORTED',
-          message: `SBI Securities does not support ${operation}`,
+          message: `SBI Securities does not support ${method}`,
         }
       }
-      if (!operation.startsWith('investments.orders.')) return { available: true }
-      if (operation === 'investments.orders.list' || operation === 'investments.orders.get') {
+      if (!method.startsWith('investments.orders.')) return { available: true }
+      if (
+        method === 'investments.orders.list' ||
+        method === 'investments.orders.get' ||
+        method === 'investments.orders.open'
+      ) {
         return { available: true }
       }
       if (
-        (operation === 'investments.orders.preview' || operation === 'investments.orders.create') &&
-        (!input || typeof input !== 'object')
+        (method === 'investments.orders.preview' || method === 'investments.orders.create') &&
+        (!params || typeof params !== 'object')
       ) {
         return { available: true, orderRules: baseOrderRules }
       }
       if (
-        operation === 'investments.orders.replace' ||
-        operation === 'investments.orders.replace.preview' ||
-        operation === 'investments.orders.cancel'
+        method === 'investments.orders.replace' ||
+        method === 'investments.orders.replace.preview' ||
+        method === 'investments.orders.cancel'
       ) {
-        const request = input as { orderId?: string } | undefined
+        const request = params as { orderId?: string } | undefined
         if (!request?.orderId) {
           return {
             available: false,
@@ -458,7 +602,7 @@ export const createProviderFromClient = (
           }
         }
         const allowed =
-          operation === 'investments.orders.cancel'
+          method === 'investments.orders.cancel'
             ? order.cancelable !== false
             : order.correctable !== false
         return allowed
@@ -467,12 +611,12 @@ export const createProviderFromClient = (
               available: false,
               reason: 'PROVIDER_RESTRICTED',
               message:
-                operation === 'investments.orders.cancel'
+                method === 'investments.orders.cancel'
                   ? 'order is not cancellable'
                   : 'order is not correctable',
             }
       }
-      const request = input as InvestmentOrderRequest
+      const request = params as InvestmentOrderRequest
       try {
         const options = cashOrderInput(request)
         const preOrder = await client.orders.cash.preOrder({
@@ -514,32 +658,55 @@ export const createProviderFromClient = (
       if (name === 'accounts.list') return { items: [await account()] } as Page<Account> as never
       const currentAccount = await account()
       if (name === 'balances.list') {
-        const input = request as { accountId?: string }
-        if (input.accountId && input.accountId !== currentAccount.id) return [] as never
-        const power = await client.account.power.buyingPower()
+        const input = request as { account?: string }
+        if (input.account && input.account !== currentAccount.id) return [] as never
+        const [power, assets] = await Promise.all([
+          client.account.power.buyingPower(),
+          client.account.assets.current(),
+        ])
         const asOf = new Date().toISOString()
-        const balances: Balance[] = [
+        // The domestic deposit total still contains cash reserved by open orders,
+        // so it is the only figure safe to use as the physical cash balance.
+        const domesticDeposit = assets.summaryDetails?.find(
+          (detail) => detail.category === 'DOMESTIC_DEPOSIT',
+        )?.valuation
+        const balances: Balance[] =
+          domesticDeposit == null
+            ? []
+            : [
+                {
+                  accountId: currentAccount.id,
+                  type: 'current',
+                  amount: {
+                    kind: 'money',
+                    money: { currency: 'JPY', value: String(domesticDeposit) },
+                  },
+                  asOf,
+                } satisfies Balance,
+              ]
+        const powerEntries: [
+          Balance['type'],
+          { currency: string; value: number | null } | undefined,
+        ][] = [
           ['buying-power', power.cashBuyingPower],
           ['withdrawable', power.withdrawableAmount],
           ['collateral', power.collateralValue],
-        ].flatMap(([type, value]) => {
-          const valueMoney = money(value as { currency: string; value: number | null } | undefined)
-          return valueMoney
-            ? [
-                {
-                  accountId: currentAccount.id,
-                  type: type as Balance['type'],
-                  amount: { kind: 'money', money: valueMoney },
-                  asOf,
-                },
-              ]
-            : []
-        })
+        ]
+        for (const [type, value] of powerEntries) {
+          const valueMoney = money(value)
+          if (valueMoney)
+            balances.push({
+              accountId: currentAccount.id,
+              type,
+              amount: { kind: 'money', money: valueMoney },
+              asOf,
+            })
+        }
         return balances as never
       }
       if (name === 'assets.valuation.get') {
-        const input = request as { accountId?: string }
-        if (input.accountId && input.accountId !== currentAccount.id) {
+        const input = request as { account?: string }
+        if (input.account && input.account !== currentAccount.id) {
           throw new Error('asset valuation account was not found')
         }
         const assets = await client.account.assets.current()
@@ -560,8 +727,8 @@ export const createProviderFromClient = (
         } as never
       }
       if (name === 'investments.positions.list') {
-        const input = request as { accountId?: string; positionType?: 'cash' | 'margin' }
-        if (input.accountId && input.accountId !== currentAccount.id) return { items: [] } as never
+        const input = request as { account?: string; positionType?: 'cash' | 'margin' }
+        if (input.account && input.account !== currentAccount.id) return { items: [] } as never
         const positionType = input.positionType
         const [cash, margin] = await Promise.all([
           positionType === 'margin' ? Promise.resolve(undefined) : client.account.positions.cash(),
@@ -579,13 +746,13 @@ export const createProviderFromClient = (
       }
       if (name === 'investments.positions.get') {
         const input = request as {
-          accountId?: string
+          account?: string
           instrumentId: string
           venue: string
           positionType?: 'cash' | 'margin'
           accountType?: string
         }
-        if (input.accountId && input.accountId !== currentAccount.id) {
+        if (input.account && input.account !== currentAccount.id) {
           throw new Error('investment position account was not found')
         }
         if (input.positionType === 'margin') {
@@ -617,7 +784,11 @@ export const createProviderFromClient = (
             input.strategy?.kind === 'ifd'
               ? await client.orders.ifd.estimate(options as IfdOrderOptions)
               : await client.orders.cash.estimate(options as CashOrderOptions)
-          return commonPreview(preview) as never
+          const result = commonPreview(preview, input)
+          if (result.confirmationToken && result.projectedAssetChanges) {
+            projectedChanges.set(result.confirmationToken, result.projectedAssetChanges)
+          }
+          return result as never
         }
         const placement = input as InvestmentOrderPlacement
         const receipt =
@@ -632,7 +803,21 @@ export const createProviderFromClient = (
                 confirmationId: placement.confirmationToken,
                 allowTrading: true,
               })
-        return commonReceipt(input, receipt, currentAccount.id) as never
+        const result = commonReceipt(input, receipt, currentAccount.id)
+        if (receipt.accepted) {
+          const changes = placement.confirmationToken
+            ? projectedChanges.get(placement.confirmationToken)
+            : undefined
+          if (!changes) throw new Error('order preview asset changes are missing or expired')
+          result.effects = {
+            referenceId: result.id || placement.confirmationToken || '',
+            changes,
+          }
+          projectedChanges.delete(placement.confirmationToken!)
+        } else if (placement.confirmationToken) {
+          projectedChanges.delete(placement.confirmationToken)
+        }
+        return result as never
       }
       if (
         name === 'investments.orders.replace.preview' ||
@@ -640,15 +825,27 @@ export const createProviderFromClient = (
         name === 'investments.orders.cancel'
       ) {
         const input = request as InvestmentOrderChangeRequest | InvestmentOrderCancelRequest
-        if (input.accountId !== currentAccount.id) throw new Error('order account was not found')
+        if (input.account !== currentAccount.id) throw new Error('order account was not found')
         const openOrders = await client.orders.inquiry.open({})
-        const source = openOrders.orders.find(
-          (order) =>
-            order.id === input.orderId ||
-            order.orderSubNo === input.orderId ||
-            order.orderNumber === input.orderId,
-        )
+        const source = openOrders.orders.find((order) => matchesOrderId(order, input.orderId))
         if (!source) throw new Error('open order was not found')
+        const lookupOrder = async () => {
+          const recent = await client.orders.inquiry.open({
+            issueCode: source.issue.code,
+            market: source.issue.market,
+          })
+          const found = recent.orders.find((order) => matchesOrderId(order, source.id))
+          if (found) {
+            const executions = await client.orders.inquiry
+              .executionsToday({ issueCode: source.issue.code, market: source.issue.market })
+              .catch(() => ({ orders: [] }))
+            return mergeExecutionDetails(
+              found,
+              executions.orders.find((order) => matchesOrderId(order, source.id)),
+            )
+          }
+          return undefined
+        }
         if (name === 'investments.orders.cancel') {
           const cancel: OrderCancelOptions = {
             orderNumber: source.orderNumber ?? source.id,
@@ -658,15 +855,41 @@ export const createProviderFromClient = (
             tradeId: source.tradeId,
           }
           const receipt = await client.orders.cash.placeCancel({ ...cancel, allowTrading: true })
+          if (!receipt.accepted) {
+            return {
+              id: source.id,
+              accountId: currentAccount.id,
+              instrumentId: source.issue.code,
+              instrumentName: source.issue.name,
+              side: source.side,
+              status: 'rejected',
+              quantity: source.quantity == null ? undefined : String(source.quantity),
+              orderedAt: source.orderedAt,
+            } as InvestmentOrder as never
+          }
+          const refreshed = await lookupOrder()
+          if (refreshed) {
+            const effects = orderEffects(refreshed)
+            const confirmed =
+              refreshed.status === 'cancelled' &&
+              (effects !== undefined || !refreshed.executedQuantity)
+            return {
+              ...commonOrder(refreshed, currentAccount.id),
+              ...(confirmed ? { confirmed: true } : {}),
+              ...(effects ? { effects } : {}),
+            } as InvestmentOrder as never
+          }
           return {
             id: source.id,
             accountId: currentAccount.id,
             instrumentId: source.issue.code,
             instrumentName: source.issue.name,
             side: source.side,
-            status: receipt.accepted ? 'cancelled' : 'rejected',
+            status: 'cancelled',
+            confirmed: true,
             quantity: source.quantity == null ? undefined : String(source.quantity),
             orderedAt: receipt.acceptedAt ?? source.orderedAt,
+            effects: { referenceId: source.id, changes: [] },
           } as InvestmentOrder as never
         }
         const change = input as InvestmentOrderChangeRequest
@@ -684,13 +907,45 @@ export const createProviderFromClient = (
             : undefined,
         }
         if (name === 'investments.orders.replace.preview') {
-          return commonPreview(await client.orders.cash.estimateCorrection(correction)) as never
+          const preview = await client.orders.cash.estimateCorrection(correction)
+          const projectedRequest: InvestmentOrderRequest = {
+            account: currentAccount.id,
+            instrumentId: source.issue.code,
+            instrumentVenue: source.issue.market,
+            side: source.side,
+            quantity:
+              change.quantity ?? (source.quantity == null ? undefined : String(source.quantity)),
+            positionType: 'cash',
+            accountType: source.accountType,
+            execution: {
+              priceType: change.limitPrice ? 'limit' : 'market',
+              limitPrice: change.limitPrice,
+              venue: source.issue.market,
+            },
+          }
+          const result = commonPreview(preview, projectedRequest)
+          if (result.confirmationToken && result.projectedAssetChanges) {
+            projectedChanges.set(result.confirmationToken, result.projectedAssetChanges)
+          }
+          return result as never
         }
         const receipt = await client.orders.cash.placeCorrection({
           ...correction,
           allowTrading: true,
         })
-        return {
+        if (receipt.accepted) {
+          const refreshed = await lookupOrder()
+          if (refreshed) {
+            const result = withOrderEffects(commonOrder(refreshed, currentAccount.id), refreshed)
+            if (result.effects) {
+              result.effects = { ...result.effects, reversesReferenceIds: [source.id] }
+              if (change.confirmationToken) projectedChanges.delete(change.confirmationToken)
+              return result as never
+            }
+            return result as never
+          }
+        }
+        const result: InvestmentOrder = {
           id: source.id,
           accountId: currentAccount.id,
           instrumentId: source.issue.code,
@@ -701,16 +956,54 @@ export const createProviderFromClient = (
             change.quantity ?? (source.quantity == null ? undefined : String(source.quantity)),
           price: change.limitPrice,
           orderedAt: receipt.acceptedAt ?? source.orderedAt,
-        } as InvestmentOrder as never
+        }
+        if (receipt.accepted) {
+          const changes = change.confirmationToken
+            ? projectedChanges.get(change.confirmationToken)
+            : undefined
+          if (!changes) throw new Error('order preview asset changes are missing or expired')
+          result.effects = {
+            referenceId: source.id,
+            changes,
+            reversesReferenceIds: [source.id],
+          }
+          projectedChanges.delete(change.confirmationToken!)
+        }
+        return result as never
+      }
+      if (name === 'investments.orders.open') {
+        const input = request as { account?: string }
+        if (input.account && input.account !== currentAccount.id) {
+          return { items: [], complete: true } as never
+        }
+        const list = await client.orders.inquiry.open({})
+        if (list.error && list.error.code !== 'ME0010') {
+          throw new Error(`open order snapshot failed: ${list.error.code}`)
+        }
+        const executions = await client.orders.inquiry
+          .executionsToday({})
+          .catch(() => ({ orders: [] }))
+        const items = list.orders.map((order) => {
+          const hydrated = mergeExecutionDetails(
+            order,
+            executions.orders.find((candidate) => matchesOrderId(candidate, order.id)),
+          )
+          return withOrderEffects(commonOrder(hydrated, currentAccount.id), hydrated)
+        })
+        return {
+          items,
+          // The inquiry caps at 999 rows; only a shorter result proves completeness.
+          complete: list.orders.length < 999,
+        } as never
       }
       if (name === 'investments.orders.get') {
         const input = request as {
-          accountId?: string
+          account?: string
           orderId: string
           instrumentId?: string
           venue: string
         }
-        if (input.accountId && input.accountId !== currentAccount.id) {
+        if (input.account && input.account !== currentAccount.id) {
           throw new Error('investment order account was not found')
         }
         const market = sbiMarket(input.venue, 'venue')
@@ -718,12 +1011,17 @@ export const createProviderFromClient = (
           issueCode: input.instrumentId,
           market,
         })
-        const source = openOrders.orders.find(
-          (order) =>
-            order.id === input.orderId ||
-            order.orderSubNo === input.orderId ||
-            order.orderNumber === input.orderId,
-        )
+        const source = openOrders.orders.find((order) => matchesOrderId(order, input.orderId))
+        if (!isUsMarket(market)) {
+          const executions = await client.orders.inquiry
+            .executionsToday({ issueCode: input.instrumentId, market })
+            .catch(() => ({ orders: [] }))
+          const execution = executions.orders.find((order) => matchesOrderId(order, input.orderId))
+          const order = source ?? execution
+          if (!order) throw new Error('investment order was not found')
+          const hydrated = mergeExecutionDetails(order, execution)
+          return withOrderEffects(commonOrder(hydrated, currentAccount.id), hydrated) as never
+        }
         const detail = await client.orders.inquiry.detail({
           orderNumber: source?.orderNumber,
           orderId: source?.orderSubNo ?? source?.id ?? input.orderId,
@@ -733,8 +1031,8 @@ export const createProviderFromClient = (
         return commonOrder(detail, currentAccount.id) as never
       }
       if (name === 'investments.trades.list') {
-        const input = request as { accountId?: string; venue?: string; limit?: number }
-        if (input.accountId && input.accountId !== currentAccount.id) {
+        const input = request as { account?: string; venue?: string; limit?: number }
+        if (input.account && input.account !== currentAccount.id) {
           return { items: [] } as never
         }
         const records = await client.orders.inquiry.tradeRecords({
@@ -746,13 +1044,15 @@ export const createProviderFromClient = (
         } as Page<InvestmentTrade> as never
       }
       if (name === 'investments.orders.list' || name === 'transactions.list') {
-        const input = request as { accountId?: string; from?: string; status?: string; to?: string }
-        if (input.accountId && input.accountId !== currentAccount.id) return { items: [] } as never
+        const input = request as { account?: string; from?: string; status?: string; to?: string }
+        if (input.account && input.account !== currentAccount.id) return { items: [] } as never
         if (input.from || input.to) {
           throw new Error("SBI Securities currently provides today's execution history only")
         }
         const executions = await client.orders.inquiry.executionsToday()
-        const orders = executions.orders.map((order) => commonOrder(order, currentAccount.id))
+        const orders = executions.orders.map((order) =>
+          withOrderEffects(commonOrder(order, currentAccount.id), order),
+        )
         if (name === 'investments.orders.list') {
           return {
             items: input.status ? orders.filter((order) => order.status === input.status) : orders,
@@ -783,7 +1083,7 @@ export const createProviderFromClient = (
         }
         const [executions, yenDetails] = await Promise.all([
           createProviderFromClient(client).invoke('transactions.list', {
-            accountId: input.accountId,
+            account: input.account,
           }),
           client.banking.detailHistory(),
         ])

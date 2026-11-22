@@ -3,7 +3,7 @@ import { parse } from 'node-html-parser'
 import type {
   Account,
   Balance,
-  CommonOperations,
+  CommonMethods,
   FinancialProvider,
   HistoryItem,
   HistoryListRequest,
@@ -609,7 +609,7 @@ export const login = async (options: PayPayBankLoginOptions = {}): Promise<PayPa
   return profileFrom(baseURL, values, jar, welcomeFields)
 }
 
-export const createProvider = (profile: PayPayBankProfile): FinancialProvider<CommonOperations> => {
+export const createProvider = (profile: PayPayBankProfile): FinancialProvider<CommonMethods> => {
   const account: Account = {
     id: `${profile.branchNo}-${profile.accountNo}`,
     providerId: 'paypay-bank',
@@ -627,7 +627,7 @@ export const createProvider = (profile: PayPayBankProfile): FinancialProvider<Co
       identity: { kind: 'stable-provider-id' },
     },
     capabilities: () => ['accounts:read', 'balances:read', 'transactions:read'],
-    operations: () => ['accounts.list', 'balances.list', 'transactions.list', 'history.list'],
+    methods: () => ['accounts.list', 'balances.list', 'transactions.list', 'history.list'],
     checkAvailability: async () => {
       try {
         await profile.getBalance()
@@ -639,8 +639,8 @@ export const createProvider = (profile: PayPayBankProfile): FinancialProvider<Co
     invoke: async (name, request) => {
       if (name === 'accounts.list') return { items: [account] } as Page<Account> as never
       if (name === 'balances.list') {
-        const accountId = (request as { accountId?: string }).accountId
-        if (accountId && accountId !== account.id) return [] as never
+        const requested = (request as { account?: string }).account
+        if (requested && requested !== account.id) return [] as never
         const value = await profile.getBalance()
         return [
           {
@@ -656,7 +656,7 @@ export const createProvider = (profile: PayPayBankProfile): FinancialProvider<Co
       }
       if (name === 'transactions.list' || name === 'history.list') {
         const input = (request ?? {}) as HistoryListRequest
-        if (input.accountId && input.accountId !== account.id) return { items: [] } as never
+        if (input.account && input.account !== account.id) return { items: [] } as never
         if (input.kinds?.some((kind) => kind !== 'transaction')) {
           throw new Error('PayPay Bank history.list supports transaction history only')
         }

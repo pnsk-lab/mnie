@@ -12,7 +12,8 @@ import type { OAuthClientInformationFull } from '@modelcontextprotocol/sdk/share
 import { createServerApp } from '../app'
 import type { ServerConfig } from '../config'
 import { createDb } from '../db'
-import { oauthClients, sessions } from '../db/schema'
+import { financialAccounts, oauthClients, sessions } from '../db/schema'
+import { createVirtualAccount, initializeVirtualAccounts } from '../virtual-accounts'
 
 describe('OAuth client registration scopes', () => {
   const db = createDb(':memory:')
@@ -20,6 +21,7 @@ describe('OAuth client registration scopes', () => {
   let server: ReturnType<typeof Bun.serve>
   let baseURL: string
   const sessionId = crypto.randomUUID()
+  let account: Awaited<ReturnType<typeof createVirtualAccount>>
   const clientMetadata = {
     client_name: 'MCP OAuth integration',
     redirect_uris: ['http://localhost/callback'],
@@ -48,6 +50,23 @@ describe('OAuth client registration scopes', () => {
       id: sessionId,
       createdAt: new Date(),
       expiresAt: new Date(Date.now() + 60_000),
+    })
+    const now = new Date()
+    await db.insert(financialAccounts).values({
+      id: 'oauth-physical',
+      profileId: 'oauth-connection',
+      providerAccountId: 'private-account',
+      connectorTypeId: 'fixture',
+      institutionId: 'fixture',
+      kind: 'brokerage',
+      createdAt: now,
+      updatedAt: now,
+    })
+    await initializeVirtualAccounts(db, 'oauth-physical')
+    account = await createVirtualAccount(db, {
+      physicalAccountId: 'oauth-physical',
+      kind: 'agent',
+      label: 'OAuth Agent',
     })
   })
 
@@ -88,6 +107,10 @@ describe('OAuth client registration scopes', () => {
         codeChallenge: consent.searchParams.get('code_challenge'),
         scope: 'read',
         resource: new URL('/api/mcp', baseURL).href,
+        settings: {
+          scopes: ['read'],
+          accountBindings: [{ accountId: account.id, role: 'read' }],
+        },
       }),
     })
     expect(approved.status).toBe(200)
@@ -108,7 +131,7 @@ describe('OAuth client registration scopes', () => {
           requestInit: { headers: { Authorization: `Bearer ${tokens.access_token}` } },
         }),
       )
-      const result = await mcp.callTool({ name: 'mnie-workspace-operations', arguments: {} })
+      const result = await mcp.callTool({ name: 'mnie-rpc-methods', arguments: {} })
       expect(result.isError).not.toBe(true)
     } finally {
       await mcp.close()

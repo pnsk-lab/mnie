@@ -26,5 +26,6 @@ const meta = computed(() => pageMeta[props.activeTab])
         </h1>
       </div>
     </div>
+    <slot />
   </header>
 </template>
