@@ -161,7 +161,7 @@ describe('transactions.list', () => {
 
   it('returns nothing for a different account', async () => {
     const provider = await providerWith({ default: meisai('202601', rows) })
-    const { items } = await provider.invoke('transactions.list', { accountId: 'OTHER' })
+    const { items } = await provider.invoke('transactions.list', { account: 'OTHER' })
     expect(items).toEqual([])
   })
 
@@ -170,7 +170,7 @@ describe('transactions.list', () => {
     const accounts = await provider.invoke('accounts.list', {})
     const accountId = accounts.items[0]!.id
     const unfiltered = await provider.invoke('transactions.list', {})
-    const filtered = await provider.invoke('transactions.list', { accountId })
+    const filtered = await provider.invoke('transactions.list', { account: accountId })
 
     expect(provider.accountId).toBe(accountId)
     expect(unfiltered.items).toHaveLength(2)
@@ -255,7 +255,7 @@ describe.each(['transactions.list', 'history.list'] as const)('%s limits', (oper
     })
 
     const { items } = await provider.invoke(operation, {
-      accountId: provider.accountId,
+      account: provider.accountId,
       from: '2026-01-01',
       to: '2026-01-31',
       limit,
@@ -288,7 +288,7 @@ describe.each(['transactions.list', 'history.list'] as const)('%s limits', (oper
       await expect(provider.invoke(operation, { limit })).rejects.toThrow(
         /limit must be a non-negative safe integer/,
       )
-      await expect(provider.invoke(operation, { accountId: 'OTHER', limit })).rejects.toThrow(
+      await expect(provider.invoke(operation, { account: 'OTHER', limit })).rejects.toThrow(
         /limit must be a non-negative safe integer/,
       )
       expect(calls).toEqual([])
@@ -404,9 +404,9 @@ describe('history.list', () => {
       calls,
     )
 
-    expect(await provider.invoke('history.list', { accountId: 'OTHER' })).toEqual({ items: [] })
+    expect(await provider.invoke('history.list', { account: 'OTHER' })).toEqual({ items: [] })
     expect(calls).toEqual([])
-    const matching = await provider.invoke('history.list', { accountId: provider.accountId })
+    const matching = await provider.invoke('history.list', { account: provider.accountId })
     expect(matching.items).toHaveLength(1)
     expect(matching.items[0]).toMatchObject({ transaction: { accountId: provider.accountId } })
   })

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import type {
   Account,
-  CommonOperations,
+  CommonMethods,
   DateRangeRequest,
   FinancialProvider,
   HistoryItem,
@@ -117,7 +117,7 @@ const toTransaction = (
 /** Resolves the authenticated card before exposing its member-site account identifier. */
 export const createProvider = async (
   profile: VpassProfile,
-): Promise<FinancialProvider<CommonOperations>> => {
+): Promise<FinancialProvider<CommonMethods>> => {
   const cards = await profile.cards()
   // Auth's cardCode and the member site's cardIdentifyKey are different IDs.
   // The global ID and issuer identify the authenticated card in the card list.
@@ -133,7 +133,7 @@ export const createProvider = async (
   const accountId = authenticatedCards[0]!.cardCode
 
   const listTransactions = async ({
-    accountId: requestedAccountId,
+    account: requestedAccountId,
     from: requestedFrom,
     to: requestedTo,
     limit,
@@ -184,7 +184,7 @@ export const createProvider = async (
       },
     },
     capabilities: () => ['accounts:read', 'transactions:read', 'cards:read'],
-    operations: () => ['accounts.list', 'transactions.list', 'history.list'],
+    methods: () => ['accounts.list', 'transactions.list', 'history.list'],
     checkAvailability: async () => {
       try {
         await profile.continueSession()

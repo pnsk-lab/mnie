@@ -688,6 +688,9 @@ export interface Order {
   accountInformation?: string
   cancelable?: boolean
   correctable?: boolean
+  commission?: CurrencyAmount
+  tax?: CurrencyAmount
+  daytradeTotal?: CurrencyAmount
 }
 
 export interface OrderList {

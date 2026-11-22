@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import type { ApiKeySettings } from '../api'
+import { onMounted, ref } from 'vue'
+import { listVirtualAccounts, type PublicFinancialAccount, type ApiKeySettings } from '../api'
+import { accountDisplayName } from '../constants/provider'
 
 defineProps<{
   compact?: boolean
@@ -8,11 +10,35 @@ defineProps<{
 
 const settings = defineModel<ApiKeySettings>({ required: true })
 
+const accounts = ref<PublicFinancialAccount[]>([])
+const accountError = ref('')
+onMounted(async () => {
+  try {
+    accounts.value = (await listVirtualAccounts()).accounts.filter(
+      (account) => account.kind !== 'system',
+    )
+  } catch (error) {
+    accountError.value = error instanceof Error ? error.message : '口座を取得できませんでした'
+  }
+})
+const bindingRole = (accountId: string) =>
+  settings.value.accountBindings?.find((binding) => binding.accountId === accountId)?.role ?? ''
+const setBinding = (accountId: string, role: string) => {
+  const bindings = (settings.value.accountBindings ?? []).filter(
+    (binding) => binding.accountId !== accountId,
+  )
+  if (role === 'read' || role === 'trade') bindings.push({ accountId, role })
+  settings.value.accountBindings = bindings
+}
+
 const rpcMethods = [
   'accounts.list',
   'balances.list',
   'assets.valuation.get',
   'transactions.list',
+  'history.list',
+  'portfolio.overview.get',
+  'portfolio.valuation.get',
   'transfers.recipients.list',
   'investments.positions.list',
   'investments.positions.get',
@@ -81,6 +107,30 @@ const ui = {
 
 <template>
   <div :class="ui.root">
+    <fieldset class="grid gap-3">
+      <legend class="font-bold">対象口座</legend>
+      <p v-if="accountError" role="alert">{{ accountError }}</p>
+      <label
+        v-for="account in accounts"
+        :key="account.id"
+        class="flex min-h-12 items-center justify-between gap-3"
+      >
+        <span>{{ accountDisplayName(account.label, account.provider) }}</span>
+        <select
+          :value="bindingRole(account.id)"
+          class="min-h-12 rounded-lg bg-inset px-3"
+          :aria-label="`${account.label}の権限`"
+          @change="setBinding(account.id, ($event.target as HTMLSelectElement).value)"
+        >
+          <option value="">アクセス不可</option>
+          <option value="read">参照</option>
+          <option value="trade">参照・取引</option>
+        </select>
+      </label>
+      <p v-if="!settings.accountBindings?.length" class="text-sm text-fg-muted">
+        口座を割り当てるまで資産の参照・取引はできません。
+      </p>
+    </fieldset>
     <div :class="ui.scopeGrid">
       <label v-for="scope in scopes" :key="scope" :class="ui.methodToggle">
         <input

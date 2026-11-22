@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vite-plus/test'
-import type { FinancialProvider, OperationMap, ProfileDescriptor } from '@mnie/types'
+import type { FinancialProvider, MethodMap, ProfileDescriptor } from '@mnie/types'
 import {
   loadPortfolioOverview,
   portfolioValuationFromOverview,
@@ -14,9 +14,9 @@ const descriptor = (id: string, category: ProfileDescriptor['category'] = 'broke
   defaultColor: '#123456',
 })
 
-const provider = (operations: string[], fail?: string) => {
+const provider = (methods: string[], fail?: string) => {
   const value = {
-    operations: () => operations,
+    methods: () => methods,
     invoke: vi.fn(async (operation: string) => {
       if (operation === fail) throw new Error('fixture failure')
       if (operation === 'accounts.list') return { items: [] }
@@ -26,11 +26,11 @@ const provider = (operations: string[], fail?: string) => {
       }
       return { items: [] }
     }),
-  } as unknown as FinancialProvider<OperationMap>
+  } as unknown as FinancialProvider<MethodMap>
   return value
 }
 
-const overviewProfile = (profile: ProfileDescriptor, value: FinancialProvider<OperationMap>) => ({
+const overviewProfile = (profile: ProfileDescriptor, value: FinancialProvider<MethodMap>) => ({
   descriptor: profile,
   use: vi.fn(async (action: Parameters<OverviewProfile['use']>[0]) => action(value)),
 })

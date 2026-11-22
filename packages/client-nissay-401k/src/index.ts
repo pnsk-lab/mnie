@@ -1,12 +1,12 @@
 import iconv from 'iconv-lite'
 import { parse, type HTMLElement } from 'node-html-parser'
 import type {
-  CommonOperations,
+  CommonMethods,
   FinancialProvider,
   HistoryItem,
   HistoryListRequest,
   Page,
-  PensionOperations,
+  PensionMethods,
 } from '@mnie/types'
 
 export type {
@@ -16,7 +16,7 @@ export type {
   PensionHistoricalAssetEntry,
   PensionHistoricalAssets,
   PensionHolding,
-  PensionOperations,
+  PensionMethods,
   PensionParticipant,
 } from '@mnie/types'
 
@@ -90,7 +90,7 @@ export class Nissay401kAuthError extends Nissay401kError {
   override name = 'Nissay401kAuthError'
 }
 
-export type Nissay401kOperations = PensionOperations & Pick<CommonOperations, 'history.list'>
+export type Nissay401kOperations = PensionMethods & Pick<CommonMethods, 'history.list'>
 
 export interface Nissay401kProfile extends FinancialProvider<Nissay401kOperations> {
   readonly baseURL: string
@@ -282,7 +282,7 @@ export const createNissay401kClient = (options: Nissay401kClientOptions): Nissay
       descriptor: { id: 'nissay-401k', name: 'Nissay 401k' },
       accountId: 'primary',
       capabilities: () => ['pensions:read'],
-      operations: () => [
+      methods: () => [
         'pension.participant.get',
         'pension.assets.current.get',
         'pension.contribution.get',
@@ -297,7 +297,7 @@ export const createNissay401kClient = (options: Nissay401kClientOptions): Nissay
           return { ok: false, message, reason: 'UNKNOWN' }
         }
       },
-      invoke: async (name) => {
+      invoke: async (name, request) => {
         if (name === 'pension.participant.get') return result.getHeader() as never
         if (name === 'pension.assets.current.get') return result.getCurrentAssets() as never
         if (name === 'pension.contribution.get') return result.getContribution() as never

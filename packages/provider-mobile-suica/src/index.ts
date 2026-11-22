@@ -83,9 +83,7 @@ const historyReaders = new WeakMap<
 class MobileSuicaCaptchaRequiredError extends Error {}
 
 /** Converts an authenticated Mobile Suica session to the provider-neutral API. */
-export const createProvider = (
-  profile: MobileSuicaProfile,
-): FinancialProvider<CommonOperations> => {
+export const createProvider = (profile: MobileSuicaProfile): FinancialProvider<CommonMethods> => {
   const account: Account = {
     id: 'mobile-suica',
     providerId: 'mobile-suica',
@@ -115,7 +113,7 @@ export const createProvider = (
       },
     },
     capabilities: () => ['accounts:read', 'transactions:read', 'transit-cards:read'],
-    operations: () => ['accounts.list', 'transactions.list', 'history.list'],
+    methods: () => ['accounts.list', 'transactions.list', 'history.list'],
     checkAvailability: async () => {
       try {
         const readHistory = historyReaders.get(profile)
@@ -176,7 +174,7 @@ const transactionsForRequest = async (
   account: Account,
   request: DateRangeRequest,
 ) => {
-  if (request.accountId && request.accountId !== account.id) return []
+  if (request.account && request.account !== account.id) return []
   if (request.cursor) {
     throw new Error('Mobile Suica transaction history does not support cursors')
   }
@@ -702,7 +700,7 @@ export const login = async (options: MobileSuicaLoginOptions): Promise<MobileSui
 /** Connects to Mobile Suica and returns the provider-neutral financial interface. */
 export const connect = async (
   options: MobileSuicaLoginOptions,
-): Promise<FinancialProvider<CommonOperations>> => createProvider(await login(options))
+): Promise<FinancialProvider<CommonMethods>> => createProvider(await login(options))
 
 const createProfile = (
   baseURL: string,
@@ -770,7 +768,7 @@ export const importSession = async (session: MobileSuicaSession): Promise<Mobile
 }
 import type {
   Account,
-  CommonOperations,
+  CommonMethods,
   DateRangeRequest,
   FinancialProvider,
   HistoryItem,

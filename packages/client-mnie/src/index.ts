@@ -2,55 +2,42 @@ import type {
   AvailabilityCheckResult,
   Capability,
   FinancialProvider,
-  FinancialWorkspace,
-  OperationMap,
-  OperationAvailability,
-  ProfileDescriptor,
+  MethodAvailability,
+  MethodAvailabilityRequest,
+  MethodMap,
+  MethodName,
+  MethodRequest,
+  MethodResponse,
+  MnieClient,
+  MnieMethods,
+  ProfileConnection,
+  ProfileSyncResult,
   ProviderAvailability,
   ProviderDescriptor,
-  WorkspaceOperations,
+  PublicFinancialAccount,
 } from '@mnie/types'
+
+export type { MnieClient }
+export type MnieProfileConnection = ProfileConnection
 
 export interface ConnectMnieOptions {
   /** Mnie server origin. A path is intentionally not accepted. */
   baseURL: string | URL
   /** API key or OAuth access token. */
   token: string
-  /** Provider registered on the Mnie server. */
-  provider?: string
-  /** Provider-neutral profile ID registered on the Mnie server. */
-  profileId?: string
-  /** WebSocket implementation for non-browser runtimes. */
+  /** Transport used to reach the Mnie RPC endpoint. Defaults to 'websocket'. */
+  transport?: 'websocket' | 'rest'
+  /** WebSocket implementation for non-browser runtimes. Only used with the 'websocket' transport. */
   WebSocket?: typeof WebSocket
-  /** Maximum time to wait for the WebSocket handshake. Defaults to 10 seconds. */
+  /**
+   * Maximum time to wait for the WebSocket handshake. Defaults to 10 seconds.
+   * Only used with the 'websocket' transport.
+   */
   connectionTimeoutMs?: number
 }
 
 export interface MnieRpcError extends Error {
   code: number
-}
-
-export interface MnieProviderConnection {
-  status: 'connected' | 'interaction-required'
-  providerId: string
-  profileId: string
-  interaction?: {
-    id: string
-    kind: 'qr' | 'captcha'
-    url?: string
-    qrUrl?: string
-    imageDataUrl?: string
-  }
-}
-
-export interface MnieWorkspace extends FinancialWorkspace<WorkspaceOperations, OperationMap> {
-  /** Starts or resumes authentication and keeps the resulting provider open on this connection. */
-  connectProfile(profileId: string): Promise<MnieProviderConnection>
-  /** Completes an interactive authentication challenge such as SMBC Direct QR approval. */
-  completeProfileConnection(
-    profileId: string,
-    interactionId: string,
-  ): Promise<MnieProviderConnection>
 }
 
 interface JsonRpcResponse {
@@ -63,6 +50,11 @@ interface JsonRpcResponse {
 interface PendingCall {
   resolve: (value: unknown) => void
   reject: (error: Error) => void
+}
+
+interface RpcTransport {
+  call(method: string, params?: unknown): Promise<unknown>
+  close(): void
 }
 
 const DEFAULT_CONNECTION_TIMEOUT_MS = 10_000
@@ -89,7 +81,7 @@ const rpcError = (code: number, message: string): MnieRpcError => {
   return error
 }
 
-class JsonRpcConnection {
+class JsonRpcConnection implements RpcTransport {
   readonly #socket: WebSocket
   readonly #pending = new Map<string, PendingCall>()
   readonly #opened: Promise<void>
@@ -185,36 +177,110 @@ class JsonRpcConnection {
   }
 }
 
-const profileProxy = (
-  rpc: JsonRpcConnection,
-  profileId: string,
+class RestRpcConnection implements RpcTransport {
+  readonly #origin: string
+  readonly #token: string
+  #nextId = 1
+
+  constructor(options: ConnectMnieOptions) {
+    if (!options.token.trim()) throw new Error('token is required')
+    this.#origin = asOrigin(options.baseURL)
+    this.#token = options.token
+  }
+
+  async call(method: string, params?: unknown): Promise<unknown> {
+    if (!method) throw new Error('RPC method is required')
+    const response = await fetch(new URL(`/api/rpc/${method}`, this.#origin), {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${this.#token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: String(this.#nextId++),
+        method,
+        params: params ?? {},
+      }),
+    })
+    const payload = (await response.json().catch(() => undefined)) as
+      | { result?: unknown; error?: string | { code?: unknown; message?: unknown } }
+      | undefined
+    if (
+      !payload ||
+      typeof payload !== 'object' ||
+      (!('result' in payload) && !('error' in payload))
+    ) {
+      throw new Error('invalid Mnie RPC response')
+    }
+    if (payload.error) {
+      if (typeof payload.error === 'string') {
+        throw rpcError(-32000, payload.error)
+      }
+      const { code, message } = payload.error
+      throw rpcError(
+        typeof code === 'number' ? code : -32000,
+        typeof message === 'string' && message ? message : 'RPC request failed',
+      )
+    }
+    if (!response.ok) {
+      throw rpcError(-32000, `Mnie RPC request failed with HTTP ${response.status}`)
+    }
+    return payload.result
+  }
+
+  close() {}
+}
+
+const scopedProxy = (
+  rpc: RpcTransport,
+  selector: { account: string } | { profile: string },
+  namespace: 'account' | 'profile',
   descriptor: ProviderDescriptor = { id: 'remote', name: 'Remote provider' },
-): FinancialProvider<OperationMap> =>
-  new Proxy({} as FinancialProvider<OperationMap>, {
+): FinancialProvider<MethodMap> => {
+  const selectorKey = namespace === 'account' ? 'account' : 'profile'
+  const selectorValue =
+    selectorKey === 'account'
+      ? (selector as { account: string }).account
+      : (selector as { profile: string }).profile
+  return new Proxy({} as FinancialProvider<MethodMap>, {
     get(_target, property) {
       if (property === 'descriptor') return descriptor
-      if (property === 'accountId') return profileId
+      if (property === 'accountId') return selectorValue
       if (property === 'capabilities') {
-        return () => rpc.call('profile.capabilities', { profileId }) as Promise<Capability[]>
+        return () => rpc.call(`${namespace}.capabilities`, selector) as Promise<Capability[]>
       }
-      if (property === 'operations') return () => rpc.call('profile.operations', { profileId })
+      if (property === 'methods') {
+        return async () =>
+          ((await rpc.call(`${namespace}.operations`, selector)) as string[]).map((name) =>
+            name.startsWith(`${namespace}.`) ? name.slice(namespace.length + 1) : name,
+          )
+      }
       if (property === 'invoke')
-        return (operation: string, input: unknown) =>
-          rpc.call('profile.invoke', { profileId, operation, input })
+        return (name: string, request: unknown) =>
+          rpc.call(`${namespace}.${name}`, {
+            ...(typeof request === 'object' && request !== null
+              ? (request as Record<string, unknown>)
+              : {}),
+            [selectorKey]: selectorValue,
+          })
       if (property === 'checkAvailability')
         return async () =>
-          ((await rpc.call('profile.availability', { profileId })) as ProviderAvailability)
+          ((await rpc.call(`${namespace}.availability`, selector)) as ProviderAvailability)
             .connection as AvailabilityCheckResult
-      if (property === 'checkOperationAvailability')
-        return async (request: { operation: string; input?: unknown }) => {
-          const availability = (await rpc.call('profile.availability', {
-            profileId,
-            operation: request.operation,
-            input: request.input,
+      if (property === 'checkMethodAvailability')
+        return async (request: MethodAvailabilityRequest) => {
+          const wireMethod = request.method.startsWith(`${namespace}.`)
+            ? request.method
+            : `${namespace}.${request.method}`
+          const availability = (await rpc.call(`${namespace}.availability`, {
+            ...selector,
+            method: wireMethod,
+            params: request.params ?? {},
           })) as ProviderAvailability
-          const operation = availability.operations[request.operation]
-          if (!operation) throw new Error('operation availability was not returned')
-          return operation as OperationAvailability
+          const method = availability.methods[wireMethod]
+          if (!method) throw new Error('method availability was not returned')
+          return method as MethodAvailability
         }
       if (property === 'exportSession')
         return () => {
@@ -224,32 +290,46 @@ const profileProxy = (
       return undefined
     },
   })
+}
 
-/** Opens a Mnie RPC connection and returns the remote financial workspace. */
-export const connectMnie = async (options: ConnectMnieOptions): Promise<MnieWorkspace> => {
-  const rpc = new JsonRpcConnection(options)
-  const workspace: MnieWorkspace = {
-    operations: () => rpc.call('workspace.operations') as Promise<(keyof WorkspaceOperations)[]>,
-    profiles: () =>
-      rpc.call('workspace.invoke', { operation: 'profiles.list', input: {} }) as Promise<
-        ProfileDescriptor[]
-      >,
-    profile: (profileId) => profileProxy(rpc, profileId),
+/** Opens a Mnie RPC connection and returns the remote client. */
+export const connectMnie = async (options: ConnectMnieOptions): Promise<MnieClient> => {
+  const rpc: RpcTransport =
+    options.transport === 'rest' ? new RestRpcConnection(options) : new JsonRpcConnection(options)
+  const call = (<Name extends MethodName<MnieMethods>>(
+    method: Name,
+    params?: MethodRequest<MnieMethods, Name>,
+  ): Promise<MethodResponse<MnieMethods, Name>> =>
+    rpc.call(method, params ?? {}) as Promise<
+      MethodResponse<MnieMethods, Name>
+    >) as MnieClient['call']
+  const client: MnieClient = {
+    methods: () => rpc.call('rpc.methods') as Promise<readonly string[]>,
+    call,
+    accounts: async () =>
+      (
+        (await rpc.call('portfolio.accounts.list', {})) as {
+          accounts: PublicFinancialAccount[]
+        }
+      ).accounts,
+    account: (accountId) => scopedProxy(rpc, { account: accountId }, 'account'),
+    profile: (profileId) => scopedProxy(rpc, { profile: profileId }, 'profile'),
     connectProfile: (profileId) =>
-      rpc.call('profile.connect', { profileId }) as Promise<MnieProviderConnection>,
+      rpc.call('admin.profiles.connect', { profileId }) as Promise<ProfileConnection>,
     completeProfileConnection: (profileId, interactionId) =>
-      rpc.call('profile.connection.complete', {
+      rpc.call('admin.profiles.connection.complete', {
         profileId,
         interactionId,
-      }) as Promise<MnieProviderConnection>,
-    invoke: (operation, input) => rpc.call('workspace.invoke', { operation, input }) as never,
+      }) as Promise<ProfileConnection>,
+    syncProfile: (profileId) =>
+      rpc.call('admin.profiles.sync', { profileId }) as Promise<ProfileSyncResult>,
     close: () => rpc.close(),
   }
   try {
-    await workspace.operations()
-    return workspace
+    await client.methods()
+    return client
   } catch (cause) {
-    workspace.close()
+    client.close()
     throw cause
   }
 }

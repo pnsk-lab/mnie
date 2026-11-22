@@ -6,10 +6,12 @@ import type { AppBindings } from '../context'
 import type { Db } from '../db'
 import type { ProviderRegistry } from '../providers/registry'
 import type { AdminRpcService } from '../rpc/admin'
-import { closeOpenProvider, handleRpc, RPC_METHODS, type RpcSocketState } from '../rpc/handler'
+import { callerMethods, handleRpc } from '../rpc/handler'
+import { createRpcPrincipalStore } from '../rpc/principals'
 
 export const createMcpRoutes = (db: Db, providers: ProviderRegistry, admin: AdminRpcService) => {
   const app = new Hono<AppBindings>()
+  const store = createRpcPrincipalStore()
   app.all('/', async (c) => {
     const config = c.get('config')
     const origin = c.req.header('Origin')
@@ -22,58 +24,117 @@ export const createMcpRoutes = (db: Db, providers: ProviderRegistry, admin: Admi
       c.header('WWW-Authenticate', `Bearer resource_metadata="${metadata.href}"`)
       return c.json({ error: 'unauthorized' }, 401)
     }
-    const state: RpcSocketState = {
-      owner: auth.type === 'session',
-      apiKeyId: auth.type === 'apiKey' ? auth.apiKeyId : undefined,
-      scopes: auth.type === 'apiKey' ? auth.scopes : undefined,
-    }
+    const active = store.entry(auth)
     const server = new McpServer({ name: 'mnie', version: '0.3.0' })
-    const methods: readonly string[] = RPC_METHODS
-    for (const method of methods) {
-      if (method.startsWith('admin.') && !state.owner) continue
-      const inputSchema: Record<string, z.ZodType> = {}
-      if (method.startsWith('account.')) inputSchema.accountId = z.string().min(1)
-      if (method.startsWith('profile.')) inputSchema.profileId = z.string().min(1)
-      if (method.endsWith('.invoke')) {
-        inputSchema.operation = z.string().min(1)
-        inputSchema.input = z.record(z.string(), z.unknown()).optional()
-      }
-      if (method.endsWith('.availability')) {
-        inputSchema.operation = z.string().optional()
-        inputSchema.input = z.record(z.string(), z.unknown()).optional()
-      }
-      if (method.endsWith('.connection.complete')) inputSchema.interactionId = z.string().min(1)
+    for (const method of callerMethods(active.state)) {
       server.registerTool(
         `mnie-${method.replaceAll('.', '-')}`,
         {
           description:
             `Calls Mnie ${method} with the same permissions as WebSocket RPC. ` +
-            'Discover supported workspace operations with mnie-workspace-operations, and provider operations with the corresponding operations tool.',
-          inputSchema,
+            'Put the method parameters in "params". ' +
+            'Discover accounts with portfolio.accounts.list, then discover account operations with account.operations and profile operations with profile.operations. ' +
+            'history methods return only activity and statement rows visible to the selected accounts.',
+          inputSchema: { params: z.record(z.string(), z.unknown()).optional() },
         },
-        async (params) => {
-          const callState: RpcSocketState = { ...state }
+        (args) =>
+          store.runQueued(active, async () => {
+            try {
+              const result = await handleRpc(db, providers, admin, active.state, {
+                id: 1,
+                method,
+                params: (args.params ?? {}) as Record<string, unknown>,
+              })
+              if ('error' in result) throw new Error(result.error.message)
+              return {
+                content: [{ type: 'text' as const, text: JSON.stringify(result.result ?? null) }],
+              }
+            } catch (cause) {
+              return {
+                isError: true,
+                content: [
+                  {
+                    type: 'text' as const,
+                    text: cause instanceof Error ? cause.message : String(cause),
+                  },
+                ],
+              }
+            }
+          }),
+      )
+    }
+    server.registerTool(
+      'mnie-account-invoke',
+      {
+        description:
+          'Calls a dynamic account.* provider method with the same permissions as WebSocket RPC. method is a wire name like account.investments.orders.preview; put the method parameters (including account) in "params".',
+        inputSchema: {
+          account: z.string().min(1),
+          method: z.string().min(1),
+          params: z.record(z.string(), z.unknown()).optional(),
+        },
+      },
+      (args) =>
+        store.runQueued(active, async () => {
           try {
-            const result = await handleRpc(db, providers, admin, callState, {
+            const result = await handleRpc(db, providers, admin, active.state, {
               id: 1,
-              method,
-              params,
+              method: args.method,
+              params: { account: args.account, ...args.params },
             })
             if ('error' in result) throw new Error(result.error.message)
-            return { content: [{ type: 'text', text: JSON.stringify(result.result ?? null) }] }
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result.result ?? null) }],
+            }
           } catch (cause) {
             return {
               isError: true,
               content: [
-                { type: 'text', text: cause instanceof Error ? cause.message : String(cause) },
+                {
+                  type: 'text' as const,
+                  text: cause instanceof Error ? cause.message : String(cause),
+                },
               ],
             }
-          } finally {
-            await closeOpenProvider(callState)
           }
+        }),
+    )
+    server.registerTool(
+      'mnie-profile-invoke',
+      {
+        description:
+          'Calls a dynamic profile.* provider method with the same permissions as WebSocket RPC. method is a wire name like profile.balances.list; put the method parameters (including profile) in "params".',
+        inputSchema: {
+          profile: z.string().min(1),
+          method: z.string().min(1),
+          params: z.record(z.string(), z.unknown()).optional(),
         },
-      )
-    }
+      },
+      (args) =>
+        store.runQueued(active, async () => {
+          try {
+            const result = await handleRpc(db, providers, admin, active.state, {
+              id: 1,
+              method: args.method,
+              params: { profile: args.profile, ...args.params },
+            })
+            if ('error' in result) throw new Error(result.error.message)
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result.result ?? null) }],
+            }
+          } catch (cause) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: cause instanceof Error ? cause.message : String(cause),
+                },
+              ],
+            }
+          }
+        }),
+    )
     const transport = new StreamableHTTPTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
@@ -86,5 +147,5 @@ export const createMcpRoutes = (db: Db, providers: ProviderRegistry, admin: Admi
       await transport.close()
     }
   })
-  return app
+  return Object.assign(app, { closeMcp: store.close })
 }

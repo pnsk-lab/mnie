@@ -38,7 +38,7 @@
     "model:download": "bun scripts/download-capsolve-model.ts",
     "fmt": "vp check --fix",
     "sdk:build": "vp run sdk-build",
-    "test": "vp run sdk-build && vp test run && bun test $(rg --files -g '*.bun.test.ts')",
+    "test": "vp run sdk-build && vp test run && bun test $(rg --files -g '*.bun.test.ts') apps/mnie-server/src/rpc/ws.integration.test.ts",
     "test:coverage": "vp run sdk-build && vp test run --coverage",
     "typecheck": "vp run typecheck:all",
     "verify:paypay-bank-runtime": "bun scripts/verify-paypay-bank-runtime.ts",
@@ -62,5 +62,5 @@
     "bun": ">=1.3.0",
     "node": ">=22.12.0"
   },
-  "packageManager": "bun@1.3.14"
+  "packageManager": "bun@1.4.4"
 }

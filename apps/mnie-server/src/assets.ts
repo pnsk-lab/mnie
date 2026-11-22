@@ -29,7 +29,7 @@ export const fetchAssetValuation = async (
     throw new Error(`${profile.provider} does not support asset valuation`)
   }
   return providers.use(profile, async ({ provider }) => {
-    if (provider.operations().includes('assets.valuation.get')) {
+    if (provider.methods().includes('assets.valuation.get')) {
       const result = (await provider.invoke('assets.valuation.get', {})) as AssetValuation
       const value = Number(result.amount.value)
       const holdingsValue = Number(result.holdingsAmount?.value)
@@ -43,13 +43,13 @@ export const fetchAssetValuation = async (
       }
     }
 
-    if (provider.operations().includes('balances.list')) {
+    if (provider.methods().includes('balances.list')) {
       const balances = (await provider.invoke('balances.list', {})) as Array<{ amount: unknown }>
       if (!balances.length) throw new Error('Provider did not return a balance')
       return readMoney(balances[0]?.amount)
     }
 
-    if (!provider.operations().includes('transactions.list')) {
+    if (!provider.methods().includes('transactions.list')) {
       throw new Error('Provider does not expose an asset valuation operation')
     }
     const transactions = (await provider.invoke('transactions.list', {})) as {

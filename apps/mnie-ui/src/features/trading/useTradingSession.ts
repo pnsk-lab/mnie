@@ -1,10 +1,10 @@
-import { notify } from '../feedback/feedback'
 import { computed, onUnmounted, ref, watch, type Ref } from 'vue'
 import {
-  createRpcSocket,
   getPortfolioOverview,
   listHistory,
   listLatestAssetValuations,
+  listManagedVirtualAccounts,
+  rpcRequest,
   type AccountProfile,
   type AssetValuation,
   type ProviderDefinition,
@@ -16,7 +16,7 @@ import {
   searchableMarkets,
 } from '../../constants/trade'
 import { countryTimeZones, marketSessions, marketTimeZones } from '../../constants/market'
-import { profileColor } from '../../constants/provider'
+import { accountDisplayName, profileColor } from '../../constants/provider'
 import type {
   ChartMode,
   AmountSellMode,
@@ -28,7 +28,6 @@ import type {
   CashOrderPriceCondition,
   CashOrderTerm,
   CashOrderTriggerZone,
-  JsonRpcResponse,
   MarketIndex,
   OrderDetail,
   OrderKind,
@@ -37,7 +36,6 @@ import type {
   Position,
   ProviderPosition,
   RealtimePricePoint,
-  RpcMessage,
   Stock,
   TradeRecordRow,
   TradeSide,
@@ -73,11 +71,6 @@ import {
   type RecordLike,
 } from './trading-data'
 import { tradeAdapterFor, type AmountOrderDraft } from './trade-adapters'
-
-interface RpcResolver {
-  resolve: (value: unknown) => void
-  reject: (reason: Error) => void
-}
 
 interface CashOrderTermOption {
   label: string
@@ -198,11 +191,30 @@ const priceMatchesStep = (price: number, step: number) => {
   return Math.abs(price / step - Math.round(price / step)) < 1e-8
 }
 
+export type TradingSource = AccountProfile & { profileId?: string }
+
 export const useTradingSession = (
   selectedProfileId: Ref<string>,
-  profiles: Ref<AccountProfile[]>,
+  profiles: Ref<TradingSource[]>,
   providerDefinitions: Ref<ProviderDefinition[]>,
+  accounts: Ref<TradingSource[]>,
+  selectedScope: Ref<string> = ref('all'),
 ) => {
+  const profileIdForAccount = (virtualAccountId: string) => {
+    const fromAccounts = accounts.value.find((account) => account.id === virtualAccountId)
+    if (fromAccounts?.profileId) return fromAccounts.profileId
+    const fromProfiles = profiles.value.find((profile) => profile.id === virtualAccountId)
+    if (fromProfiles?.profileId) return fromProfiles.profileId
+    // The id may already be a profile id (for example in non-virtual flows).
+    if (profiles.value.some((profile) => profile.id === virtualAccountId)) {
+      return virtualAccountId
+    }
+    return virtualAccountId
+  }
+  const accountLabelForProvider = (providerId: string) => {
+    const matches = accounts.value.filter((account) => account.provider === providerId)
+    return matches.length === 1 ? matches[0]?.label : undefined
+  }
   const selectedStockCode = ref('')
   const selectedStockId = ref('')
   const viewedStockCodes = ref<string[]>([])
@@ -241,11 +253,9 @@ export const useTradingSession = (
   const previewTimer = window.setInterval(() => (previewNow.value = Date.now()), 1_000)
   onUnmounted(() => window.clearInterval(previewTimer))
   const cashPreOrder = ref<RecordLike | null>(null)
-  const ws = ref<WebSocket | null>(null)
   const providerOperations = ref(new Set<string>())
   const providerOrderRules = ref<RecordLike>({})
   const providerAccountId = ref('')
-  const rpcPending = new Map<number, RpcResolver>()
   let profileInteractionId = ''
   const profileConnected = ref(false)
   const connectedProfileId = ref('')
@@ -293,13 +303,13 @@ export const useTradingSession = (
   const chartNotice = ref<ChartNotice | null>(null)
   const realtimePricePoints = ref<RealtimePricePoint[]>([])
   const pricePolling = ref(false)
-  let rpcId = 0
-  let boardPollingSubscriptionId = ''
   let boardPollingRequestId = 0
   let chartHistoryRequestId = 0
   let cashPreOrderRequestId = 0
   let instrumentDetailRequestId = 0
   let connectingProfileId = ''
+  let connectionGeneration = 0
+  let connectionAbort: AbortController | undefined
 
   const maxRealtimePricePoints = 120
   const errorMessage = (cause: unknown, fallback: string) =>
@@ -307,8 +317,7 @@ export const useTradingSession = (
 
   const isExpectedRpcInterruption = (cause: unknown) =>
     cause instanceof Error &&
-    (cause.message === 'RPC socket reconnecting' ||
-      cause.message === 'RPC socket closed' ||
+    (cause.name === 'AbortError' ||
       (dataLoading.value && cause.message === '証券口座に接続されていません'))
 
   const stockId = (stock: Pick<Stock, 'code' | 'market'>) =>
@@ -327,9 +336,10 @@ export const useTradingSession = (
 
   const codeFromStockId = (id: string) => stockRefFromId(id).code
 
+  const dataIssue = ref('')
   const reportDataError = (message: string, cause?: unknown) => {
     if (isExpectedRpcInterruption(cause)) return
-    notify(message)
+    dataIssue.value = message
     if (cause) {
       console.error(`[mnie-ui] データ取得エラー: ${message}`, cause)
       return
@@ -365,8 +375,7 @@ export const useTradingSession = (
 
     return stocks.value[0] ?? emptyStock
   })
-  const socketReady = computed(() => ws.value?.readyState === WebSocket.OPEN)
-  const connected = computed(() => profileConnected.value && socketReady.value)
+  const connected = computed(() => profileConnected.value)
   const orderInputMode = computed(() =>
     asArray(providerOrderRules.value.sizing).some(
       (sizing) => textValue(asRecord(sizing).kind) === 'amount',
@@ -723,11 +732,11 @@ export const useTradingSession = (
     portfolioOverviewLoading.value = true
     portfolioOrderHistoryNotice.value = ''
     try {
-      const overview = await getPortfolioOverview()
+      const scope = selectedScope.value
+      const overview = await getPortfolioOverview(scope === 'all' ? undefined : scope)
+      if (scope !== selectedScope.value) return
       if (overview.errors.length)
-        reportDataError(
-          overview.errors.map((item) => `${item.providerId}: ${item.message}`).join('; '),
-        )
+        dataIssue.value = overview.errors.map((error) => error.message).join('; ')
       portfolioOverview.value = overview
       portfolioPositions.value = overview.components.flatMap((component) =>
         (component.positions ?? []).flatMap((item) => {
@@ -737,7 +746,11 @@ export const useTradingSession = (
                 {
                   ...parsed,
                   profileId: component.profile.id,
-                  profileLabel: component.profile.label,
+                  profileLabel: accountDisplayName(
+                    component.profile.label,
+                    component.profile.provider.id,
+                  ),
+                  accountLabel: accountLabelForProvider(component.profile.provider.id),
                   providerId: component.profile.provider.id,
                   providerName: component.profile.provider.name,
                 },
@@ -754,7 +767,10 @@ export const useTradingSession = (
                   ...parsed,
                   cancelable: false,
                   profileId: component.profile.id,
-                  profileLabel: component.profile.label,
+                  profileLabel: accountDisplayName(
+                    component.profile.label,
+                    component.profile.provider.id,
+                  ),
                   providerId: component.profile.provider.id,
                   providerName: component.profile.provider.name,
                 },
@@ -835,11 +851,15 @@ export const useTradingSession = (
   })
 
   const loadStoredAssetValuations = async () => {
+    const scope = selectedScope.value
     assetHistoryLoading.value = true
     try {
       const from = homeAssetHistoryFrom()
-      const valuationsPromise = listLatestAssetValuations()
+      const valuationsPromise = listLatestAssetValuations(
+        selectedScope.value === 'all' ? undefined : selectedScope.value,
+      )
         .then(({ valuations }) => {
+          if (scope !== selectedScope.value) return
           assetValuations.value = valuations
           const jpy = valuations.filter((item) => item.currency === 'JPY')
           storedTotalAssetValue.value = jpy.length
@@ -854,8 +874,13 @@ export const useTradingSession = (
         .finally(() => {
           storedAssetsLoaded.value = true
         })
-      const historyPromise = listHistory({ from, kinds: ['snapshot', 'transaction'] })
+      const historyPromise = listHistory({
+        from,
+        account: selectedScope.value === 'all' ? undefined : selectedScope.value,
+        kinds: ['snapshot', 'transaction'],
+      })
         .then((history) => {
+          if (scope !== selectedScope.value) return
           const profileFor = (profileId: string) => {
             const profile = profiles.value.find((item) => item.id === profileId)
             if (!profile) throw new Error(`History profile was not found: ${profileId}`)
@@ -884,6 +909,7 @@ export const useTradingSession = (
                         ...position,
                         profileId,
                         profileLabel: profile.label,
+                        accountLabel: accountLabelForProvider(profile.provider),
                         providerId: profile.provider,
                         providerName,
                         color: profileColor(profile),
@@ -1107,6 +1133,7 @@ export const useTradingSession = (
           ...position,
           profileId: selectedProfile.id,
           profileLabel: selectedProfile.label,
+          accountLabel: selectedProfile.label,
           providerId: selectedProfile.provider,
           providerName,
           color: profileColor(selectedProfile),
@@ -1191,11 +1218,6 @@ export const useTradingSession = (
     lastCashEstimateKey.value = ''
   }
 
-  const rejectPendingRpc = (reason: Error) => {
-    for (const pending of rpcPending.values()) pending.reject(reason)
-    rpcPending.clear()
-  }
-
   const appendRealtimePricePoint = (price: number, at = new Date()) => {
     if (!Number.isFinite(price) || price <= 0) return
     realtimePricePoints.value = [
@@ -1205,114 +1227,91 @@ export const useTradingSession = (
   }
 
   const stopBoardPolling = () => {
-    const subscriptionId = boardPollingSubscriptionId
-    boardPollingSubscriptionId = ''
     boardPollingRequestId += 1
     pricePolling.value = false
-    if (subscriptionId && providerOperations.value.has('market.issue.pollBoard.unsubscribe')) {
-      call('market.issue.pollBoard.unsubscribe', { subscriptionId })
-    }
   }
 
-  const handleBoardPollingUpdate = (params: unknown) => {
-    const payload = asRecord(params)
-    const subscriptionId = textValue(payload.subscriptionId)
-    if (!subscriptionId || subscriptionId !== boardPollingSubscriptionId) return
-
-    const stock = stockFromBoard(payload.board, {
-      code: selectedStock.value.code,
-      market: selectedStock.value.market,
-      name: selectedStock.value.name,
-    })
-    if (stock.code && stock.code !== selectedStock.value.code) return
-
-    mergeStocks([stock])
-    const timeZone = selectedStockTimeZone.value
-    if (!timeZone || !isMarketSessionOpen(stock.market, timeZone)) {
-      stopBoardPolling()
-      return
-    }
-    appendRealtimePricePoint(stock.price)
-  }
-
-  const handleRpcMessage = (data: string) => {
-    let response: JsonRpcResponse
-    try {
-      response = JSON.parse(data) as JsonRpcResponse
-    } catch {
-      return
-    }
-    if (response.method === 'market.issue.pollBoard.update') {
-      handleBoardPollingUpdate(response.params)
-      return
-    }
-    if (response.method === 'market.issue.pollBoard.error') {
-      const payload = asRecord(response.params)
-      if (textValue(payload.subscriptionId) === boardPollingSubscriptionId) {
-        pricePolling.value = false
-        reportDataError(textValue(payload.message, '価格ポーリングに失敗しました'))
+  const rpcCall = <T>(method: string, params?: unknown): Promise<T> => {
+    if (
+      [
+        'investments.orders.create',
+        'investments.orders.replace',
+        'investments.orders.cancel',
+      ].includes(method)
+    ) {
+      const input = asRecord(params)
+      params = {
+        ...input,
+        idempotencyKey:
+          input.idempotencyKey ??
+          (input.confirmationToken
+            ? `quote:${String(input.confirmationToken)}`
+            : crypto.randomUUID()),
       }
-      return
     }
-    if (typeof response.id !== 'number') return
-    const pending = rpcPending.get(response.id)
-    if (!pending) return
-    rpcPending.delete(response.id)
-    if (response.error) {
-      const rpcError = new Error(response.error.message || 'RPC request failed') as Error & {
-        providerCode?: string
-      }
-      rpcError.providerCode = response.error.data?.providerCode
-      pending.reject(rpcError)
-    } else if ('result' in response) {
-      pending.resolve(response.result)
-    } else {
-      pending.reject(new Error('サーバーからの応答が不正です'))
+    if (method === 'account.connect') {
+      return rpcRequest<T>(
+        'admin.profiles.connect',
+        { profileId: profileIdForAccount(selectedProfileId.value) },
+        { signal: connectionAbort?.signal },
+      )
     }
-  }
-
-  const call = (method: string, params?: unknown) => {
-    const socket = ws.value
-    if (!socket || socket.readyState !== WebSocket.OPEN) return undefined
-    const controlMethod =
-      method.startsWith('provider.') ||
-      method.startsWith('profile.') ||
-      method.startsWith('workspace.') ||
-      method === 'rpc.methods'
-    const payload: RpcMessage = controlMethod
-      ? { id: ++rpcId, method, params }
-      : {
-          id: ++rpcId,
-          method: 'profile.invoke',
-          params: { profileId: selectedProfileId.value, operation: method, input: params ?? {} },
-        }
-    socket.send(JSON.stringify({ jsonrpc: '2.0', ...payload }))
-    return payload.id
-  }
-
-  const rpcCall = async <T>(method: string, params?: unknown): Promise<T> => {
-    const id = call(method, params)
-    if (!id) throw new Error('証券口座に接続されていません')
-    return new Promise<T>((resolve, reject) => {
-      const timeout = window.setTimeout(() => {
-        rpcPending.delete(id)
-        reject(
-          new Error(
-            '応答がタイムアウトしました。操作が反映されているか確認してから再試行してください。',
-          ),
-        )
-      }, 60_000)
-      rpcPending.set(id, {
-        resolve: (value) => {
-          window.clearTimeout(timeout)
-          resolve(value as T)
+    if (method === 'account.connection.complete') {
+      const input = asRecord(params)
+      return rpcRequest<T>(
+        'admin.profiles.connection.complete',
+        {
+          profileId: profileIdForAccount(textValue(input.accountId) || selectedProfileId.value),
+          interactionId: textValue(input.interactionId),
         },
-        reject: (cause) => {
-          window.clearTimeout(timeout)
-          reject(cause)
+        { signal: connectionAbort?.signal },
+      )
+    }
+    if (method === 'account.operations') {
+      const input = asRecord(params)
+      const account = textValue(input.account ?? input.accountId) || selectedProfileId.value
+      return rpcRequest<T>('account.operations', { account }, { signal: connectionAbort?.signal })
+    }
+    if (method === 'account.availability') {
+      const input = asRecord(params)
+      const account = textValue(input.account ?? input.accountId) || selectedProfileId.value
+      const operation = textValue(input.method ?? input.operation)
+      const operationParams = (input.params ?? input.input) as Record<string, unknown> | undefined
+      return rpcRequest<T>(
+        'account.availability',
+        {
+          account,
+          ...(operation
+            ? { method: operation.startsWith('account.') ? operation : `account.${operation}` }
+            : {}),
+          ...(operationParams !== undefined ? { params: operationParams } : {}),
         },
-      })
-    })
+        { signal: connectionAbort?.signal },
+      )
+    }
+    const passthrough =
+      method.startsWith('admin.') ||
+      method.startsWith('portfolio.') ||
+      method === 'rpc.methods' ||
+      method.startsWith('account.') ||
+      method.startsWith('profile.')
+    if (passthrough) {
+      return rpcRequest<T>(method, params, { signal: connectionAbort?.signal })
+    }
+    if (
+      !connected.value &&
+      (!connectingProfileId || connectingProfileId !== selectedProfileId.value)
+    ) {
+      throw new Error('証券口座に接続されていません')
+    }
+    const { accountId, account, ...rest } = asRecord(params)
+    void accountId
+    void account
+    return rpcRequest<T>(
+      `account.${method}`,
+      { account: selectedProfileId.value, ...rest },
+      { signal: connectionAbort?.signal },
+    )
   }
 
   const invokeProvider = (method: string, params?: unknown) => rpcCall(method, params)
@@ -1322,25 +1321,24 @@ export const useTradingSession = (
     params?: unknown,
     timeoutMs = 8_000,
   ): Promise<T> => {
-    const id = call(method, params)
-    if (!id) throw new Error('証券口座に接続されていません')
-    return new Promise<T>((resolve, reject) => {
-      const timeout = window.setTimeout(() => {
-        rpcPending.delete(id)
-        reject(new Error(`${method} timed out`))
-      }, timeoutMs)
-      rpcPending.set(id, {
-        resolve: (value) => {
-          window.clearTimeout(timeout)
-          resolve(value as T)
-        },
-        reject: (reason) => {
-          window.clearTimeout(timeout)
-          const message = reason instanceof Error ? reason.message : 'RPC request failed'
-          reject(new Error(`${method}: ${message}`))
-        },
-      })
+    const request = rpcCall<T>(method, params).catch((reason) => {
+      const message = reason instanceof Error ? reason.message : 'RPC request failed'
+      const wrapped = new Error(`${method}: ${message}`) as Error & { providerCode?: string }
+      wrapped.providerCode = (reason as { providerCode?: string } | undefined)?.providerCode
+      if (reason instanceof Error) wrapped.name = reason.name
+      throw wrapped
     })
+    let timeout = 0
+    try {
+      return await Promise.race([
+        request,
+        new Promise<never>((_, reject) => {
+          timeout = window.setTimeout(() => reject(new Error(`${method} timed out`)), timeoutMs)
+        }),
+      ])
+    } finally {
+      window.clearTimeout(timeout)
+    }
   }
 
   const mergeStocks = (nextStocks: Stock[]) => {
@@ -1581,16 +1579,34 @@ export const useTradingSession = (
     providerOrderRules.value = {}
     if (!providerOperations.value.has('investments.orders.preview')) return
     const availability = asRecord(
-      await rpcCall<RecordLike>('profile.availability', {
-        profileId,
-        operation: 'investments.orders.preview',
+      await rpcCall<RecordLike>('account.availability', {
+        account: profileId,
+        method: 'account.investments.orders.preview',
       }),
     )
-    const operation = asRecord(asRecord(availability.operations)['investments.orders.preview'])
+    const methods = asRecord(availability.methods)
+    const operation = asRecord(
+      methods['account.investments.orders.preview'] ?? methods['investments.orders.preview'],
+    )
     if (operation.available !== true) {
       throw new Error(textValue(operation.message, 'このproviderでは注文を利用できません'))
     }
     providerOrderRules.value = asRecord(operation.orderRules)
+  }
+
+  const resetConnectionState = () => {
+    stopBoardPolling()
+    chartHistoryRequestId += 1
+    historicalPricePoints.value = []
+    chartLoading.value = false
+    chartNotice.value = null
+    realtimePricePoints.value = []
+    profileConnected.value = false
+    connectedProfileId.value = ''
+    providerOperations.value = new Set()
+    providerOrderRules.value = {}
+    connectingProfileId = ''
+    dataLoading.value = false
   }
 
   let connectionTask: Promise<void> | undefined
@@ -1599,26 +1615,24 @@ export const useTradingSession = (
     // interactions such as SMBC 2FA. A trading connection must only touch the
     // profile selected below; portfolio data is refreshed by the portfolio flow.
     const selectedProfile = profiles.value.find((profile) => profile.id === selectedProfileId.value)
-    if (!selectedProfile) {
-      reportDataError('口座プロフィールを選択してください')
+    // A profile id is also accepted: SMBC Direct has no accounts until the
+    // first login completes and provisions them.
+    const selectedId = selectedProfile?.id ?? selectedProfileId.value
+    if (!selectedId) {
+      reportDataError('口座を選択してください')
       return
     }
-    if (
-      connectedProfileId.value === selectedProfile.id &&
-      profileConnected.value &&
-      ws.value?.readyState === WebSocket.OPEN
-    ) {
+    if (connectedProfileId.value === selectedId && profileConnected.value) {
       return
     }
-    if (
-      connectingProfileId === selectedProfile.id &&
-      (ws.value?.readyState === WebSocket.CONNECTING || ws.value?.readyState === WebSocket.OPEN)
-    ) {
+    if (connectingProfileId === selectedId) {
       return connectionTask
     }
 
-    const previousSocket = ws.value
-    rejectPendingRpc(new Error('RPC socket reconnecting'))
+    const generation = ++connectionGeneration
+    connectionAbort?.abort()
+    connectionAbort = new AbortController()
+    resetConnectionState()
     selectedStockCode.value = ''
     selectedStockId.value = ''
     viewedStockCodes.value = []
@@ -1642,39 +1656,28 @@ export const useTradingSession = (
     orderNotice.value = ''
     orderError.value = ''
     orderBusy.value = false
-    providerOrderRules.value = {}
     instrumentDetailRequestId += 1
     quoteLoading.value = false
-    stopBoardPolling()
-    previousSocket?.close()
-    profileConnected.value = false
-    connectedProfileId.value = ''
     smbcQrUrl.value = ''
     smbcUrl.value = ''
     smbcBalance.value = null
     dataLoading.value = true
-    connectingProfileId = selectedProfile.id
-    let completeConnection: () => void = () => {}
-    connectionTask = new Promise<void>((resolve) => {
-      completeConnection = resolve
-    })
-    const socket = createRpcSocket()
-    const connectionTimeout = window.setTimeout(() => {
-      if (ws.value !== socket) return
-      reportDataError('接続がタイムアウトしました。再接続してください。')
-      socket.close()
-    }, 30_000)
-    socket.addEventListener('open', async () => {
-      window.clearTimeout(connectionTimeout)
-      if (ws.value !== socket) return
+    connectingProfileId = selectedId
+
+    connectionTask = (async () => {
+      const timeout = window.setTimeout(() => {
+        if (generation !== connectionGeneration) return
+        reportDataError('接続がタイムアウトしました。再接続してください。')
+        connectionAbort?.abort()
+      }, 30_000)
       try {
-        const connection = (await rpcCall('profile.connect', {
-          profileId: selectedProfile.id,
+        const connection = (await rpcCall('admin.profiles.connect', {
+          profileId: profileIdForAccount(selectedId),
         })) as {
           status: 'connected' | 'interaction-required'
           interaction?: { id: string; kind: string; url?: string; qrUrl?: string }
         }
-        if (ws.value !== socket) return
+        if (generation !== connectionGeneration || selectedProfileId.value !== selectedId) return
         if (connection.status === 'interaction-required') {
           if (connection.interaction?.kind !== 'qr' || !connection.interaction.qrUrl) {
             throw new Error('未対応の接続操作が要求されました')
@@ -1685,52 +1688,47 @@ export const useTradingSession = (
           return
         }
         providerOperations.value = new Set(
-          await rpcCall<string[]>('profile.operations', { profileId: selectedProfile.id }),
+          (await rpcCall<string[]>('account.operations', { account: selectedId })).map((name) =>
+            name.startsWith('account.') ? name.slice('account.'.length) : name,
+          ),
         )
-        await loadProviderOrderRules(selectedProfile.id)
+        await loadProviderOrderRules(selectedId)
+        if (generation !== connectionGeneration || selectedProfileId.value !== selectedId) return
         profileConnected.value = true
-        connectedProfileId.value = selectedProfile.id
+        connectedProfileId.value = selectedId
         await loadTradingData()
+        void rpcCall('admin.profiles.sync', {
+          profileId: profileIdForAccount(selectedId),
+        })
+          .then(() => {
+            if (generation !== connectionGeneration || selectedProfileId.value !== selectedId)
+              return
+            return loadTradingData()
+          })
+          .catch((cause) => {
+            if (generation !== connectionGeneration) return
+            reportDataError(errorMessage(cause, '口座情報の同期に失敗しました'), cause)
+          })
       } catch (cause) {
-        if (ws.value !== socket) return
+        if (generation !== connectionGeneration || selectedProfileId.value !== selectedId) return
         profileConnected.value = false
         connectedProfileId.value = ''
         reportDataError(errorMessage(cause, '接続に失敗しました'), cause)
-        socket.close()
+        connectionAbort?.abort()
       } finally {
-        completeConnection()
-        if (ws.value !== socket) return
-        if (connectingProfileId === selectedProfile.id) connectingProfileId = ''
+        window.clearTimeout(timeout)
+        if (generation !== connectionGeneration) return
+        if (connectingProfileId === selectedId) connectingProfileId = ''
         dataLoading.value = false
       }
-    })
-    socket.addEventListener('message', (event) => handleRpcMessage(String(event.data)))
-    socket.addEventListener('error', () => {
-      if (ws.value !== socket) return
-      reportDataError('証券口座への接続に失敗しました')
-    })
-    socket.addEventListener('close', () => {
-      window.clearTimeout(connectionTimeout)
-      completeConnection()
-      if (ws.value !== socket) return
-      reportDataError('口座との接続が切れました。口座を選び直して再接続してください。')
-      rejectPendingRpc(new Error('RPC socket closed'))
-      boardPollingSubscriptionId = ''
-      chartHistoryRequestId += 1
-      historicalPricePoints.value = []
-      chartLoading.value = false
-      chartNotice.value = null
-      realtimePricePoints.value = []
-      pricePolling.value = false
-      profileConnected.value = false
-      connectedProfileId.value = ''
-      providerOperations.value = new Set()
-      providerOrderRules.value = {}
-      if (connectingProfileId === selectedProfile.id) connectingProfileId = ''
-      dataLoading.value = false
-    })
-    ws.value = socket
+    })()
     return connectionTask
+  }
+
+  const connectProfile = (profileId: string) => {
+    selectedProfileId.value =
+      profiles.value.find((profile) => profile.profileId === profileId)?.id ?? profileId
+    return connect()
   }
 
   const finishSmbc2fa = async () => {
@@ -1738,12 +1736,26 @@ export const useTradingSession = (
     dataLoading.value = true
     try {
       if (!profileInteractionId) throw new Error('SMBC Direct interaction is missing')
-      await rpcCall('profile.connection.complete', {
-        profileId: selectedProfileId.value,
+      await rpcCall('admin.profiles.connection.complete', {
+        profileId: profileIdForAccount(selectedProfileId.value),
         interactionId: profileInteractionId,
       })
+      if (!accounts.value.some((account) => account.id === selectedProfileId.value)) {
+        // The first SMBC login provisions accounts during completion; adopt the
+        // created account so account-scoped calls below can resolve a target.
+        const provisionedId = (await listManagedVirtualAccounts()).accounts.find(
+          (account) => account.profileId === selectedProfileId.value,
+        )?.id
+        if (!provisionedId) throw new Error('接続した口座を特定できませんでした')
+        selectedProfileId.value = provisionedId
+        // The selection watcher aborts the in-flight controller; subsequent
+        // calls in this flow need a fresh one.
+        connectionAbort = new AbortController()
+      }
       providerOperations.value = new Set(
-        await rpcCall<string[]>('profile.operations', { profileId: selectedProfileId.value }),
+        (await rpcCall<string[]>('account.operations', { account: selectedProfileId.value })).map(
+          (name) => (name.startsWith('account.') ? name.slice('account.'.length) : name),
+        ),
       )
       await loadProviderOrderRules(selectedProfileId.value)
       profileConnected.value = true
@@ -1793,21 +1805,6 @@ export const useTradingSession = (
       if (!timeZone || !isMarketSessionOpen(quotedStock.market, timeZone)) return
 
       appendRealtimePricePoint(quotedStock.price)
-      if (!providerOperations.value.has('market.issue.pollBoard.subscribe')) return
-
-      const subscribed = await rpcCall<RecordLike>('market.issue.pollBoard.subscribe', {
-        issueCode: stock.code,
-        market: stock.market,
-      })
-      if (requestId !== boardPollingRequestId) {
-        const staleSubscriptionId = textValue(subscribed.subscriptionId)
-        if (staleSubscriptionId) {
-          call('market.issue.pollBoard.unsubscribe', { subscriptionId: staleSubscriptionId })
-        }
-        return
-      }
-      boardPollingSubscriptionId = textValue(subscribed.subscriptionId)
-      pricePolling.value = Boolean(boardPollingSubscriptionId)
     } catch (cause) {
       if (requestId === boardPollingRequestId) {
         pricePolling.value = false
@@ -2087,7 +2084,7 @@ export const useTradingSession = (
                 },
               }
     return {
-      accountId: providerAccountId.value,
+      account: selectedProfileId.value,
       instrumentId: selectedStock.value.code,
       instrumentVenue: cashOrderPreOrderMarket.value,
       side: tradeSide.value,
@@ -2123,10 +2120,10 @@ export const useTradingSession = (
     }
     try {
       const availability = asRecord(
-        await rpcCall<RecordLike>('profile.availability', {
-          profileId: selectedProfileId.value,
-          operation: 'investments.orders.preview',
-          input:
+        await rpcCall<RecordLike>('account.availability', {
+          account: selectedProfileId.value,
+          method: 'account.investments.orders.preview',
+          params:
             orderInputMode.value === 'amount' && canRequestOrderEstimate.value
               ? tradeAdapter.value.buildPreviewRequest?.(amountOrderDraft())
               : orderInputMode.value === 'quantity'
@@ -2134,7 +2131,10 @@ export const useTradingSession = (
                 : undefined,
         }),
       )
-      const operation = asRecord(asRecord(availability.operations)['investments.orders.preview'])
+      const methods = asRecord(availability.methods)
+      const operation = asRecord(
+        methods['account.investments.orders.preview'] ?? methods['investments.orders.preview'],
+      )
       if (operation.available !== true) {
         throw new Error(textValue(operation.message, 'この注文は現在利用できません'))
       }
@@ -2194,7 +2194,10 @@ export const useTradingSession = (
               adapter.buildCreateRequest(confirmationToken),
             ),
           )
-          orderNotice.value = textValue(receipt.message, '注文を受け付けました。')
+          orderNotice.value =
+            receipt.status === 'submission_unknown'
+              ? '注文結果を確認中です。再注文せず、状態の確認をお待ちください。'
+              : textValue(receipt.message, '注文を受け付けました。')
           showOrderDialog.value = false
           lastCashEstimate.value = null
           amountInput.value = ''
@@ -2229,14 +2232,17 @@ export const useTradingSession = (
           kind: orderKind.value,
           quantity: orderQuantity.value,
           price: orderPrice.value,
-          status: '注文中',
+          status: receipt.status === 'submission_unknown' ? '結果確認中' : '注文中',
         },
         ...orders.value,
       ]
       showOrderDialog.value = false
       lastCashEstimate.value = null
       lastCashEstimateKey.value = ''
-      orderNotice.value = '注文を受け付けました。'
+      orderNotice.value =
+        receipt.status === 'submission_unknown'
+          ? '注文結果を確認中です。再注文せず、状態の確認をお待ちください。'
+          : '注文を受け付けました。'
       await loadTradingData()
     } catch (cause) {
       orderError.value = errorMessage(cause, '注文処理に失敗しました')
@@ -2259,12 +2265,14 @@ export const useTradingSession = (
     if (cancelingOrderKey.value) return false
     cancelingOrderKey.value = key
     try {
-      await rpcCall('investments.orders.cancel', {
-        accountId: providerAccountId.value,
-        orderId: order.orderSubNo || order.id,
-        allowTransaction: true,
-      })
-      order.status = '取消済'
+      const receipt = asRecord(
+        await rpcCall('investments.orders.cancel', {
+          account: selectedProfileId.value,
+          orderId: order.orderSubNo || order.id,
+          allowTransaction: true,
+        }),
+      )
+      order.status = receipt.status === 'cancelled' ? '取消済' : '取消確認中'
       await loadTradingData()
       return true
     } catch (cause) {
@@ -2280,7 +2288,7 @@ export const useTradingSession = (
       throw new Error('この provider は注文詳細に未対応です')
     }
     const detail = await rpcCall<RecordLike>('investments.orders.get', {
-      accountId: providerAccountId.value,
+      account: selectedProfileId.value,
       orderId: order.id,
       instrumentId: order.code,
       venue: order.market,
@@ -2295,7 +2303,7 @@ export const useTradingSession = (
       throw new Error('この provider は取引明細に未対応です')
     }
     const result = await rpcCall<RecordLike>('investments.trades.list', {
-      accountId: providerAccountId.value,
+      account: selectedProfileId.value,
       limit: 50,
     })
     return asArray(result.items)
@@ -2308,7 +2316,7 @@ export const useTradingSession = (
       throw new Error('この provider は保有詳細に未対応です')
     }
     const detail = await rpcCall<RecordLike>('investments.positions.get', {
-      accountId: providerAccountId.value,
+      account: selectedProfileId.value,
       instrumentId: position.code,
       venue: position.market,
       positionType: 'cash',
@@ -2330,7 +2338,7 @@ export const useTradingSession = (
     if (!providerAccountId.value) throw new Error('取引口座を取得できません')
     const preview = asRecord(
       await rpcCall<unknown>('investments.orders.replace.preview', {
-        accountId: providerAccountId.value,
+        account: selectedProfileId.value,
         orderId: order.orderSubNo || order.id,
         quantity: String(draft.quantity),
         limitPrice:
@@ -2360,7 +2368,7 @@ export const useTradingSession = (
     }
     if (!isUsMarket(order.market)) throw new Error('注文訂正は米国株のみ対応しています')
     await rpcCall('investments.orders.replace', {
-      accountId: providerAccountId.value,
+      account: selectedProfileId.value,
       orderId: order.orderSubNo || order.id,
       quantity: String(draft.quantity),
       limitPrice:
@@ -2403,6 +2411,38 @@ export const useTradingSession = (
     const stock = stocks.value.find((candidate) => candidate.code === code)
     openTradeForStock(stock ?? selectedStock.value, navigate)
   }
+
+  watch(
+    selectedProfileId,
+    () => {
+      connectionGeneration += 1
+      connectionAbort?.abort()
+      lastCashEstimate.value = null
+      lastCashEstimateKey.value = ''
+      showEstimateDialog.value = false
+      showOrderDialog.value = false
+      selectedHoldingId.value = ''
+      positions.value = []
+      orders.value = []
+      profileConnected.value = false
+      connectedProfileId.value = ''
+    },
+    { flush: 'sync' },
+  )
+  let portfolioGeneration = 0
+  watch(selectedScope, async () => {
+    if (!accounts.value.length) return
+    const generation = ++portfolioGeneration
+    portfolioOverview.value = null
+    portfolioPositions.value = []
+    portfolioOrders.value = []
+    try {
+      await loadPortfolioOverview()
+      if (generation === portfolioGeneration) await loadStoredAssetValuations()
+    } catch (cause) {
+      reportDataError(errorMessage(cause, '口座のデータを取得できませんでした'), cause)
+    }
+  })
 
   let searchTimer: ReturnType<typeof setTimeout> | undefined
   let searchRequestId = 0
@@ -2545,14 +2585,13 @@ export const useTradingSession = (
 
   onUnmounted(() => {
     clearTimeout(searchTimer)
-    stopBoardPolling()
-    const socket = ws.value
-    ws.value = null
-    socket?.close()
-    rejectPendingRpc(new Error('RPC socket closed'))
+    connectionGeneration += 1
+    connectionAbort?.abort()
+    resetConnectionState()
   })
 
   return {
+    dataIssue,
     smbcQrUrl,
     smbcUrl,
     smbcBalance,
@@ -2661,6 +2700,7 @@ export const useTradingSession = (
     selectTradeStock,
     selectStockByCode,
     connect,
+    connectProfile,
     loadTradingData,
     invokeProvider,
     loadStoredAssetValuations,

@@ -41,7 +41,7 @@ defineProps<{
   secondaryPrice: number
   quantity: number
   amount: number
-  profileName: string
+  accountName: string
   orderInputMode: TradeOrderInputMode
   canConfirm: boolean
   previewExpired: boolean
@@ -96,7 +96,7 @@ const accountTypeLabel = (type: CashOrderAccountType) =>
       <dl :class="ui.confirmList">
         <div v-if="orderInputMode === 'amount'" :class="ui.confirmRow">
           <dt>取引口座</dt>
-          <dd>{{ profileName }}</dd>
+          <dd>{{ accountName }}</dd>
         </div>
         <div :class="ui.confirmRow">
           <dt>売買</dt>
@@ -214,7 +214,7 @@ const accountTypeLabel = (type: CashOrderAccountType) =>
       <dl :class="ui.confirmList">
         <div v-if="orderInputMode === 'amount'" :class="ui.confirmRow">
           <dt>取引口座</dt>
-          <dd>{{ profileName }}</dd>
+          <dd>{{ accountName }}</dd>
         </div>
         <div v-if="orderInputMode === 'quantity'" :class="ui.confirmRow">
           <dt>区分</dt>

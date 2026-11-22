@@ -12,7 +12,7 @@
   },
   "scripts": {
     "build": "cd ../.. && vp run @mnie/types#build && cd packages/client-mnie && vp pack",
-    "dev": "vp pack --watch",
+    "dev": "vp pack --watch --no-clean",
     "clean": "rm -rf dist",
     "typecheck": "tsc"
   },

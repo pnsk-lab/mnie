@@ -49,18 +49,22 @@ mnie rpc methods --profile local
 Call a method with its parameters as one JSON argument.
 
 ```bash
-mnie rpc call market.issue.board \
-  '{"issueCode":"7203","market":"T"}' \
-  --profile local \
-  --provider sbisec --profile-id sbi_xxx
+mnie rpc call portfolio.accounts.list --profile local
 ```
+
+```bash
+mnie rpc call balances.list --account acct_xxx --profile local
+```
+
+Account-scoped reads go through `client.account(id).invoke(op, params)`; the wire name is
+`account.<op>` with `{ account }`. Profile passthrough is `profile.<op>` with `{ profile }`.
 
 Output is formatted JSON, so it can be inspected directly or passed to another process.
 
 ```bash
-mnie rpc call account.positions.cash \
+mnie rpc call account.investments.positions.list \
+  '{"account":"acct_xxx"}' \
   --profile local \
-  --provider sbisec --profile-id sbi_xxx \
   | jq
 ```
 

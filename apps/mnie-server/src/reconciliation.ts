@@ -119,13 +119,13 @@ export const listEconomicEvents = async (db: Db, request: EventsListRequest = {}
       (!request.states || request.states.includes(event.state as EconomicEvent['state'])),
   )
   let matching = filtered
-  if (request.accountId) {
+  if (request.financialAccountId) {
     const ledgerIds = new Set(
       (
         await db
           .select({ id: ledgerAccounts.id })
           .from(ledgerAccounts)
-          .where(eq(ledgerAccounts.financialAccountId, request.accountId))
+          .where(eq(ledgerAccounts.financialAccountId, request.financialAccountId))
       ).map((account) => account.id),
     )
     const postings = await db.select().from(eventPostings)

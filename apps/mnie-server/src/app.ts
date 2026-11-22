@@ -11,6 +11,7 @@ import { authenticateRequest } from './security/http-auth'
 import { createAuthRoutes } from './routes/auth'
 import { createOAuthRoutes } from './routes/oauth'
 import { createMcpRoutes } from './routes/mcp'
+import { createRestRpcRoutes } from './rpc/rest'
 import { createRpcWebSocket } from './rpc/ws'
 import { createProviderRegistry } from './providers/registry'
 import { AdminRpcService } from './rpc/admin'
@@ -66,6 +67,9 @@ export const createServerApp = (
     }),
   )
   app.get('/api/ws', rpcWebSocket.upgradeWebSocket)
+  const restRpc = createRestRpcRoutes(db, providers, adminRpc)
+  app.route('/api/rpc', restRpc)
+  const mcpRoutes: ReturnType<typeof createMcpRoutes>[] = []
   for (const path of ['/api/mcp', '/mcp']) {
     app.get(`/.well-known/oauth-protected-resource${path}`, (c) =>
       c.json({
@@ -75,7 +79,9 @@ export const createServerApp = (
         bearer_methods_supported: ['header'],
       }),
     )
-    app.route(path, createMcpRoutes(db, providers, adminRpc))
+    const routes = createMcpRoutes(db, providers, adminRpc)
+    mcpRoutes.push(routes)
+    app.route(path, routes)
   }
   app.route('/api/auth', createAuthRoutes())
   app.route('/api/oauth', createOAuthRoutes())
@@ -84,6 +90,10 @@ export const createServerApp = (
     app,
     websocket: rpcWebSocket.websocket,
     providers,
-    close: () => cronSystem.close(),
+    close: async () => {
+      await Promise.all(mcpRoutes.map((routes) => routes.closeMcp()))
+      await restRpc.closeRest()
+      await cronSystem.close()
+    },
   }
 }

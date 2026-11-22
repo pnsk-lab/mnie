@@ -1,5 +1,5 @@
 import { afterEach, expect, mock, spyOn, test } from 'bun:test'
-import type { FinancialProvider, OperationMap } from '@mnie/types'
+import type { FinancialProvider, MethodMap } from '@mnie/types'
 import { ensureInitialAssetValuations, fetchAssetValuation } from './assets'
 import { createCronSystem } from './cron'
 import type { ServerConfig } from './config'
@@ -22,11 +22,11 @@ const setup = async () => {
   }))
   await db.insert(accountProfiles).values(profiles)
   const registry = new ProviderRegistry(db, {} as ServerConfig)
-  const provider: FinancialProvider<OperationMap> = {
+  const provider: FinancialProvider<MethodMap> = {
     descriptor: { id: 'paypay-bank', name: 'PayPay Bank' },
     accountId: 'bank-account',
     capabilities: () => ['balances:read'],
-    operations: () => ['balances.list'],
+    methods: () => ['balances.list'],
     checkAvailability: async () => ({ ok: true }),
     invoke: async () =>
       [{ amount: { kind: 'money', money: { currency: 'JPY', value: '100' } } }] as never,
@@ -70,7 +70,7 @@ test('asset refresh skips a healthy statement-only VPass profile and still refre
   const { db, profiles, registry, openedProfiles, errors } = await setup()
   spyOn(registry, 'availability').mockResolvedValue({
     connection: { ok: true },
-    operations: {},
+    methods: {},
     checkedAt: new Date().toISOString(),
   })
   const cron = createCronSystem(db, {} as ServerConfig, registry)
@@ -78,7 +78,7 @@ test('asset refresh skips a healthy statement-only VPass profile and still refre
     for (const profile of profiles) {
       cron.setAvailability(profile.id, {
         result: { ok: true },
-        operations: {},
+        methods: {},
         checkedAt: new Date(),
       })
     }

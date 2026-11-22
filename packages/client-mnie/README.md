@@ -1,25 +1,25 @@
 # client-mnie
 
-Remote `FinancialWorkspace` client for a Mnie server.
+Remote `MnieClient` for a Mnie server.
 
 ```ts
 import { connectMnie } from '@repo/client-mnie'
 
-const workspace = await connectMnie({
+const client = await connectMnie({
   baseURL: 'https://mnie.example.com',
   token: 'mnie_xxx',
 })
 
 try {
-  const valuation = await workspace.invoke('portfolio.valuation.get', {
+  const valuation = await client.call('portfolio.valuation.get', {
     baseCurrency: 'JPY',
   })
-  const profiles = await workspace.profiles()
-  const transactions = await workspace.profile(profiles[0].id).invoke('transactions.list', {})
+  const accounts = await client.accounts()
+  const transactions = await client.account(accounts[0].id).invoke('transactions.list', {})
   console.log({ valuation, transactions })
 } finally {
-  workspace.close()
+  client.close()
 }
 ```
 
-The client uses one WebSocket and explicitly scopes requests as `workspace.invoke` or `profile.invoke`.
+Calls map to flat wire method names: `client.call('portfolio.valuation.get')` sends `portfolio.valuation.get`, and the `account(id)` / `profile(id)` proxies prefix provider methods as `account.<method>` / `profile.<method>` with the matching selector. The client uses one WebSocket by default; pass `transport: 'rest'` to send each call as a JSON-RPC request over `POST /api/rpc/{method}` instead.

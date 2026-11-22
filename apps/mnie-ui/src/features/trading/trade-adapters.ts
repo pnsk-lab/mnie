@@ -33,7 +33,7 @@ const quantityTradeAdapter: TradeAdapter = {
 const amountTradeAdapter: TradeAdapter = {
   orderInputMode: 'amount',
   buildPreviewRequest: (draft) => ({
-    accountId: draft.profileId,
+    account: draft.profileId,
     instrumentId: draft.side === 'sell' ? draft.holding?.code : draft.stock.code,
     side: draft.side,
     accountType: String(

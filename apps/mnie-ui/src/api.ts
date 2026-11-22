@@ -6,6 +6,7 @@ export interface AuthStatus {
 export interface ApiKey {
   id: string
   label: string
+  accountBindings?: Array<{ accountId: string; role: 'read' | 'trade' }>
   maxTradesPerHour?: number | null
   maxTradesPer6Hours?: number | null
   maxTradesPerDay?: number | null
@@ -21,6 +22,7 @@ export interface ApiKey {
 
 export type ApiKeySettings = Pick<
   ApiKey,
+  | 'accountBindings'
   | 'maxTradesPerHour'
   | 'maxTradesPer6Hours'
   | 'maxTradesPerDay'
@@ -212,6 +214,41 @@ export interface FinancialAccount {
   kind: string
 }
 
+export interface PublicFinancialAccount {
+  id: string
+  implementation: 'virtual-brokerage' | 'passthrough-readonly'
+  category: 'brokerage' | 'bank' | 'transit' | 'pension' | 'other'
+  provider?: string
+  label: string
+  kind: 'personal' | 'agent' | 'system'
+  status: 'active' | 'frozen' | 'reconciliation_required' | 'closed'
+  capabilities: string[]
+  permissions: { read: boolean; trade: boolean; manage: boolean }
+  color?: string
+  icon?: string
+  version: number
+}
+
+export interface ManagedVirtualAccount extends PublicFinancialAccount {
+  physicalAccountId: string
+  profileId: string
+  providerAccountId: string
+  connectorTypeId: string
+  physicalAccountKind: string
+  policy: Record<string, unknown>
+}
+
+export interface VirtualAccountAsset {
+  accountId: string
+  assetKey: string
+  assetKind: 'cash' | 'security'
+  available: string
+  reserved: string
+  pending: string
+  version: number
+  updatedAt: string
+}
+
 export interface TransactionObservation {
   id: string
   accountId: string
@@ -231,7 +268,7 @@ export interface TransactionObservation {
 }
 
 export type ProfileAvailability =
-  | { ok: true; checkedAt?: string; operations?: Record<string, unknown> }
+  | { ok: true; checkedAt?: string; methods?: Record<string, unknown> }
   | {
       ok: false
       message: unknown
@@ -246,7 +283,7 @@ export type ProfileAvailability =
         | 'PROVIDER_RESTRICTED'
         | 'UNKNOWN'
       checkedAt?: string
-      operations?: Record<string, unknown>
+      methods?: Record<string, unknown>
     }
 
 export interface CronJob {
@@ -284,102 +321,46 @@ const httpRequest = async <T>(path: string, init?: RequestInit): Promise<T> => {
   return response.json() as Promise<T>
 }
 
-interface RpcResponse {
-  id?: number | null
-  result?: unknown
-  error?: { message?: string }
-}
+let rpcRequestId = 0
 
-let adminSocket: WebSocket | undefined
-let adminSocketReady: Promise<WebSocket> | undefined
-let adminRpcId = 0
-const adminPending = new Map<
-  number,
-  { resolve(value: unknown): void; reject(reason?: unknown): void }
->()
-
-const connectAdminSocket = () => {
-  if (adminSocket?.readyState === WebSocket.OPEN) return Promise.resolve(adminSocket)
-  if (adminSocketReady) return adminSocketReady
-  adminSocketReady = new Promise<WebSocket>((resolve, reject) => {
-    const socket = createRpcSocket()
-    const timeout = setTimeout(() => {
-      reject(new Error('接続がタイムアウトしました。接続状態を確認してください。'))
-      socket.close()
-    }, 30_000)
-    socket.addEventListener('open', () => {
-      clearTimeout(timeout)
-      adminSocket = socket
-      adminSocketReady = undefined
-      resolve(socket)
-    })
-    socket.addEventListener('message', (event) => {
-      let response: RpcResponse
-      try {
-        response = JSON.parse(String(event.data)) as RpcResponse
-      } catch {
-        return
+export const rpcRequest = async <T>(
+  method: string,
+  params?: unknown,
+  options: { signal?: AbortSignal } = {},
+): Promise<T> => {
+  const response = await fetch(`/api/rpc/${method}`, {
+    method: 'POST',
+    credentials: 'include',
+    cache: 'no-store',
+    signal: options.signal
+      ? AbortSignal.any([options.signal, AbortSignal.timeout(60_000)])
+      : AbortSignal.timeout(60_000),
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: ++rpcRequestId,
+      method,
+      params: params ?? {},
+    }),
+  })
+  const payload = (await response.json().catch(() => undefined)) as
+    | {
+        result?: unknown
+        error?: { code?: number; message?: string; data?: { providerCode?: string } }
       }
-      if (typeof response.id !== 'number') return
-      const pending = adminPending.get(response.id)
-      if (!pending) return
-      adminPending.delete(response.id)
-      if (response.error) pending.reject(new Error(response.error.message || 'RPC request failed'))
-      else if ('result' in response) pending.resolve(response.result)
-      else pending.reject(new Error('サーバーからの応答が不正です'))
-    })
-    socket.addEventListener('error', () => {
-      reject(new Error('サーバーに接続できませんでした'))
-      socket.close()
-    })
-    socket.addEventListener('close', () => {
-      clearTimeout(timeout)
-      reject(new Error('サーバーとの接続が切れました'))
-      if (adminSocket === socket) adminSocket = undefined
-      adminSocketReady = undefined
-      for (const pending of adminPending.values()) pending.reject(new Error('WebSocket closed'))
-      adminPending.clear()
-    })
-  })
-  return adminSocketReady
-}
-
-const rpcRequest = async <T>(method: string, params?: unknown): Promise<T> => {
-  const socket = await connectAdminSocket()
-  const id = ++adminRpcId
-  return new Promise<T>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      adminPending.delete(id)
-      reject(
-        new Error(
-          '応答がタイムアウトしました。操作が反映されているか確認してから再試行してください。',
-        ),
-      )
-    }, 60_000)
-    adminPending.set(id, {
-      resolve: (value) => {
-        clearTimeout(timeout)
-        resolve(value as T)
-      },
-      reject: (cause) => {
-        clearTimeout(timeout)
-        reject(cause)
-      },
-    })
-    try {
-      socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
-    } catch (cause) {
-      adminPending.get(id)?.reject(cause)
-      adminPending.delete(id)
+    | undefined
+  if (!response.ok)
+    throw new Error(payload?.error?.message || response.statusText || 'RPC request failed')
+  if (payload?.error) {
+    const error = new Error(payload.error.message || 'RPC request failed') as Error & {
+      providerCode?: string
     }
-  })
+    error.providerCode = payload.error.data?.providerCode
+    throw error
+  }
+  if (!payload || !('result' in payload)) throw new Error('サーバーからの応答が不正です')
+  return payload.result as T
 }
-
-const adminRequest = <T>(operation: string, input: Record<string, unknown> = {}) =>
-  rpcRequest<T>('admin.invoke', { operation, input })
-
-const workspaceRequest = <T>(operation: string, input: Record<string, unknown> = {}) =>
-  rpcRequest<T>('workspace.invoke', { operation, input })
 
 export const getStatus = () => httpRequest<AuthStatus>('/auth/status')
 
@@ -407,14 +388,14 @@ export const verifyLogin = (challengeId: string, response: unknown) =>
   })
 
 export const createApiKey = (label: string, settings?: ApiKeySettings) =>
-  adminRequest<{ apiKey: ApiKey }>('apiKeys.create', { label, settings })
+  rpcRequest<{ apiKey: ApiKey }>('admin.apiKeys.create', { label, settings })
 
-export const listApiKeys = () => adminRequest<{ apiKeys: ApiKey[] }>('apiKeys.list')
+export const listApiKeys = () => rpcRequest<{ apiKeys: ApiKey[] }>('admin.apiKeys.list')
 
 export const updateApiKeySettings = (id: string, settings: ApiKeySettings) =>
-  adminRequest<{ ok: true }>('apiKeys.update', { id, settings })
+  rpcRequest<{ ok: true }>('admin.apiKeys.update', { id, settings })
 
-export const revokeApiKey = (id: string) => adminRequest<{ ok: true }>('apiKeys.revoke', { id })
+export const revokeApiKey = (id: string) => rpcRequest<{ ok: true }>('admin.apiKeys.revoke', { id })
 
 export const listSbiPasskeys = async () => {
   const { profiles } = await listAccountProfiles()
@@ -426,19 +407,19 @@ export const listSbiPasskeys = async () => {
 }
 
 export const listAuthManagers = () =>
-  adminRequest<{ authManagers: AuthManagerConfig[] }>('authManagers.list')
+  rpcRequest<{ authManagers: AuthManagerConfig[] }>('admin.authManagers.list')
 
 export const saveBitwardenAuthManager = (payload: { label: string; dataPath?: string }) =>
-  adminRequest<{ authManager: AuthManagerConfig }>('authManagers.create', {
+  rpcRequest<{ authManager: AuthManagerConfig }>('admin.authManagers.create', {
     kind: 'bitwarden',
     ...payload,
   })
 
 export const deleteAuthManager = (id: string) =>
-  adminRequest<{ ok: true }>('authManagers.delete', { id })
+  rpcRequest<{ ok: true }>('admin.authManagers.delete', { id })
 
 export const fillFromAuthManager = (id: string, provider: string, masterPassword: string) =>
-  adminRequest<{ credentials: FilledAuthCredential[] }>('authManagers.credentials.list', {
+  rpcRequest<{ credentials: FilledAuthCredential[] }>('admin.authManagers.credentials.list', {
     id,
     providerId: provider,
     masterPassword,
@@ -450,7 +431,7 @@ export const saveSbiPasskey = (payload: {
   tradePassword?: string
   deviceId?: string
 }) =>
-  adminRequest<{ profile: AccountProfile }>('profiles.create', {
+  rpcRequest<{ profile: AccountProfile }>('admin.profiles.create', {
     providerId: 'sbisec',
     label: payload.label,
     credentials: {
@@ -468,88 +449,190 @@ export const saveSbiPasskey = (payload: {
   }))
 
 export const deleteSbiPasskey = (id: string) =>
-  adminRequest<{ ok: true }>('profiles.delete', { id })
+  rpcRequest<{ ok: true }>('admin.profiles.delete', { id })
 
 export const listAccountProfiles = () =>
-  adminRequest<{ profiles: AccountProfile[] }>('profiles.list')
+  rpcRequest<{ profiles: AccountProfile[] }>('admin.profiles.list')
 
 export const syncAllAccountHistory = (profileId: string) =>
-  adminRequest<{
+  rpcRequest<{
     profileId: string
     from: string
     to: string
     synced: number
     errors: HistoryListError[]
-  }>('history.sync', { profileId, from: new Date(0).toISOString(), to: new Date().toISOString() })
+  }>('admin.history.sync', {
+    profileId,
+    from: new Date(0).toISOString(),
+    to: new Date().toISOString(),
+  })
 
 export const syncAccountHistorySinceLast = (profileId: string) =>
-  adminRequest<{
+  rpcRequest<{
     profileId: string
     from: string
     to: string
     synced: number
     errors: HistoryListError[]
-  }>('history.sync.since-last', { profileId })
+  }>('admin.history.sync.since-last', { profileId })
 
 export const listProviderDefinitions = () =>
-  adminRequest<{ providers: ProviderDefinition[] }>('providers.list')
+  rpcRequest<{ providers: ProviderDefinition[] }>('admin.providers.list')
 
-export const listLatestAssetValuations = () =>
-  adminRequest<{ valuations: AssetValuation[] }>('assets.valuations.latest')
+export const listLatestAssetValuations = async (account?: string) => {
+  const overview = await getPortfolioOverview(account)
+  return {
+    valuations: overview.components.flatMap((component) =>
+      component.valuation
+        ? [
+            {
+              profileId: component.profile.id,
+              provider: component.profile.provider.id,
+              value: Number(component.valuation.amount.value),
+              holdingsValue: Number(component.valuation.holdingsAmount?.value ?? 0),
+              cashValue: Number(component.valuation.cashAmount?.value ?? 0),
+              currency: component.valuation.amount.currency,
+              capturedAt: component.valuation.asOf,
+            },
+          ]
+        : [],
+    ),
+  }
+}
 
-export const getPortfolioOverview = () =>
-  workspaceRequest<PortfolioOverview>('portfolio.overview.get')
+export const getPortfolioOverview = (account?: string) =>
+  rpcRequest<PortfolioOverview>('portfolio.overview.get', account ? { account } : {})
 
 export const listHistory = (
   input: {
-    profileIds?: string[]
+    profiles?: string[]
+    account?: string
+    accounts?: string[]
     from?: string
     to?: string
     kinds?: Array<'transaction' | 'valuation' | 'snapshot'>
     limit?: number
   } = {},
-) => workspaceRequest<{ items: HistoryItem[]; errors: HistoryListError[] }>('history.list', input)
+) =>
+  rpcRequest<{ items: HistoryItem[]; errors: HistoryListError[] }>('portfolio.history.list', input)
 
 export const listReconciliationProposals = (
   states: Array<'proposed' | 'rejected' | 'confirmed'> = ['proposed'],
 ) =>
-  workspaceRequest<{ items: ReconciliationProposal[] }>('reconciliation.proposals.list', { states })
+  rpcRequest<{ items: ReconciliationProposal[] }>(
+    'portfolio.ledger.reconciliation.proposals.list',
+    { states },
+  )
 
-export const listFinancialAccounts = () =>
-  workspaceRequest<FinancialAccount[]>('financial-accounts.list')
+export type AdminAccount =
+  | ({ layer: 'physical' } & FinancialAccount)
+  | ({ layer: 'virtual' } & ManagedVirtualAccount)
+
+export const listAdminAccounts = () =>
+  rpcRequest<{ accounts: AdminAccount[] }>('admin.accounts.list')
+
+export const listFinancialAccounts = async () => {
+  const { accounts } = await listAdminAccounts()
+  return accounts.filter(
+    (account): account is { layer: 'physical' } & FinancialAccount => account.layer === 'physical',
+  )
+}
+
+export const discoverFinancialAccounts = () =>
+  rpcRequest<{ discovered: number }>('admin.accounts.discover')
+
+export const listVirtualAccounts = () =>
+  rpcRequest<{ accounts: PublicFinancialAccount[] }>('portfolio.accounts.list')
+
+export const listVirtualAccountAssets = (account: string) =>
+  rpcRequest<{ assets: VirtualAccountAsset[] }>('portfolio.accounts.balances', { account })
+
+export const initializeVirtualAccounts = (physicalAccountId: string) =>
+  rpcRequest<{ unallocated: PublicFinancialAccount }>('admin.accounts.initialize', {
+    physicalAccountId,
+  })
+
+export const listVirtualAccountInitializations = () =>
+  rpcRequest<{ physicalAccountIds: string[] }>('admin.accounts.initializations.list')
+
+export const createVirtualAccount = (input: {
+  physicalAccountId: string
+  label: string
+  allocations?: Array<{
+    fromAccountId: string
+    assetKey: string
+    amount: string
+    expectedFromVersion: number
+    reason: string
+  }>
+  kind: 'personal' | 'agent'
+}) => rpcRequest<{ account: PublicFinancialAccount }>('admin.accounts.create', input)
+
+export const ensureDefaultVirtualAccounts = () =>
+  rpcRequest<{
+    created: number
+    synced: number
+    errors: Array<{ profileId: string; message: string }>
+  }>('admin.accounts.defaults.ensure')
+
+export const listManagedVirtualAccounts = async () => {
+  const { accounts } = await listAdminAccounts()
+  return {
+    accounts: accounts.filter(
+      (account): account is { layer: 'virtual' } & ManagedVirtualAccount =>
+        account.layer === 'virtual',
+    ),
+  }
+}
+
+export const transferVirtualAsset = (input: {
+  fromAccountId: string
+  toAccountId: string
+  assetKey: string
+  amount: string
+  expectedFromVersion: number
+  expectedToVersion: number
+  reason: string
+}) => rpcRequest<{ id: string }>('admin.accounts.assets.transfer', input)
+
+export const approveVirtualAccountReconciliation = (physicalAccountId: string) =>
+  rpcRequest<{ ok: true }>('admin.accounts.reconciliation.approve', { physicalAccountId })
 
 export const listTransactionObservations = () =>
-  workspaceRequest<TransactionObservation[]>('transaction-observations.list')
+  rpcRequest<TransactionObservation[]>('portfolio.ledger.observations.list')
 
-export const listAccountLinks = () => workspaceRequest<unknown[]>('account-links.list')
+export const listAccountLinks = () => rpcRequest<unknown[]>('portfolio.ledger.account-links.list')
 
 export const saveAccountLink = (input: Record<string, unknown>) =>
-  workspaceRequest('account-links.upsert', input)
+  rpcRequest('portfolio.ledger.account-links.upsert', input)
 
 export const confirmReconciliationProposal = (proposalId: string) =>
-  workspaceRequest('reconciliation.confirm', { proposalId })
+  rpcRequest('portfolio.ledger.reconciliation.confirm', { proposalId })
 
 export const rejectReconciliationProposal = (proposalId: string, reason?: string) =>
-  workspaceRequest('reconciliation.reject', { proposalId, ...(reason ? { reason } : {}) })
+  rpcRequest('portfolio.ledger.reconciliation.reject', {
+    proposalId,
+    ...(reason ? { reason } : {}),
+  })
 
 export const checkAccountProfileAvailability = () =>
-  adminRequest<{ availability: Record<string, ProfileAvailability> }>(
-    'profiles.availability.cached',
+  rpcRequest<{ availability: Record<string, ProfileAvailability> }>(
+    'admin.profiles.availability.cached',
   )
 
 export const checkProfileAvailability = (profileId: string) =>
-  adminRequest<{ availability: Record<string, ProfileAvailability> }>(
-    'profiles.availability.cached',
+  rpcRequest<{ availability: Record<string, ProfileAvailability> }>(
+    'admin.profiles.availability.cached',
     { profileId },
   )
 
 export const checkProfileAvailabilityLive = (profileId: string) =>
-  adminRequest<{ availability: Record<string, ProfileAvailability> }>(
-    'profiles.availability.refresh',
+  rpcRequest<{ availability: Record<string, ProfileAvailability> }>(
+    'admin.profiles.availability.refresh',
     { profileId },
   )
 
-export const listCronJobs = () => adminRequest<{ jobs: CronJob[] }>('jobs.list')
+export const listCronJobs = () => rpcRequest<{ jobs: CronJob[] }>('admin.jobs.list')
 
 export const saveSmbcDirectProfile = (payload: {
   label: string
@@ -557,7 +640,7 @@ export const saveSmbcDirectProfile = (payload: {
   password: string
   accountItemCode?: string
 }) =>
-  adminRequest<{ profile: AccountProfile }>('profiles.create', {
+  rpcRequest<{ profile: AccountProfile }>('admin.profiles.create', {
     providerId: 'smbc-direct',
     label: payload.label,
     credentials: payload,
@@ -569,7 +652,7 @@ export const savePayPayBankProfile = (payload: {
   accountNo: string
   password: string
 }) =>
-  adminRequest<{ profile: AccountProfile }>('profiles.create', {
+  rpcRequest<{ profile: AccountProfile }>('admin.profiles.create', {
     providerId: 'paypay-bank',
     label: payload.label,
     credentials: payload,
@@ -581,7 +664,7 @@ export const saveVpassProfile = (payload: {
   password: string
   idKind?: 'vpass' | 'fa'
 }) =>
-  adminRequest<{ profile: AccountProfile }>('profiles.create', {
+  rpcRequest<{ profile: AccountProfile }>('admin.profiles.create', {
     providerId: 'vpass',
     label: payload.label,
     credentials: {
@@ -596,7 +679,7 @@ export const saveStarbucksProfile = (payload: {
   username: string
   password: string
 }) =>
-  adminRequest<{ profile: AccountProfile }>('profiles.create', {
+  rpcRequest<{ profile: AccountProfile }>('admin.profiles.create', {
     providerId: 'starbucks-jp',
     label: payload.label,
     credentials: {
@@ -610,43 +693,89 @@ export const savePayPaySecProfile = (payload: {
   credential: unknown
   tradePassword: string
 }) =>
-  adminRequest<{ profile: AccountProfile }>('profiles.create', {
+  rpcRequest<{ profile: AccountProfile }>('admin.profiles.create', {
     providerId: 'paypay-sec',
     label: payload.label,
     credentials: payload,
   })
 
 export const deleteAccountProfile = (id: string) =>
-  adminRequest<{ ok: true }>('profiles.delete', { id })
+  rpcRequest<{ ok: true }>('admin.profiles.delete', { id })
 
 export const updateAccountProfile = (
   id: string,
   payload: { label: string; color: string; tradePassword?: string },
-) => adminRequest<{ profile: AccountProfile }>('profiles.update', { id, ...payload })
+) => rpcRequest<{ profile: AccountProfile }>('admin.profiles.update', { id, ...payload })
 
 export const createMobileSuicaCaptcha = (payload: {
   label: string
   user: string
   password: string
 }) =>
-  adminRequest<{ interactionId: string; imageDataUrl: string; suggestedAnswer: string }>(
-    'profiles.mobileSuica.login.start',
+  rpcRequest<{ interactionId: string; imageDataUrl: string; suggestedAnswer: string }>(
+    'admin.profiles.mobileSuica.login.start',
     payload,
   ).then(({ interactionId, ...interaction }) => ({ id: interactionId, ...interaction }))
 
 export const createMobileSuicaReauthCaptcha = (profileId: string) =>
-  adminRequest<{ interactionId: string; imageDataUrl: string; suggestedAnswer: string }>(
-    'profiles.mobileSuica.login.start',
+  rpcRequest<{ interactionId: string; imageDataUrl: string; suggestedAnswer: string }>(
+    'admin.profiles.mobileSuica.login.start',
     { profileId },
   ).then(({ interactionId, ...interaction }) => ({ id: interactionId, ...interaction }))
 
 export const submitMobileSuicaCaptcha = (id: string, answer: string) =>
-  adminRequest<{ profile: { id: string } }>('profiles.mobileSuica.login.complete', {
+  rpcRequest<{ profile: { id: string } }>('admin.profiles.mobileSuica.login.complete', {
     interactionId: id,
     answer,
   })
 
-export const createRpcSocket = () => {
-  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return new WebSocket(`${protocol}//${location.host}/api/ws`)
+export const updateVirtualAccount = (
+  accountId: string,
+  expectedVersion: number,
+  input: { label?: string; policy?: Record<string, unknown> },
+) => rpcRequest('admin.accounts.update', { accountId, expectedVersion, ...input })
+export const setVirtualAccountState = (
+  accountId: string,
+  expectedVersion: number,
+  action: 'freeze' | 'unfreeze' | 'close',
+) => rpcRequest(`admin.accounts.${action}`, { accountId, expectedVersion })
+export const getAccountAccess = (accountId: string) =>
+  rpcRequest<{
+    items: Array<{
+      apiKeyId: string
+      label: string
+      role: 'read' | 'trade'
+      revokedAt?: string | null
+    }>
+  }>('admin.accountAccess.list', { accountId })
+export const revokeAccountAccess = (accountId: string, apiKeyId: string) =>
+  rpcRequest('admin.accountAccess.revoke', { accountId, apiKeyId })
+export const getAccountActivity = (accountId: string) =>
+  rpcRequest<{ items: Array<{ id: string; event: string; createdAt: string }> }>(
+    'admin.accounts.activity',
+    { accountId },
+  )
+export const bindAccountAccess = (accountId: string, apiKeyId: string, role: 'read' | 'trade') =>
+  rpcRequest('admin.apiKeys.bind', { accountId, apiKeyId, role })
+
+export const migrateVirtualAccounts = (physicalAccountId: string) =>
+  rpcRequest<{ accountId: string }>('admin.accounts.migrate', { physicalAccountId })
+
+export const transferVirtualAssets = (
+  transfers: Array<Parameters<typeof transferVirtualAsset>[0]>,
+) => rpcRequest('admin.accounts.assets.transferBatch', { transfers })
+
+export interface AccountReconciliation {
+  snapshotError: boolean
+  externalOrders: Array<{ id: string; state: 'open' | 'needs_review' }>
+
+  assets: Array<{ assetKey: string; allocated: string; actual: string; unallocated: string }>
+  orders: Array<{ id: string; accountId: string; status: string; instrumentId?: string }>
+  events: Array<{ id: string; createdAt: string; detail: { assetKey?: string; delta?: string } }>
 }
+export const inspectAccountReconciliation = (physicalAccountId: string) =>
+  rpcRequest<AccountReconciliation>('admin.accounts.reconciliation.inspect', {
+    physicalAccountId,
+  })
+export const reconcileOrderReference = (orderId: string, providerOrderId: string) =>
+  rpcRequest('admin.accounts.orders.reconcile', { orderId, providerOrderId })

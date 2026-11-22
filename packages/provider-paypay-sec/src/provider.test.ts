@@ -202,7 +202,7 @@ describe('PayPay Securities provider', () => {
       accountType: 'specific',
       lotType: 'notApplicable',
     })
-    expect(await provider.invoke('balances.list', { accountId: 'other' })).toEqual([])
+    expect(await provider.invoke('balances.list', { account: 'other' })).toEqual([])
   })
 
   test('searches instruments and submits a preview using the runtime trade password', async () => {
@@ -215,7 +215,7 @@ describe('PayPay Securities provider', () => {
     expect(detail.price).toEqual({ currency: 'JPY', value: '2000' })
 
     const preview = await provider.invoke('investments.orders.preview', {
-      accountId: 'account-1',
+      account: 'account-1',
       instrumentId: '101',
       side: 'buy',
       accountType: '2',
@@ -242,7 +242,7 @@ describe('PayPay Securities provider', () => {
     const provider = createProvider(fakeClient(), { tradePassword: 'trade-secret' })
 
     await expect(
-      provider.checkOperationAvailability?.({ operation: 'investments.orders.preview' }),
+      provider.checkMethodAvailability?.({ method: 'investments.orders.preview' }),
     ).resolves.toMatchObject({
       available: true,
       orderRules: {
@@ -254,9 +254,9 @@ describe('PayPay Securities provider', () => {
       },
     })
     await expect(
-      provider.checkOperationAvailability?.({
-        operation: 'investments.orders.create',
-        input: { confirmationToken: 'confirmation-1', allowTransaction: true },
+      provider.checkMethodAvailability?.({
+        method: 'investments.orders.create',
+        params: { confirmationToken: 'confirmation-1', allowTransaction: true },
       }),
     ).resolves.toMatchObject({
       available: true,
@@ -268,10 +268,10 @@ describe('PayPay Securities provider', () => {
     const client = fakeClient()
     const provider = createProvider(client)
     const availability = (side: 'buy' | 'sell', value: string) =>
-      provider.checkOperationAvailability?.({
-        operation: 'investments.orders.preview',
-        input: {
-          accountId: 'account-1',
+      provider.checkMethodAvailability?.({
+        method: 'investments.orders.preview',
+        params: {
+          account: 'account-1',
           instrumentId: '101',
           side,
           accountType: 'specific',
@@ -285,10 +285,10 @@ describe('PayPay Securities provider', () => {
     await expect(availability('sell', '99')).resolves.toMatchObject({ available: false })
     await expect(availability('sell', '100')).resolves.toMatchObject({ available: true })
     await expect(
-      provider.checkOperationAvailability?.({
-        operation: 'investments.orders.preview',
-        input: {
-          accountId: 'account-1',
+      provider.checkMethodAvailability?.({
+        method: 'investments.orders.preview',
+        params: {
+          account: 'account-1',
           instrumentId: '101',
           side: 'sell',
           accountType: 'specific',
@@ -300,7 +300,7 @@ describe('PayPay Securities provider', () => {
 
     await expect(
       provider.invoke('investments.orders.preview', {
-        accountId: 'account-1',
+        account: 'account-1',
         instrumentId: '101',
         side: 'buy',
         accountType: 'specific',

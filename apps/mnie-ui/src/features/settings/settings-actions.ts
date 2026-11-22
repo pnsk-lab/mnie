@@ -16,6 +16,7 @@ export interface SettingsActionArgs {
   finishSmbc2fa: []
   forceProfileAvailability: [profileId: string]
   connect: []
+  connectProfile: [profileId: string]
   removeSbiPasskey: [id: string]
   updateProfile: [id: string, label: string, color: string, tradePassword?: string]
 }

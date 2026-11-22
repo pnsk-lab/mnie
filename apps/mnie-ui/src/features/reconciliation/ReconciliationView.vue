@@ -1,17 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { RefreshCw } from 'lucide-vue-next'
 import { AnimatePresence } from 'motion-v'
 import {
   confirmReconciliationProposal,
-  listAccountProfiles,
   listFinancialAccounts,
   listReconciliationProposals,
   listTransactionObservations,
   rejectReconciliationProposal,
-  syncAccountHistorySinceLast,
-  syncAllAccountHistory,
-  type AccountProfile,
   type FinancialAccount,
   type ReconciliationProposal,
   type TransactionObservation,
@@ -28,12 +23,8 @@ const error = ref('')
 const changing = ref('')
 const accounts = ref<FinancialAccount[]>([])
 const observations = ref<TransactionObservation[]>([])
-const profiles = ref<AccountProfile[]>([])
-const syncingProfileId = ref('')
-const syncMode = ref<Record<string, 'all' | 'since-last'>>({})
 const selectedObservation = ref<TransactionObservation | null>(null)
 const highlightedObservationId = ref('')
-const syncResults = ref<Record<string, { kind: 'success' | 'error'; message: string }>>({})
 let highlightTimer: ReturnType<typeof setTimeout> | undefined
 
 const amount = (proposal: ReconciliationProposal) => {
@@ -95,51 +86,18 @@ const load = async () => {
   loading.value = true
   error.value = ''
   try {
-    const [nextObservations, nextProposals, nextAccounts, nextProfiles] = await Promise.all([
+    const [nextObservations, nextProposals, nextAccounts] = await Promise.all([
       listTransactionObservations(),
       listReconciliationProposals(['proposed', 'confirmed']),
       listFinancialAccounts(),
-      listAccountProfiles(),
     ])
     observations.value = nextObservations
     proposals.value = nextProposals.items
     accounts.value = nextAccounts
-    profiles.value = nextProfiles.profiles
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '照合候補を取得できませんでした'
   } finally {
     loading.value = false
-  }
-}
-
-const syncHistory = async (profile: AccountProfile, mode: 'all' | 'since-last') => {
-  if (syncingProfileId.value) return
-  syncingProfileId.value = profile.id
-  const { [profile.id]: _previous, ...remainingResults } = syncResults.value
-  syncResults.value = remainingResults
-  try {
-    const result =
-      mode === 'all'
-        ? await syncAllAccountHistory(profile.id)
-        : await syncAccountHistorySinceLast(profile.id)
-    if (result.errors.length) {
-      throw new Error(result.errors.map((item) => item.message).join('; '))
-    }
-    syncResults.value = {
-      ...syncResults.value,
-      [profile.id]: { kind: 'success', message: `${result.synced}件を取得しました` },
-    }
-    await load()
-  } catch (cause) {
-    syncResults.value = {
-      ...syncResults.value,
-      [profile.id]: {
-        kind: 'error',
-        message: cause instanceof Error ? cause.message : '履歴を再取得できませんでした',
-      },
-    }
-  } finally {
-    syncingProfileId.value = ''
   }
 }
 
@@ -332,67 +290,6 @@ onUnmounted(() => {
       </table>
     </div>
     <p v-else-if="!loading" :class="[ui.muted, 'py-6 text-center']">保存済みの取引はありません</p>
-  </section>
-
-  <section :class="ui.panel">
-    <div :class="ui.panelHead">
-      <h2>プロバイダ</h2>
-      <span :class="ui.muted">{{ profiles.length }}件</span>
-    </div>
-    <div v-if="profiles.length" class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      <article
-        v-for="profile in profiles"
-        :key="profile.id"
-        class="grid gap-3 rounded-2xl border border-border bg-transparent p-4"
-      >
-        <div class="flex items-start gap-3">
-          <span
-            class="mt-1 h-3 w-3 shrink-0 rounded-full"
-            :style="{ backgroundColor: profile.color || profile.defaultColor }"
-          />
-          <span class="grid min-w-0 flex-1 gap-1">
-            <strong class="truncate">{{ profile.label }}</strong>
-            <small :class="ui.muted">{{ profile.providerName }}</small>
-          </span>
-        </div>
-        <div class="flex flex-wrap items-center gap-2">
-          <label class="min-w-0 flex-1 text-xs text-fg-muted">
-            取得範囲
-            <select
-              :value="syncMode[profile.id] ?? 'since-last'"
-              :class="ui.input"
-              :disabled="Boolean(syncingProfileId)"
-              @change="
-                syncMode[profile.id] = ($event.target as HTMLSelectElement).value as
-                  | 'all'
-                  | 'since-last'
-              "
-            >
-              <option value="since-last">前回以降</option>
-              <option value="all">全期間</option>
-            </select>
-          </label>
-          <UiButton
-            size="sm"
-            :disabled="Boolean(syncingProfileId)"
-            :loading="syncingProfileId === profile.id"
-            @click="syncHistory(profile, syncMode[profile.id] ?? 'since-last')"
-          >
-            <RefreshCw v-if="syncingProfileId !== profile.id" class="h-4 w-4" aria-hidden="true" />
-            履歴を取得
-          </UiButton>
-        </div>
-        <small
-          v-if="syncResults[profile.id]"
-          :class="syncResults[profile.id]?.kind === 'error' ? ui.negative : ui.positive"
-        >
-          {{ syncResults[profile.id]?.message }}
-        </small>
-      </article>
-    </div>
-    <p v-else-if="!loading" :class="[ui.muted, 'py-6 text-center']">
-      登録済みのプロバイダはありません
-    </p>
   </section>
 
   <p v-if="error" :class="ui.dialogNote" role="alert">{{ error }}</p>

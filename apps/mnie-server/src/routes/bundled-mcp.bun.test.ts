@@ -55,8 +55,8 @@ test('the bundled app routes both MCP paths to authenticated tool discovery', as
           }),
         )
         const { tools } = await client.listTools()
-        expect(tools.map((tool) => tool.name)).toContain('mnie-workspace-invoke')
-        const result = await client.callTool({ name: 'mnie-workspace-operations', arguments: {} })
+        expect(tools.map((tool) => tool.name)).toContain('mnie-portfolio-accounts-list')
+        const result = await client.callTool({ name: 'mnie-rpc-methods', arguments: {} })
         expect(result.isError).not.toBe(true)
       } finally {
         await client.close()

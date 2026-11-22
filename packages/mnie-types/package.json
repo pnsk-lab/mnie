@@ -12,7 +12,7 @@
   },
   "scripts": {
     "build": "vp pack",
-    "dev": "vp pack --watch",
+    "dev": "vp pack --watch --no-clean",
     "clean": "rm -rf dist",
     "typecheck": "tsc"
   },

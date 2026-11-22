@@ -172,6 +172,7 @@ export const useAuthAdmin = () => {
 
   const saveApiKeySettings = async (key: ApiKey) => {
     await updateApiKeySettings(key.id, {
+      accountBindings: key.accountBindings,
       maxTradesPerHour: key.maxTradesPerHour,
       maxTradesPer6Hours: key.maxTradesPer6Hours,
       maxTradesPerDay: key.maxTradesPerDay,

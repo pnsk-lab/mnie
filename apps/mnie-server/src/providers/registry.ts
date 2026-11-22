@@ -1,11 +1,11 @@
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import {
   createProvider as createMobileSuicaProvider,
   exportSession as exportMobileSuicaSession,
-  importSession as importMobileSuicaSession,
   login as loginMobileSuica,
   type MobileSuicaProfile,
 } from '@mnie/provider-mobile-suica'
+import { captchaModelPath, createCaptchaSolver, type CaptchaSolver } from '@repo/capsolve-sp'
 import {
   createProvider as createPayPayBankProvider,
   exportSession as exportPayPayBankSession,
@@ -37,21 +37,37 @@ import {
 } from '@mnie/starbucks-jp'
 import type {
   FinancialProvider,
-  OperationAvailability,
-  OperationMap,
+  MethodAvailability,
+  MethodMap,
   ProviderAvailability,
-  OperationAvailabilityRequest,
+  MethodAvailabilityRequest,
   ProfileDescriptor,
 } from '@mnie/types'
 import type { ServerConfig } from '../config'
 import type { Db } from '../db'
-import { accountProfiles, assetValuations, historySyncs, historyTransactions } from '../db/schema'
+import {
+  accountProfiles,
+  apiKeyVirtualAccounts,
+  assetValuations,
+  financialAccounts,
+  historySyncs,
+  historyTransactions,
+  physicalAccountAssets,
+  virtualAccountAssets,
+  virtualAccounts,
+  virtualAssetMovements,
+  virtualOperationEffects,
+  physicalPositionPrices,
+  virtualOrders,
+  virtualOrderQuotes,
+  accountAudit,
+} from '../db/schema'
 import { syncInitialHistory } from '../history'
 import { withProfileLock } from '../profile-lock'
 import { connectSbi } from './sbi'
 import { randomId } from '../security/crypto'
 import { deleteSecret, readSecret, saveSecret } from '../security/keyring'
-import { operationAvailability } from './operations'
+import { methodAvailability } from './operations'
 import type {
   SbiPasskeySource,
   StoredMobileSuicaSecret,
@@ -64,15 +80,45 @@ import type {
 } from './credentials'
 import { openPayPaySec } from './paypay-sec'
 import { normalizePayPaySecCredential } from './paypay-sec-options'
+import { provisionProfileAccounts } from '../physical-accounts'
 
 export type AccountProfile = typeof accountProfiles.$inferSelect
 
 export interface OpenProvider {
   profile: AccountProfile
-  provider: FinancialProvider<OperationMap>
+  provider: FinancialProvider<MethodMap>
   persist(): Promise<void>
   /** Releases server-side resources without logging out the persisted remote session. */
   release(): Promise<void>
+}
+
+const PARALLEL_INVOKE_PROVIDERS = new Set(['sbisec', 'paypay-sec'])
+
+const serializeProviderSession = (open: OpenProvider): OpenProvider => {
+  if (PARALLEL_INVOKE_PROVIDERS.has(open.profile.provider)) return open
+  const lock = `provider-session:${open.profile.id}`
+  const run = <T>(task: () => Promise<T> | T) => withProfileLock(lock, async () => task())
+  const provider = open.provider
+  return {
+    ...open,
+    provider: {
+      ...provider,
+      checkAvailability: () => run(() => provider.checkAvailability()),
+      ...(provider.checkMethodAvailability
+        ? {
+            checkMethodAvailability: (request: MethodAvailabilityRequest) =>
+              run(() => provider.checkMethodAvailability!(request)),
+          }
+        : {}),
+      invoke: ((name: string, request: unknown) =>
+        run(() =>
+          provider.invoke(name as never, request as never),
+        )) as OpenProvider['provider']['invoke'],
+      close: () => run(() => provider.close()),
+    },
+    persist: () => run(() => open.persist()),
+    release: () => run(() => open.release()),
+  }
 }
 
 export type ConnectionResult =
@@ -114,7 +160,7 @@ interface PendingMobileSuicaInteraction {
 }
 
 const asProvider = <Operations>(provider: FinancialProvider<Operations>) =>
-  provider as unknown as FinancialProvider<OperationMap>
+  provider as unknown as FinancialProvider<MethodMap>
 
 const message = (cause: unknown) =>
   cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : String(cause)
@@ -159,8 +205,14 @@ const splitDateRange = (from: Date, to: Date): [Date, Date, Date, Date] | undefi
 }
 
 export class ProviderRegistry {
+  #captchaSolver?: Promise<CaptchaSolver>
   readonly #pendingSmbc = new Map<string, PendingSmbcInteraction>()
   readonly #pendingMobileSuica = new Map<string, PendingMobileSuicaInteraction>()
+
+  private solveCaptcha(image: Uint8Array) {
+    this.#captchaSolver ??= createCaptchaSolver(captchaModelPath())
+    return this.#captchaSolver.then((solver) => solver.solve(image))
+  }
 
   constructor(
     readonly db: Db,
@@ -404,21 +456,87 @@ export class ProviderRegistry {
         throw cause
       }
     }
+    if (providerId !== 'smbc-direct') {
+      try {
+        await provisionProfileAccounts(this.db, this, id)
+      } catch (cause) {
+        await this.deleteProfile(id)
+        throw cause
+      }
+    }
     return { id, provider: providerId, label, createdAt: now, updatedAt: now }
   }
 
   async deleteProfile(profileId: string) {
     const profile = await this.profile(profileId)
-    await this.db.transaction(async (tx) => {
-      await tx.delete(assetValuations).where(eq(assetValuations.profileId, profile.id))
-      await tx.delete(historyTransactions).where(eq(historyTransactions.profileId, profile.id))
-      await tx.delete(historySyncs).where(eq(historySyncs.profileId, profile.id))
-      await tx.delete(accountProfiles).where(eq(accountProfiles.id, profile.id))
+    this.db.transaction((tx) => {
+      const physicalIds = tx
+        .select({ id: financialAccounts.id })
+        .from(financialAccounts)
+        .where(eq(financialAccounts.profileId, profile.id))
+        .all()
+        .map((account) => account.id)
+      const accounts = physicalIds.length
+        ? tx
+            .select()
+            .from(virtualAccounts)
+            .where(inArray(virtualAccounts.physicalAccountId, physicalIds))
+            .all()
+        : []
+      const virtualIds = accounts.map((account) => account.id)
+      if (
+        accounts.some((account) => account.kind !== 'system') ||
+        (virtualIds.length &&
+          tx
+            .select()
+            .from(virtualAssetMovements)
+            .where(inArray(virtualAssetMovements.virtualAccountId, virtualIds))
+            .get())
+      )
+        throw new Error('connection has account assets or audit history; it cannot be deleted')
+      if (virtualIds.length) {
+        if (
+          tx.select().from(virtualOrders).where(inArray(virtualOrders.accountId, virtualIds)).get()
+        )
+          throw new Error('connection has orders and cannot be deleted')
+        tx.delete(virtualOrderQuotes).where(inArray(virtualOrderQuotes.accountId, virtualIds)).run()
+        tx.delete(accountAudit).where(inArray(accountAudit.accountId, virtualIds)).run()
+        tx.delete(apiKeyVirtualAccounts)
+          .where(inArray(apiKeyVirtualAccounts.virtualAccountId, virtualIds))
+          .run()
+        tx.delete(virtualOperationEffects)
+          .where(inArray(virtualOperationEffects.virtualAccountId, virtualIds))
+          .run()
+        tx.delete(virtualAccountAssets)
+          .where(inArray(virtualAccountAssets.virtualAccountId, virtualIds))
+          .run()
+        tx.delete(virtualAccounts).where(inArray(virtualAccounts.id, virtualIds)).run()
+      }
+      if (physicalIds.length) {
+        tx.delete(physicalPositionPrices)
+          .where(inArray(physicalPositionPrices.physicalAccountId, physicalIds))
+          .run()
+        tx.delete(physicalAccountAssets)
+          .where(inArray(physicalAccountAssets.physicalAccountId, physicalIds))
+          .run()
+        tx.delete(financialAccounts).where(inArray(financialAccounts.id, physicalIds)).run()
+      }
+      tx.delete(assetValuations).where(eq(assetValuations.profileId, profile.id)).run()
+      tx.delete(historyTransactions).where(eq(historyTransactions.profileId, profile.id)).run()
+      tx.delete(historySyncs).where(eq(historySyncs.profileId, profile.id)).run()
+      tx.delete(accountProfiles).where(eq(accountProfiles.id, profile.id)).run()
     })
     await deleteSecret(profile.keyringAccount)
   }
 
   async open(
+    profileOrId: AccountProfile | string,
+    options: { forceLogin?: boolean } = {},
+  ): Promise<OpenProvider> {
+    return serializeProviderSession(await this.#open(profileOrId, options))
+  }
+
+  async #open(
     profileOrId: AccountProfile | string,
     options: { forceLogin?: boolean } = {},
   ): Promise<OpenProvider> {
@@ -611,16 +729,25 @@ export class ProviderRegistry {
 
     if (profile.provider === 'mobile-suica') {
       const secret = await readSecret<StoredMobileSuicaSecret>(profile.keyringAccount)
-      if (!secret.session) throw new Error('Mobile Suica authentication is required')
-      const imported = await importMobileSuicaSession(secret.session)
-      const provider = asProvider(createMobileSuicaProvider(imported))
+      if (!secret.user || !secret.password) {
+        throw new Error('Mobile Suica credentials are not stored')
+      }
+      const baseURL = this.config.mobileSuicaBaseUrl
+      if (!baseURL) throw new Error('MOBILE_SUICA_BASE_URL is required')
+      const session = await loginMobileSuica({
+        baseURL,
+        user: secret.user,
+        password: secret.password,
+        onCaptcha: ({ image }) => this.solveCaptcha(image),
+      })
+      const provider = asProvider(createMobileSuicaProvider(session))
       return {
         profile,
         provider,
         persist: async () =>
           saveSecret(profile.keyringAccount, {
             ...secret,
-            session: exportMobileSuicaSession(imported),
+            session: exportMobileSuicaSession(session),
           } satisfies StoredMobileSuicaSecret),
         release: async () => {},
       }
@@ -753,6 +880,17 @@ export class ProviderRegistry {
       ...secret,
       session: exportSmbcDirectSession(imported),
     } satisfies StoredSmbcDirectSecret)
+    // smbc-direct defers account provisioning to the first completed login;
+    // later re-authentications only restart the session.
+    if (
+      this.db
+        .select({ id: financialAccounts.id })
+        .from(financialAccounts)
+        .where(eq(financialAccounts.profileId, pending.profile.id))
+        .all().length === 0
+    ) {
+      await provisionProfileAccounts(this.db, this, pending.profile.id)
+    }
     return {
       connection: {
         status: 'connected',
@@ -772,10 +910,7 @@ export class ProviderRegistry {
     }
   }
 
-  async startMobileSuicaLogin(
-    input: Record<string, unknown>,
-    solveCaptcha: (image: Uint8Array) => Promise<string>,
-  ) {
+  async startMobileSuicaLogin(input: Record<string, unknown>) {
     const baseURL = this.config.mobileSuicaBaseUrl
     if (!baseURL) throw new Error('MOBILE_SUICA_BASE_URL is required')
     const reauthenticateProfileId = optionalCredential(input.profileId)
@@ -828,7 +963,7 @@ export class ProviderRegistry {
       password,
       onCaptcha: async ({ image, contentType }) => {
         const interactionId = randomId('interaction')
-        const suggestedAnswer = await solveCaptcha(image)
+        const suggestedAnswer = await this.solveCaptcha(image)
         if (captchaAttempt > 0) return suggestedAnswer
         captchaAttempt += 1
         const answer = new Promise<string>((resolve) => {
@@ -879,6 +1014,7 @@ export class ProviderRegistry {
       })
       try {
         await syncInitialHistory(this.db, this, pending.profileId)
+        await provisionProfileAccounts(this.db, this, pending.profileId)
       } catch (cause) {
         await this.deleteProfile(pending.profileId)
         throw cause
@@ -894,7 +1030,7 @@ export class ProviderRegistry {
 
   async availability(
     profileOrId: AccountProfile | string,
-    request?: OperationAvailabilityRequest,
+    request?: MethodAvailabilityRequest,
   ): Promise<ProviderAvailability> {
     try {
       const profile =
@@ -916,41 +1052,41 @@ export class ProviderRegistry {
     } catch (cause) {
       return {
         connection: { ok: false, reason: 'AUTHENTICATION_REQUIRED', message: message(cause) },
-        operations: {},
+        methods: {},
         checkedAt: new Date().toISOString(),
       }
     }
   }
 
   async availabilityForProvider(
-    provider: FinancialProvider<OperationMap>,
-    request?: OperationAvailabilityRequest,
+    provider: FinancialProvider<MethodMap>,
+    request?: MethodAvailabilityRequest,
   ): Promise<ProviderAvailability> {
     const checkedAt = new Date().toISOString()
     const rawConnection = await provider.checkAvailability()
     const connection = rawConnection.ok
       ? rawConnection
       : { ...rawConnection, message: message(rawConnection.message) }
-    const advertised = provider.operations()
-    const requestedOperations = request ? [request.operation] : advertised
-    const operations = Object.fromEntries(
+    const advertised = provider.methods()
+    const requestedMethods = request ? [request.method] : advertised
+    const methods = Object.fromEntries(
       await Promise.all(
-        requestedOperations.map(async (operation) => {
-          const availability: OperationAvailability = connection.ok
-            ? await operationAvailability(provider, {
-                operation,
-                input: request?.operation === operation ? request.input : undefined,
+        requestedMethods.map(async (method) => {
+          const availability: MethodAvailability = connection.ok
+            ? await methodAvailability(provider, {
+                method,
+                params: request?.method === method ? request.params : undefined,
               })
             : {
                 available: false,
                 reason: connection.reason,
                 message: connection.message,
               }
-          return [operation, availability] as const
+          return [method, availability] as const
         }),
       ),
     )
-    return { connection, operations, checkedAt }
+    return { connection, methods, checkedAt }
   }
 
   supportsAssetValuation(profile: AccountProfile) {
@@ -966,9 +1102,7 @@ export class ProviderRegistry {
   }
 
   sessionRefreshIntervalMs(profile: AccountProfile) {
-    return profile.provider === 'smbc-direct' || profile.provider === 'mobile-suica'
-      ? 5 * 60_000
-      : undefined
+    return profile.provider === 'smbc-direct' ? 5 * 60_000 : undefined
   }
 
   historyListInput(profile: AccountProfile, from: Date, to: Date) {

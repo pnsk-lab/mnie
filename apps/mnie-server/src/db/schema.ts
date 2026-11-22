@@ -1,4 +1,6 @@
+import { sql } from 'drizzle-orm'
 import { integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import type { FinancialAssetChange } from '@mnie/types'
 
 export const appState = sqliteTable('app_state', {
   key: text('key').primaryKey(),
@@ -97,6 +99,19 @@ export const financialAccounts = sqliteTable(
       table.providerAccountId,
     ),
   ],
+)
+
+export const physicalAccountAssets = sqliteTable(
+  'physical_account_assets',
+  {
+    physicalAccountId: text('physical_account_id').notNull(),
+    assetKey: text('asset_key').notNull(),
+    assetKind: text('asset_kind', { enum: ['cash', 'security'] }).notNull(),
+    amount: text('amount').notNull(),
+    version: integer('version').notNull().default(1),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.physicalAccountId, table.assetKey] })],
 )
 
 /** A fetched, normalized history page. Raw provider payloads are added separately. */
@@ -252,6 +267,7 @@ export const apiKeys = sqliteTable(
     scopes: text('scopes', { mode: 'json' }).$type<string[] | null>(),
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
     lastUsedAt: integer('last_used_at', { mode: 'timestamp_ms' }),
+    expiresAt: integer('expires_at', { mode: 'timestamp_ms' }),
     revokedAt: integer('revoked_at', { mode: 'timestamp_ms' }),
   },
   (table) => [uniqueIndex('api_keys_token_hash_unique').on(table.tokenHash)],
@@ -267,6 +283,99 @@ export const apiKeyTradeUsage = sqliteTable(
     updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },
   (table) => [primaryKey({ columns: [table.apiKeyId, table.window, table.hourBucket] })],
+)
+
+export const virtualAccounts = sqliteTable(
+  'virtual_accounts',
+  {
+    id: text('id').primaryKey(),
+    physicalAccountId: text('physical_account_id').notNull(),
+    label: text('label').notNull(),
+    kind: text('kind', { enum: ['personal', 'agent', 'system'] }).notNull(),
+    systemRole: text('system_role', { enum: ['unallocated'] }),
+    status: text('status', {
+      enum: ['active', 'frozen', 'reconciliation_required', 'closed'],
+    }).notNull(),
+    color: text('color'),
+    icon: text('icon'),
+    policy: text('policy_json', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+    version: integer('version').notNull().default(1),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+    closedAt: integer('closed_at', { mode: 'timestamp_ms' }),
+  },
+  (table) => [
+    uniqueIndex('virtual_accounts_physical_system_role_unique').on(
+      table.physicalAccountId,
+      table.systemRole,
+    ),
+  ],
+)
+
+export const virtualAccountAssets = sqliteTable(
+  'virtual_account_assets',
+  {
+    virtualAccountId: text('virtual_account_id').notNull(),
+    assetKey: text('asset_key').notNull(),
+    assetKind: text('asset_kind', { enum: ['cash', 'security'] }).notNull(),
+    available: text('available').notNull(),
+    reserved: text('reserved').notNull(),
+    pending: text('pending').notNull(),
+    costBasis: text('cost_basis_json', { mode: 'json' }).$type<unknown>(),
+    version: integer('version').notNull().default(1),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.virtualAccountId, table.assetKey] })],
+)
+
+export const virtualAssetMovements = sqliteTable(
+  'virtual_asset_movements',
+  {
+    id: text('id').primaryKey(),
+    virtualAccountId: text('virtual_account_id').notNull(),
+    assetKey: text('asset_key').notNull(),
+    availableDelta: text('available_delta').notNull(),
+    reservedDelta: text('reserved_delta').notNull(),
+    pendingDelta: text('pending_delta').notNull(),
+    eventType: text('event_type').notNull(),
+    referenceType: text('reference_type').notNull(),
+    referenceId: text('reference_id').notNull(),
+    metadata: text('metadata_json', { mode: 'json' }).$type<Record<string, unknown>>(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [
+    uniqueIndex('virtual_asset_movements_reference_unique').on(
+      table.virtualAccountId,
+      table.assetKey,
+      table.referenceType,
+      table.referenceId,
+    ),
+  ],
+)
+
+export const virtualOperationEffects = sqliteTable(
+  'virtual_operation_effects',
+  {
+    virtualAccountId: text('virtual_account_id').notNull(),
+    providerReferenceId: text('provider_reference_id').notNull(),
+    movementReferenceId: text('movement_reference_id').notNull(),
+    changes: text('changes_json', { mode: 'json' }).$type<FinancialAssetChange[]>().notNull(),
+    status: text('status', { enum: ['active', 'reversed'] }).notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.virtualAccountId, table.providerReferenceId] })],
+)
+
+export const apiKeyVirtualAccounts = sqliteTable(
+  'api_key_virtual_accounts',
+  {
+    apiKeyId: text('api_key_id').notNull(),
+    virtualAccountId: text('virtual_account_id').notNull(),
+    role: text('role', { enum: ['read', 'trade'] }).notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.apiKeyId, table.virtualAccountId] })],
 )
 
 export const oauthClients = sqliteTable('oauth_clients', {
@@ -300,3 +409,97 @@ export const oauthRefreshTokens = sqliteTable('oauth_refresh_tokens', {
   revokedAt: integer('revoked_at', { mode: 'timestamp_ms' }),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 })
+
+export const virtualOrderQuotes = sqliteTable('virtual_order_quotes', {
+  id: text('id').primaryKey(),
+  accountId: text('virtual_account_id').notNull(),
+  principal: text('principal').notNull(),
+  accountVersion: integer('account_version').notNull(),
+  operation: text('operation').notNull(),
+  requestHash: text('request_hash').notNull(),
+  request: text('request_json', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+  sealedToken: text('sealed_token').notNull(),
+  changes: text('changes_json', { mode: 'json' }).$type<FinancialAssetChange[]>().notNull(),
+  preview: text('preview_json', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+  consumedAt: integer('consumed_at', { mode: 'timestamp_ms' }),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+})
+
+export const virtualOrders = sqliteTable(
+  'virtual_orders',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('virtual_account_id').notNull(),
+    physicalAccountId: text('physical_account_id').notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    requestHash: text('request_hash').notNull(),
+    request: text('request_json', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+    state: text('state').notNull(),
+    providerOrderId: text('provider_order_id'),
+    reservationId: text('reservation_id'),
+    changes: text('changes_json', { mode: 'json' }).$type<FinancialAssetChange[]>().notNull(),
+    result: text('result_json', { mode: 'json' }).$type<Record<string, unknown>>(),
+    error: text('error'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [
+    uniqueIndex('virtual_orders_idempotency_unique').on(table.accountId, table.idempotencyKey),
+    uniqueIndex('virtual_orders_broker_reference_unique')
+      .on(table.physicalAccountId, table.providerOrderId)
+      .where(
+        sql`${table.providerOrderId} IS NOT NULL AND json_extract(${table.request}, '$.parentId') IS NULL`,
+      ),
+  ],
+)
+
+export const accountAudit = sqliteTable('account_audit', {
+  id: text('id').primaryKey(),
+  accountId: text('virtual_account_id').notNull(),
+  event: text('event').notNull(),
+  detail: text('detail_json', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+})
+
+export const physicalPositionPrices = sqliteTable(
+  'physical_position_prices',
+  {
+    physicalAccountId: text('physical_account_id').notNull(),
+    assetKey: text('asset_key').notNull(),
+    price: text('price_json', { mode: 'json' })
+      .$type<{ currency: string; value: string }>()
+      .notNull(),
+    costBasis: text('cost_basis_json', { mode: 'json' }).$type<{
+      currency: string
+      value: string
+    }>(),
+    name: text('name'),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.physicalAccountId, table.assetKey] })],
+)
+
+export const virtualAccountSnapshots = sqliteTable(
+  'virtual_account_snapshots',
+  {
+    accountId: text('virtual_account_id').notNull(),
+    capturedAt: integer('captured_at', { mode: 'timestamp_ms' }).notNull(),
+    snapshot: text('snapshot_json', { mode: 'json' })
+      .$type<import('@mnie/types').AssetSnapshot>()
+      .notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.accountId, table.capturedAt] })],
+)
+
+export const externalOrderReservations = sqliteTable(
+  'external_order_reservations',
+  {
+    physicalAccountId: text('physical_account_id').notNull(),
+    providerOrderId: text('provider_order_id').notNull(),
+    changes: text('changes_json', { mode: 'json' }).$type<FinancialAssetChange[]>().notNull(),
+    state: text('state', { enum: ['open', 'closed', 'needs_review'] }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.physicalAccountId, table.providerOrderId] })],
+)

@@ -1,6 +1,6 @@
 import type {
   FinancialProvider,
-  OperationMap,
+  MethodMap,
   PortfolioOverview,
   PortfolioOverviewComponent,
   PortfolioOverviewError,
@@ -11,20 +11,20 @@ import type {
 export interface OverviewProfile {
   descriptor: ProfileDescriptor
   use(
-    action: (provider: FinancialProvider<OperationMap>) => Promise<PortfolioOverviewComponent>,
+    action: (provider: FinancialProvider<MethodMap>) => Promise<PortfolioOverviewComponent>,
   ): Promise<PortfolioOverviewComponent>
 }
 
 const messageOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause))
 
 const invokeOptional = async (
-  provider: FinancialProvider<OperationMap>,
+  provider: FinancialProvider<MethodMap>,
   profile: ProfileDescriptor,
   operation: string,
   input: Record<string, unknown>,
   errors: PortfolioOverviewError[],
 ) => {
-  if (!provider.operations().includes(operation)) return undefined
+  if (!provider.methods().includes(operation)) return undefined
   try {
     return await provider.invoke(operation, input)
   } catch (cause) {

@@ -20,7 +20,7 @@ describe('tradeAdapterFor', () => {
         sellAll: false,
       }),
     ).toEqual({
-      accountId: 'profile-1',
+      account: 'profile-1',
       instrumentId: 'US0378331005',
       side: 'buy',
       accountType: 'growthInvestment',

@@ -1,13 +1,13 @@
 import { connectMnie } from '@repo/client-mnie'
 
-const profile = await connectMnie({
+const client = await connectMnie({
   baseURL: 'https://mnie.example.com',
   token: 'your-token-here',
-  provider: 'sbisec',
-  profileId: 'your-sbi-profile-id',
 })
 
-const _accounts = await profile.invoke('accounts.list', {})
-const _balances = await profile.invoke('balances.list', {})
+const _methods = await client.methods()
+const _accounts = await client.accounts()
+const _valuation = await client.call('portfolio.valuation.get', { baseCurrency: 'JPY' })
+const _balances = await client.account('your-account-id').invoke('balances.list', {})
 
-profile.close()
+client.close()

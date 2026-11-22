@@ -305,7 +305,7 @@ const backFromProviderSetup = () => {
 const startSmbcReauthentication = async () => {
   if (!editedProfile.value) return
   selectedProfileId.value = editedProfile.value.id
-  await action('connect')
+  await action('connectProfile', editedProfile.value.id)
 }
 
 const confirmProfileDeletion = async () => {
@@ -350,9 +350,11 @@ const saveEditingApiKey = async () => {
 </script>
 
 <template>
-  <section class="grid min-h-[calc(100dvh-9rem)] min-w-0 max-w-full gap-0 lg:block">
+  <section
+    class="grid min-h-[calc(100dvh-9rem)] min-w-0 max-w-full flex-none gap-0 lg:grid-cols-[18rem_minmax(0,1fr)]"
+  >
     <aside
-      class="min-w-0 border-b border-border pb-4 lg:fixed lg:top-8 lg:left-[9rem] lg:z-10 lg:h-fit lg:max-h-[calc(100dvh-4rem)] lg:w-72 lg:overflow-y-auto lg:border-r lg:border-b-0 lg:pr-5 lg:pb-0"
+      class="min-w-0 border-b border-border pb-4 lg:sticky lg:top-0 lg:z-10 lg:h-fit lg:max-h-[calc(100dvh-4rem)] lg:self-start lg:overflow-y-auto lg:border-r lg:border-b-0 lg:pr-5 lg:pb-0"
       aria-label="Settings"
     >
       <div class="grid gap-5">
@@ -394,7 +396,7 @@ const saveEditingApiKey = async () => {
     </aside>
 
     <div
-      class="settings-content grid min-w-0 content-start pt-5 lg:ml-72 lg:pl-7 lg:pt-0"
+      class="settings-content grid min-w-0 content-start pt-5 lg:pl-7 lg:pt-0"
       :class="isProviderSetup ? 'gap-3' : 'gap-8'"
     >
       <button
@@ -616,20 +618,14 @@ const saveEditingApiKey = async () => {
                   </AsyncButton>
                 </div>
                 <div
-                  v-if="selectedProvider === 'smbc-direct' || selectedProvider === 'mobile-suica'"
+                  v-if="selectedProvider === 'smbc-direct'"
                   v-for="job in cronJobs.filter((value) => value.id === 'provider-sessions')"
                   :key="job.id"
                   class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-transparent p-4 text-sm"
                 >
                   <div>
                     <h4 class="font-black text-fg">{{ job.label }}</h4>
-                    <p class="mt-1 text-fg-secondary">
-                      {{
-                        selectedProvider === 'mobile-suica'
-                          ? '5 分ごとに利用履歴を取得して接続を維持します。'
-                          : '5 分ごとに接続を維持します。'
-                      }}
-                    </p>
+                    <p class="mt-1 text-fg-secondary">5 分ごとに接続を維持します。</p>
                   </div>
                   <span :class="job.lastError ? 'text-negative' : 'text-positive'">
                     {{ job.lastError ? job.lastError : job.running ? '実行中' : '有効' }}

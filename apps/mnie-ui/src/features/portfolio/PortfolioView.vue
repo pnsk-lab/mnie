@@ -269,7 +269,6 @@ const historyChart = computed(() => {
       yTicks: [],
     }
   const dates = extent(points, (item) => item.date)
-  const values = extent(points, (item) => item.value)
   const firstDate = dates[0] ?? points[0]!.date
   const lastDate = dates[1] ?? firstDate
   const fullStart = firstDate.getTime()
@@ -286,14 +285,16 @@ const historyChart = computed(() => {
   const visiblePoints = points.filter(
     (point) => point.date >= xDomain[0] && point.date <= xDomain[1],
   )
-  const min = 0
+  const scopedPoints = visiblePoints.length ? visiblePoints : points
+  const values = extent(scopedPoints, (item) => item.value)
+  const min = values[0] ?? 0
   const max = values[1] ?? min
-  const padding = Math.max(max * 0.05, 1)
+  const padding = max > min ? (max - min) * 0.05 : Math.max(max * 0.05, 1)
   const x = scaleTime()
     .domain(xDomain)
     .range([68, historyViewWidth.value - 12])
   const y = scaleLinear()
-    .domain([min, max + padding])
+    .domain([min >= 0 ? Math.max(0, min - padding) : min - padding, max + padding])
     .range([historyChartBottom.value, 12])
   const layers = providers.map(([profileId, [label, color]], providerIndex) => {
     const values = points.map((point) => {
@@ -322,7 +323,7 @@ const historyChart = computed(() => {
     domainEnd: xDomain[1].getTime(),
     fullStart,
     fullEnd,
-    points: (visiblePoints.length ? visiblePoints : points).map((item) => ({
+    points: scopedPoints.map((item) => ({
       ...item,
       x: x(item.date),
       y: y(item.value),
@@ -797,7 +798,7 @@ const confirmCancel = () => {
         </div>
         <div :class="ui.holdingsBody">
           <div :class="ui.holdingsHead">
-            <span>プロファイル</span>
+            <span>アカウント</span>
             <span>銘柄</span>
             <span>タイプ</span>
             <span>数量</span>
@@ -810,7 +811,7 @@ const confirmCancel = () => {
               <span
                 class="col-span-2 truncate text-sm font-semibold text-fg-secondary md:col-span-1"
               >
-                {{ position.profileLabel ?? '-' }}
+                {{ position.accountLabel ?? '—' }}
               </span>
               <button
                 class="grid gap-1 text-left text-fg"
@@ -875,9 +876,6 @@ const confirmCancel = () => {
                   >{{ order.side === 'buy' ? '買付' : '売却' }} ・
                   {{ orderQuantityText(order) }}</small
                 >
-                <small v-if="order.profileLabel" class="text-primary">
-                  {{ order.providerName }} / {{ order.profileLabel }}
-                </small>
                 <small :class="[ui.statusBadge, order.status === '注文中' && ui.pendingBadge]">
                   {{ order.status }}
                 </small>

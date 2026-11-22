@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vite-plus/test'
+import { describe, expect, test } from 'bun:test'
 import type { Transaction } from '@mnie/types'
 import { createDb } from './db'
 import { persistTransactionObservations, type ObservationProfile } from './observations'
@@ -255,9 +255,11 @@ describe('reconciliation store', () => {
       }),
     ).resolves.toEqual({ items: [confirmed] })
     await expect(
-      listEconomicEvents(db, { accountId: bank!.observation.accountId }),
+      listEconomicEvents(db, { financialAccountId: bank!.observation.accountId }),
     ).resolves.toEqual({ items: [confirmed] })
-    await expect(listEconomicEvents(db, { accountId: 'unrelated-account' })).resolves.toEqual({
+    await expect(
+      listEconomicEvents(db, { financialAccountId: 'unrelated-account' }),
+    ).resolves.toEqual({
       items: [],
     })
     await expect(listEconomicEvents(db, { from: 'invalid' })).rejects.toThrow(

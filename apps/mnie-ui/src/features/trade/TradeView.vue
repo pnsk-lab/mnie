@@ -74,13 +74,13 @@ defineProps<
     providerPositions: ProviderPosition[]
     selectedPosition?: Position
     positions: Position[]
-    brokerageProfiles: Array<{
+    brokerageAccounts: Array<{
       id: string
       providerName: string
       label: string
     }>
-    selectedProfileId: string
-    profileName: string
+    selectedAccountId: string
+    accountName: string
     chartLoading: boolean
     orderBusy: boolean
     orderNotice: string
@@ -163,7 +163,7 @@ const emit = defineEmits<{
   reconnect: []
   openSearch: []
   selectStock: [stock: Stock]
-  selectProfile: [profileId: string]
+  selectAccount: [accountId: string]
   downloadCsv: []
   estimate: []
   confirmOrder: []
@@ -195,13 +195,13 @@ const emit = defineEmits<{
           <label class="relative block min-w-0">
             <span class="sr-only">取引口座を選択</span>
             <select
-              :value="selectedProfileId"
+              :value="selectedAccountId"
               :disabled="orderBusy"
               class="h-9 max-w-full cursor-pointer appearance-none rounded-full border border-border bg-inset py-1 pr-9 pl-4 text-xs font-bold text-primary-soft outline-none transition hover:border-border-strong focus:border-primary-focus focus:ring-2 focus:ring-primary-focus/20 sm:min-w-64"
-              @change="emit('selectProfile', ($event.target as HTMLSelectElement).value)"
+              @change="emit('selectAccount', ($event.target as HTMLSelectElement).value)"
             >
-              <option v-for="profile in brokerageProfiles" :key="profile.id" :value="profile.id">
-                {{ profile.providerName }} / {{ profile.label }}
+              <option v-for="account in brokerageAccounts" :key="account.id" :value="account.id">
+                {{ account.providerName }} / {{ account.label }}
               </option>
             </select>
             <ChevronDown
@@ -215,7 +215,7 @@ const emit = defineEmits<{
             <p :class="ui.eyebrow">{{ selectedStock.symbol }}</p>
             <h2>{{ selectedStock.name }}</h2>
             <p v-if="orderInputMode === 'amount'" class="mt-1 text-xs text-primary">
-              取引口座: {{ profileName }}
+              取引口座: {{ accountName }}
             </p>
           </div>
           <div :class="ui.quoteBox">
@@ -484,7 +484,6 @@ const emit = defineEmits<{
                         ></i>
                         <span class="grid min-w-0">
                           <strong class="truncate text-sm">{{ position.providerName }}</strong>
-                          <small class="truncate text-fg-faint">{{ position.profileLabel }}</small>
                         </span>
                       </span>
                       <strong class="text-right text-sm">{{ position.quantity }}株</strong>

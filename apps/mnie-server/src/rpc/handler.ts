@@ -1,64 +1,40 @@
-import type { OpenProvider, ProviderRegistry } from '../providers/registry'
+import type { ProviderRegistry } from '../providers/registry'
 import type { Db } from '../db'
-import {
-  assertAndConsumeApiKeyTradeLimits,
-  assertApiKeyMethodAllowed,
-  isTransactionOperation,
-} from '../security/trade-limits'
+import { FinancialAccountService } from '../financial-account-service'
+import { ProfileRpcService } from '../profile-service'
 import type { JsonRpcRequest } from './protocol'
 import { objectParams, rpcError, rpcResult } from './protocol'
-import { invokeWorkspace, WORKSPACE_OPERATIONS } from './workspace'
+import { assertPortfolioScope, invokePortfolio, PORTFOLIO_METHODS } from './portfolio'
 import type { AdminRpcService } from './admin'
-import { ADMIN_OPERATIONS } from './admin-operations'
-import { operationAvailability, ProviderOperationUnavailableError } from '../providers/operations'
+import { STATIC_METHODS } from './methods'
 
 export interface RpcSocketState {
-  open?: OpenProvider
+  service?: FinancialAccountService
+  profileService?: ProfileRpcService
   apiKeyId?: string
   scopes?: string[]
   owner: boolean
 }
 
-export const RPC_METHODS = [
-  'rpc.methods',
-  'admin.operations',
-  'admin.invoke',
-  'profile.operations',
-  'profile.capabilities',
-  'profile.availability',
-  'profile.connect',
-  'profile.connection.complete',
-  'profile.invoke',
-  'workspace.operations',
-  'workspace.invoke',
-] as const
+export { STATIC_METHODS }
+export const RPC_METHODS = STATIC_METHODS
+
+export const callerMethods = (state: RpcSocketState): readonly string[] =>
+  state.owner
+    ? STATIC_METHODS
+    : (STATIC_METHODS as readonly string[]).filter((method) => !method.startsWith('admin.'))
+
+const SESSION_METHODS = new Set([
+  'admin.profiles.connect',
+  'admin.profiles.connection.complete',
+  'admin.profiles.sync',
+])
+export const usesSessionState = (method: string) =>
+  method.startsWith('account.') || method.startsWith('profile.') || SESSION_METHODS.has(method)
 
 const assertReadScope = (state: RpcSocketState) => {
   if (state.apiKeyId && !(state.scopes ?? []).includes('read')) {
     throw new Error('missing OAuth scope: read')
-  }
-}
-
-const assertOperationScope = (state: RpcSocketState, operation: string, input?: unknown) => {
-  if (!state.apiKeyId) return
-  const required = isTransactionOperation(operation, input) ? 'trade' : 'read'
-  if (!(state.scopes ?? []).includes(required)) throw new Error(`missing OAuth scope: ${required}`)
-}
-
-const isReconciliationWrite = (operation: string) =>
-  operation === 'reconciliation.confirm' ||
-  operation === 'reconciliation.reject' ||
-  operation === 'account-links.upsert' ||
-  operation === 'account-links.delete'
-
-const assertWorkspaceOperationScope = (state: RpcSocketState, operation: string) => {
-  assertReadScope(state)
-  if (
-    state.apiKeyId &&
-    isReconciliationWrite(operation) &&
-    !(state.scopes ?? []).includes('reconcile')
-  ) {
-    throw new Error('missing OAuth scope: reconcile')
   }
 }
 
@@ -71,25 +47,10 @@ export const tradeLimitParams = (
 }
 
 export const closeOpenProvider = async (state: RpcSocketState) => {
-  const open = state.open
-  state.open = undefined
-  if (!open) return
-  try {
-    await open.persist()
-  } finally {
-    await open.release()
-  }
-}
-
-const profileProvider = async (
-  providers: ProviderRegistry,
-  state: RpcSocketState,
-  profileId: string,
-) => {
-  if (state.open?.profile.id === profileId) return state.open.provider
-  await closeOpenProvider(state)
-  state.open = await providers.open(profileId)
-  return state.open.provider
+  await state.service?.close()
+  state.service = undefined
+  await state.profileService?.close()
+  state.profileService = undefined
 }
 
 export const handleRpc = async (
@@ -99,119 +60,83 @@ export const handleRpc = async (
   state: RpcSocketState,
   request: JsonRpcRequest,
 ) => {
-  if (request.method === 'rpc.methods') return rpcResult(request.id, RPC_METHODS)
+  if (request.method === 'rpc.methods') return rpcResult(request.id, callerMethods(state))
 
-  if (request.method === 'admin.operations') {
+  if (typeof request.method === 'string' && request.method.startsWith('admin.')) {
     if (!state.owner) throw new Error('owner session is required')
-    return rpcResult(request.id, ADMIN_OPERATIONS)
-  }
-
-  if (request.method === 'admin.invoke') {
-    if (!state.owner) throw new Error('owner session is required')
-    const params = objectParams(request.params)
-    const operation = String(params.operation ?? '')
-    if (!ADMIN_OPERATIONS.includes(operation as (typeof ADMIN_OPERATIONS)[number])) {
-      return rpcError(request.id, -32601, 'admin operation not found')
+    const operation = request.method.slice('admin.'.length)
+    if (
+      operation === 'profiles.connect' ||
+      operation === 'profiles.connection.complete' ||
+      operation === 'profiles.sync'
+    ) {
+      state.service ??= new FinancialAccountService(db, providers)
+      return rpcResult(
+        request.id,
+        await state.service.dispatch(request.method, objectParams(request.params), state),
+      )
     }
-    return rpcResult(request.id, await admin.invoke(operation, objectParams(params.input)))
-  }
-
-  if (request.method === 'workspace.operations') {
-    assertReadScope(state)
-    return rpcResult(request.id, WORKSPACE_OPERATIONS)
-  }
-
-  if (request.method === 'workspace.invoke') {
-    const params = objectParams(request.params)
-    const operation = String(params.operation ?? '')
-    if (!WORKSPACE_OPERATIONS.includes(operation as (typeof WORKSPACE_OPERATIONS)[number])) {
-      return rpcError(request.id, -32601, 'workspace operation not found')
-    }
-    assertWorkspaceOperationScope(state, operation)
-    return rpcResult(
-      request.id,
-      await invokeWorkspace(db, providers, operation, objectParams(params.input)),
-    )
-  }
-
-  if (request.method === 'profile.connect') {
-    assertReadScope(state)
-    const profileId = String(objectParams(request.params).profileId ?? '')
-    if (!profileId) throw new Error('profileId is required')
-    await closeOpenProvider(state)
-    const connected = await providers.connect(profileId)
-    state.open = connected.open
-    return rpcResult(request.id, connected.connection)
-  }
-
-  if (request.method === 'profile.connection.complete') {
-    assertReadScope(state)
-    const params = objectParams(request.params)
-    const profileId = String(params.profileId ?? '')
-    const interactionId = String(params.interactionId ?? '')
-    if (!profileId || !interactionId) throw new Error('profileId and interactionId are required')
-    await closeOpenProvider(state)
-    const connected = await providers.completeConnection(profileId, interactionId)
-    state.open = connected.open
-    return rpcResult(request.id, connected.connection)
-  }
-
-  if (
-    request.method === 'profile.operations' ||
-    request.method === 'profile.capabilities' ||
-    request.method === 'profile.availability' ||
-    request.method === 'profile.invoke'
-  ) {
-    const params = objectParams(request.params)
-    const profileId = String(params.profileId ?? '')
-    if (!profileId) throw new Error('profileId is required')
-    assertReadScope(state)
-
-    if (request.method === 'profile.availability') {
-      const availabilityRequest =
-        typeof params.operation === 'string'
-          ? { operation: params.operation, input: params.input }
-          : undefined
-      if (state.open?.profile.id === profileId) {
-        return rpcResult(
-          request.id,
-          await providers.availabilityForProvider(state.open.provider, availabilityRequest),
-        )
+    try {
+      return rpcResult(request.id, await admin.invoke(operation, objectParams(request.params)))
+    } catch (cause) {
+      if (cause instanceof Error && cause.message.startsWith('admin operation not found')) {
+        return rpcError(request.id, -32601, cause.message)
       }
-      return rpcResult(request.id, await providers.availability(profileId, availabilityRequest))
+      throw cause
     }
+  }
 
-    const provider = await profileProvider(providers, state, profileId)
-    if (request.method === 'profile.operations') return rpcResult(request.id, provider.operations())
-    if (request.method === 'profile.capabilities') {
-      return rpcResult(request.id, provider.capabilities())
+  if (typeof request.method === 'string' && request.method.startsWith('portfolio.')) {
+    assertPortfolioScope(state, request.method)
+    if (!(PORTFOLIO_METHODS as readonly string[]).includes(request.method)) {
+      return rpcError(request.id, -32601, 'method not found')
     }
-
-    const operation = String(params.operation ?? '')
-    if (!operation || !provider.operations().includes(operation)) {
-      return rpcError(request.id, -32601, 'profile operation not found')
-    }
-    assertOperationScope(state, operation, params.input)
-    if (state.apiKeyId) {
-      await assertApiKeyMethodAllowed(db, state.apiKeyId, operation)
-    }
-    const availability = await operationAvailability(provider, {
-      operation,
-      input: params.input,
-    })
-    if (!availability.available) {
-      throw new ProviderOperationUnavailableError(operation, availability)
-    }
-    if (state.apiKeyId) {
-      if (isTransactionOperation(operation, params.input)) {
-        await assertAndConsumeApiKeyTradeLimits({
-          db,
+    try {
+      return rpcResult(
+        request.id,
+        await invokePortfolio(db, providers, request.method, objectParams(request.params), {
+          owner: state.owner,
           apiKeyId: state.apiKeyId,
-          params: tradeLimitParams(params.input, availability.transactionAmount),
-        })
+        }),
+      )
+    } catch (cause) {
+      if (cause instanceof Error && cause.message.endsWith('method not found')) {
+        return rpcError(request.id, -32601, cause.message)
       }
+      throw cause
     }
-    return rpcResult(request.id, await provider.invoke(operation, params.input ?? {}))
+  }
+
+  if (typeof request.method === 'string' && request.method.startsWith('account.')) {
+    assertReadScope(state)
+    state.service ??= new FinancialAccountService(db, providers)
+    try {
+      return rpcResult(
+        request.id,
+        await state.service.dispatch(request.method, objectParams(request.params), state),
+      )
+    } catch (cause) {
+      if (cause instanceof Error && cause.message === 'account method not found') {
+        return rpcError(request.id, -32601, cause.message)
+      }
+      throw cause
+    }
+  }
+
+  if (typeof request.method === 'string' && request.method.startsWith('profile.')) {
+    assertReadScope(state)
+    state.profileService ??= new ProfileRpcService(db, providers)
+    try {
+      return rpcResult(
+        request.id,
+        await state.profileService.dispatch(request.method, objectParams(request.params), state),
+      )
+    } catch (cause) {
+      if (cause instanceof Error && cause.message === 'profile method not found') {
+        return rpcError(request.id, -32601, cause.message)
+      }
+      throw cause
+    }
   }
 
   return rpcError(request.id, -32601, 'method not found')

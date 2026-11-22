@@ -72,7 +72,7 @@ const setup = () => {
           throw new VpassError('secret-token secret-cookie secret-password')
         }
         return { items: name === 'accounts.list' ? [{ id: 'CARD1' }]
-          : process.env.FAIL_ACCOUNT_FILTER && !input.accountId ? [{ id: 'row1', accountId: 'CARD1' }] : [] }
+          : process.env.FAIL_ACCOUNT_FILTER && !input.account ? [{ id: 'row1', accountId: 'CARD1' }] : [] }
       } }),
     }))`,
   )

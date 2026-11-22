@@ -1,15 +1,15 @@
 ---
 title: SDK
-description: Provider-neutral financial providers and cross-profile workspaces.
+description: Provider-neutral financial providers and cross-profile clients.
 ---
 
 # SDK
 
-Mnie separates individual financial-service operations from cross-profile operations.
+Mnie separates individual financial-service methods from cross-profile reads.
 
 - `FinancialProvider`: one profile, usable directly or through the server
-- `FinancialWorkspace`: multiple profiles and aggregate operations
-- `@mnie/sdk`: helpers and `createLocalWorkspace`
-- `connectMnie`: a remote workspace backed by `mnie-server`
+- `MnieClient`: multiple accounts and aggregate methods over flat RPC names
+- `@mnie/sdk`: helpers and `createLocalClient`
+- `connectMnie`: a remote client backed by `mnie-server`
 
 See [Workspaces and providers](./workspaces.md) for direct, local, and remote examples.

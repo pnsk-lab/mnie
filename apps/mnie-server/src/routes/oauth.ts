@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import type { Context } from 'hono'
 import type { AppBindings } from '../context'
 import { oauthClients } from '../db/schema'
-import type { ApiKeySettings } from '../security/api-keys'
+import { validateAccountBindings, type ApiKeySettings } from '../security/api-keys'
 import { createOAuthAuthorizationCode } from '../security/oauth-provider'
 
 const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]'])
@@ -78,11 +78,27 @@ export const createOAuthRoutes = () => {
       return c.json({ error: 'redirectUri is not registered for this client' }, 400)
     }
 
+    const grantedScopes = (requestedScopes.length ? requestedScopes : ['read']).filter(
+      (scope) => body.settings?.scopes == null || body.settings.scopes.includes(scope),
+    )
+    if (!grantedScopes.length) return c.json({ error: 'select at least one requested scope' }, 400)
+    try {
+      const bindings = validateAccountBindings(c.get('db'), body.settings?.accountBindings)
+      if (!bindings.length) return c.json({ error: 'select at least one account' }, 400)
+      if (bindings.some((binding) => binding.role === 'trade') && !grantedScopes.includes('trade'))
+        return c.json({ error: 'trade role requires trade scope' }, 400)
+    } catch (error) {
+      return c.json(
+        { error: error instanceof Error ? error.message : 'invalid account binding' },
+        400,
+      )
+    }
+
     const code = await createOAuthAuthorizationCode(c.get('db'), {
       clientId: body.clientId,
       redirectUri: body.redirectUri,
       codeChallenge: body.codeChallenge,
-      scopes: requestedScopes.length ? requestedScopes : ['read'],
+      scopes: grantedScopes,
       resource: body.resource,
       apiKeySettings: body.settings,
     })

@@ -23,3 +23,8 @@ export const profileColor = (
   profile.defaultColor ||
   defaultProviderColors[profile.provider] ||
   generatedProviderColor(profile.provider)
+
+export const accountDisplayName = (label: string, providerId: string | undefined) => {
+  const suffix = providerId ? `(${providerId})` : ''
+  return suffix && !label.endsWith(suffix) ? `${label}${suffix}` : label
+}

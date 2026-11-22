@@ -13,6 +13,7 @@ interface Profile {
   apiKeyStorage: 'file' | 'keyring'
   apiKey?: string
   keyringAccount?: string
+  defaultAccountId?: string
 }
 
 interface ProfilesFile {
@@ -31,14 +32,15 @@ Usage:
   mnie profile add <name> --origin <origin> --api-key <key> [--storage file|keyring]
   mnie profile list
   mnie profile use <name>
+  mnie account use <id> [--profile <name>]
   mnie rpc methods [--profile <name>]
-  mnie rpc call <method> [json-params] [--profile <name>] [--provider sbisec|smbc-direct] [--profile-id <id>]
-  mnie export beancount --from <YYYY-MM-DD> --to <YYYY-MM-DD> [--profile <name>] [--profile-id <id>]
+  mnie rpc call <method> [json-params] [--profile <name>] [--account <id>]
+  mnie export beancount --from <YYYY-MM-DD> --to <YYYY-MM-DD> [--profile <name>] [--account <id>]
   mnie login --origin <origin> [--profile <name>] [--scopes <scopes>] [--storage file|keyring]
 
 Examples:
   mnie profile add local --origin http://127.0.0.1:8787 --api-key mnie_xxx
-  mnie rpc call account.profile --provider sbisec --profile-id sbi_xxx
+  mnie rpc call balances.list --account acct_xxx
 `
 
 const parseOptions = (args: string[]) => {
@@ -275,19 +277,35 @@ const rpc = async (args: string[]) => {
   const client = await connectMnie({ baseURL: profile.origin, token: apiKey })
   try {
     if (positionals[0] === 'methods') {
-      printJson(await client.operations())
+      printJson(await client.methods())
       return
     }
     if (positionals[0] !== 'call' || !positionals[1])
       throw new Error('rpc requires methods or call')
-    const profileId = option(options, 'profile-id')
+    const accountId =
+      option(options, 'account') ?? option(options, 'account-id') ?? profile.defaultAccountId
     const params = positionals[2] ? JSON.parse(positionals[2]) : undefined
     const method = positionals[1]
-    printJson(
-      profileId
-        ? await client.profile(profileId).invoke(method, params ?? {})
-        : await client.invoke(method as 'portfolio.valuation.get', params ?? {}),
-    )
+    const isWireMethod =
+      method.startsWith('rpc.') ||
+      method.startsWith('admin.') ||
+      method.startsWith('portfolio.') ||
+      method.startsWith('account.') ||
+      method.startsWith('profile.')
+    if (accountId && !isWireMethod) {
+      printJson(await client.account(accountId).invoke(method, params ?? {}))
+      return
+    }
+    if (method.startsWith('account.') && accountId) {
+      printJson(
+        await client.call(method, {
+          ...(typeof params === 'object' && params !== null ? params : {}),
+          account: (params as { account?: string } | undefined)?.account ?? accountId,
+        }),
+      )
+      return
+    }
+    printJson(await client.call(method, params ?? {}))
   } finally {
     client.close()
     console.error(`profile: ${name}`)
@@ -298,6 +316,23 @@ const main = async () => {
   const [command, subcommand, ...rest] = process.argv.slice(2)
   if (!command || command === '--help' || command === '-h') {
     console.log(help)
+    return
+  }
+  if (command === 'account' && subcommand === 'use') {
+    const { positionals, options } = parseOptions(rest)
+    const accountId = positionals[0]
+    if (!accountId) throw new Error('account use requires an account ID')
+    const selected = await requireProfile(option(options, 'profile'))
+    const client = await connectMnie({ baseURL: selected.profile.origin, token: selected.apiKey })
+    try {
+      await client.call('portfolio.accounts.get', { account: accountId })
+    } finally {
+      client.close()
+    }
+    const profiles = await loadProfiles()
+    profiles.profiles[selected.name]!.defaultAccountId = accountId
+    await saveProfiles(profiles)
+    printJson({ accountId })
     return
   }
   if (command === 'profile' && subcommand === 'add') return addProfile(rest)

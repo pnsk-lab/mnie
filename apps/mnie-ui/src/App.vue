@@ -2,7 +2,12 @@
 import { AnimatePresence } from 'motion-v'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { revokeApiKey } from './api'
+import {
+  listManagedVirtualAccounts,
+  revokeApiKey,
+  type AccountProfile,
+  type ManagedVirtualAccount,
+} from './api'
 import AppHeader from './components/layout/AppHeader.vue'
 import AppSidebar from './components/layout/AppSidebar.vue'
 import SearchDialog from './features/search/SearchDialog.vue'
@@ -16,8 +21,10 @@ import PortfolioView from './features/portfolio/PortfolioView.vue'
 import ReconciliationView from './features/reconciliation/ReconciliationView.vue'
 import SettingsView from './features/settings/SettingsView.vue'
 import TradeView from './features/trade/TradeView.vue'
+import AccountsView from './features/accounts/AccountsView.vue'
 import { useTradingSession } from './features/trading/useTradingSession'
 import { stockIdFromTradeRouteId, tradeRouteIdFromStockId } from './constants/trade'
+import { accountDisplayName } from './constants/provider'
 import { routeNames, type RouteName } from './router'
 import AsyncButton from './components/ui/AsyncButton.vue'
 import UiSnackbar from './components/ui/UiSnackbar.vue'
@@ -28,6 +35,7 @@ import { ui } from './styles/ui'
 const route = useRoute()
 const router = useRouter()
 const activeTab = computed<RouteName>(() => {
+  if (route.name === 'accountsPhysical') return 'accounts'
   return routeNames.includes(route.name as RouteName) ? (route.name as RouteName) : 'portfolio'
 })
 const isOAuthRoute = computed(() => route.name === 'oauthAuthorize')
@@ -52,15 +60,15 @@ const navigateTrade = (id = selectedStock.value.routeId || selectedStockCode.val
 const navigate = (name: RouteName) => {
   if (name === 'settings') return router.push('/settings/api-keys')
   if (name === 'trade') {
-    const profile =
-      brokerageProfiles.value.find((item) => item.id === selectedProfileId.value) ??
-      brokerageProfiles.value[0]
-    if (profile) selectedProfileId.value = profile.id
-    return router.push('/trade').then(() => {
-      if (profile) connect()
+    const account =
+      brokerageAccounts.value.find((item) => item.id === tradeAccountId.value) ??
+      brokerageAccounts.value[0]
+    if (account) tradeAccountId.value = account.id
+    return router.push({ path: '/trade', query: route.query }).then(() => {
+      if (account) connect()
     })
   }
-  return router.push({ name })
+  return router.push({ name, query: route.query })
 }
 
 const {
@@ -126,17 +134,66 @@ const {
   updateProfile,
 } = useAuthAdmin()
 
-// The sidebar, settings flow, and trading session must share one profile selection.
-// Keeping a second ref here leaves the trading session disconnected after linking a provider.
-const tradeProfileId = selectedProfileId
-const selectedProfile = computed(() =>
-  profiles.value.find((profile) => profile.id === tradeProfileId.value),
+const selectedScope = computed(() =>
+  typeof route.query.account === 'string' ? route.query.account : 'all',
 )
-const brokerageProfiles = computed(() =>
-  profiles.value.filter((profile) => profile.category === 'brokerage'),
+const setAccountScope = (id: string) => {
+  if (id !== 'all' && !managedAccounts.value.some((account) => account.id === id)) return
+  if (activeTab.value === 'trade' && id !== 'all') selectBrokerageAccount(id)
+  void router.replace({ query: { ...route.query, account: id } })
+}
+watch(
+  () => route.query.account,
+  (id) => {
+    if (
+      typeof id === 'string' &&
+      id !== 'all' &&
+      activeTab.value === 'trade' &&
+      brokerageAccounts.value.some((account) => account.id === id)
+    )
+      selectBrokerageAccount(id)
+  },
+)
+
+const tradeAccountId = ref('')
+const managedAccounts = ref<ManagedVirtualAccount[]>([])
+const accountSources = computed<Array<AccountProfile & { profileId: string }>>(() =>
+  managedAccounts.value.map((account) => {
+    const definition = providerDefinitions.value.find(
+      (provider) => provider.id === account.connectorTypeId,
+    )
+    return {
+      id: account.id,
+      profileId: account.profileId,
+      provider: account.connectorTypeId,
+      providerName: definition?.name ?? account.connectorTypeId,
+      category: account.category,
+      defaultColor: definition?.defaultColor ?? '#9aa0a9',
+      label: accountDisplayName(account.label, account.connectorTypeId),
+      color: account.color ?? null,
+      createdAt: '',
+      updatedAt: '',
+    }
+  }),
+)
+const tradingSources = computed(() => accountSources.value)
+const tradableManagedAccounts = computed(() =>
+  managedAccounts.value.filter(
+    (account) =>
+      account.category === 'brokerage' && account.status === 'active' && account.permissions.trade,
+  ),
+)
+const brokerageAccounts = computed(() =>
+  accountSources.value.filter((account) =>
+    tradableManagedAccounts.value.some((managed) => managed.id === account.id),
+  ),
+)
+const selectedAccount = computed(() =>
+  brokerageAccounts.value.find((account) => account.id === tradeAccountId.value),
 )
 
 const {
+  dataIssue,
   selectedStockCode,
   selectedStockId,
   tradeSide,
@@ -234,6 +291,7 @@ const {
   selectTradeStock,
   selectStockByCode,
   connect,
+  connectProfile,
   loadTradingData,
   loadPortfolioOverview,
   loadStoredAssetValuations,
@@ -250,18 +308,31 @@ const {
   smbcUrl,
   smbcBalance,
   finishSmbc2fa,
-} = useTradingSession(tradeProfileId, profiles, providerDefinitions)
+} = useTradingSession(
+  tradeAccountId,
+  tradingSources,
+  providerDefinitions,
+  accountSources,
+  selectedScope,
+)
 
 const openPortfolioPosition = (position: (typeof portfolioPositions.value)[number]) => {
   if (!position.profileId) return
-  tradeProfileId.value = position.profileId
+  const managedAccount = tradableManagedAccounts.value.find(
+    (candidate) =>
+      candidate.id === position.profileId &&
+      (!position.providerAccountId || candidate.providerAccountId === position.providerAccountId),
+  )
+  const account = accountSources.value.find((candidate) => candidate.id === managedAccount?.id)
+  if (!account) return
+  tradeAccountId.value = account.id
   connect()
   navigateTrade(position.code)
 }
 
-const selectBrokerageProfile = (id: string) => {
-  if (!id || tradeProfileId.value === id) return
-  tradeProfileId.value = id
+const selectBrokerageAccount = (id: string) => {
+  if (!id || tradeAccountId.value === id) return
+  tradeAccountId.value = id
   connect()
   if (tradeId.value) selectStockByCode(tradeId.value)
 }
@@ -269,6 +340,7 @@ const selectBrokerageProfile = (id: string) => {
 const finishSmbc2faAndRefreshAvailability = async () => {
   const connected = await finishSmbc2fa()
   if (!connected) throw new Error('認証を完了できませんでした。承認状態を確認してください。')
+  managedAccounts.value = (await listManagedVirtualAccounts()).accounts
   if (selectedProfileId.value) await forceProfileAvailability(selectedProfileId.value)
   await loadStoredAssetValuations()
   await loadPortfolioOverview()
@@ -283,19 +355,21 @@ const loadPortfolioData = async () => {
 
 const refreshAndMaybeConnect = async () => {
   await refresh()
-  if (status.value.authenticated) await loadPortfolioData()
+  if (!status.value.authenticated) return
+  managedAccounts.value = (await listManagedVirtualAccounts()).accounts
+  await loadPortfolioData()
 }
 
 const addSbiPasskeyAndConnect = async () => {
   await addSbiPasskey()
-  tradeProfileId.value = selectedProfileId.value
-  await connect()
+  managedAccounts.value = (await listManagedVirtualAccounts()).accounts
+  connectProfile(selectedProfileId.value)
 }
 
 const addPayPaySecProfileAndConnect = async () => {
   await addPayPaySecProfile()
-  tradeProfileId.value = selectedProfileId.value
-  await connect()
+  managedAccounts.value = (await listManagedVirtualAccounts()).accounts
+  connectProfile(selectedProfileId.value)
 }
 
 const addStarbucksProfileAndRefresh = async () => {
@@ -316,17 +390,19 @@ const revokeAndRefresh = async (id: string) => {
 }
 
 watch(
-  [tradeId, activeTab, brokerageProfiles],
-  ([id, tab, availableProfiles]) => {
+  [tradeId, activeTab, brokerageAccounts],
+  ([id, tab, availableAccounts]) => {
     if (tab !== 'trade') return
 
     // On a direct visit the route is resolved before refresh() has populated the
     // profiles. Connect as soon as a brokerage profile becomes available, then
     // restore the route selection because connect() resets profile-scoped state.
-    const profile =
-      availableProfiles.find((item) => item.id === tradeProfileId.value) ?? availableProfiles[0]
-    if (!profile) return
-    tradeProfileId.value = profile.id
+    const account =
+      availableAccounts.find((item) => item.id === route.query.account) ??
+      availableAccounts.find((item) => item.id === tradeAccountId.value) ??
+      availableAccounts[0]
+    if (!account) return
+    tradeAccountId.value = account.id
     connect()
     if (id) selectStockByCode(id)
   },
@@ -338,7 +414,7 @@ watch(
   ([tab]) => {
     const id = selectedStock.value.routeId || selectedStockId.value || selectedStockCode.value
     if (tab !== 'trade' || !id || tradeId.value === id) return
-    void router.replace(tradePath(tradeRouteIdFromStockId(id)))
+    void router.replace({ path: tradePath(tradeRouteIdFromStockId(id)), query: route.query })
   },
   { immediate: true },
 )
@@ -376,7 +452,33 @@ onUnmounted(() => {
     <AppSidebar v-if="!isOAuthRoute" :active-tab="activeTab" @navigate="navigate" />
 
     <section :class="isOAuthRoute ? ui.oauthWorkspace : ui.workspace">
-      <AppHeader v-if="!isOAuthRoute && activeTab !== 'settings'" :active-tab="activeTab" />
+      <AppHeader
+        v-if="!isOAuthRoute && !['settings', 'accounts'].includes(activeTab)"
+        :active-tab="activeTab"
+      >
+        <label
+          v-if="status.authenticated && ['portfolio', 'history', 'trade'].includes(activeTab)"
+          class="grid min-w-40 gap-1 text-sm font-bold"
+        >
+          口座
+          <select
+            class="min-h-12 rounded-lg border border-border bg-surface px-3"
+            :value="activeTab === 'trade' ? tradeAccountId : selectedScope"
+            @change="setAccountScope(($event.target as HTMLSelectElement).value)"
+          >
+            <option v-if="activeTab !== 'trade'" value="all">すべての口座</option>
+            <option v-else value="" disabled>口座を選択</option>
+            <option
+              v-for="account in activeTab === 'trade' ? tradableManagedAccounts : managedAccounts"
+              :key="account.id"
+              :value="account.id"
+            >
+              {{ accountDisplayName(account.label, account.connectorTypeId) }} ·
+              {{ account.status }}
+            </option>
+          </select>
+        </label>
+      </AppHeader>
 
       <div v-if="!authReady" class="grid min-h-64 place-items-center" role="status">
         <Spinner />読み込み中
@@ -404,6 +506,9 @@ onUnmounted(() => {
       />
 
       <template v-else>
+        <p v-if="dataIssue" role="alert" class="mb-4 rounded-xl bg-danger p-4 text-on-danger">
+          {{ dataIssue }}
+        </p>
         <PortfolioView
           v-if="activeTab === 'portfolio'"
           :show-portfolio-spinner="showPortfolioSpinner"
@@ -429,14 +534,14 @@ onUnmounted(() => {
         />
 
         <div
-          v-if="activeTab === 'trade' && !selectedProfile"
+          v-if="activeTab === 'trade' && !selectedAccount"
           class="m-5 grid min-h-64 place-items-center rounded-2xl border border-border bg-transparent p-8 text-fg-muted"
         >
           取引口座を選択してください
         </div>
 
         <TradeView
-          v-else-if="activeTab === 'trade' && selectedProfile"
+          v-else-if="activeTab === 'trade' && selectedAccount"
           v-model:trade-side="tradeSide"
           v-model:order-kind="orderKind"
           v-model:cash-order-account-type="cashOrderAccountType"
@@ -461,9 +566,9 @@ onUnmounted(() => {
           :provider-positions="selectedStockProviderPositions"
           :selected-position="selectedPosition"
           :positions="sellPositions"
-          :brokerage-profiles="brokerageProfiles"
-          :selected-profile-id="tradeProfileId"
-          :profile-name="`${selectedProfile.providerName} / ${selectedProfile.label}`"
+          :brokerage-accounts="brokerageAccounts"
+          :selected-account-id="tradeAccountId"
+          :account-name="`${selectedAccount.providerName} / ${selectedAccount.label}`"
           :order-input-mode="orderInputMode"
           :chart-available="chartAvailable"
           :chart-loading="chartLoading"
@@ -491,7 +596,7 @@ onUnmounted(() => {
           :has-quote="hasQuote"
           @reconnect="connect"
           @open-search="showSearch = true"
-          @select-profile="selectBrokerageProfile"
+          @select-account="selectBrokerageAccount"
           @select-stock="
             (stock) => {
               void selectTradeStock(stock).then(() => navigateTrade(stock.routeId || stock.code))
@@ -503,6 +608,8 @@ onUnmounted(() => {
         />
 
         <ReconciliationView v-if="activeTab === 'history'" />
+
+        <AccountsView v-if="activeTab === 'accounts'" :positions="portfolioPositions" />
 
         <HistoryView
           v-if="activeTab === 'history'"
@@ -581,6 +688,7 @@ onUnmounted(() => {
             finishSmbc2fa: finishSmbc2faAndRefreshAvailability,
             forceProfileAvailability: forceProfileAvailability,
             connect: connect,
+            connectProfile: connectProfile,
             removeSbiPasskey: removeSbiPasskey,
             updateProfile: updateProfile,
           }"
@@ -613,7 +721,7 @@ onUnmounted(() => {
     </AnimatePresence>
 
     <OrderDialogs
-      v-if="selectedProfile"
+      v-if="selectedAccount"
       :busy="orderBusy"
       :error="orderError"
       :estimate="lastCashEstimate"
@@ -639,8 +747,8 @@ onUnmounted(() => {
       :order-input-mode="orderInputMode"
       :can-confirm="canPlaceCashOrder"
       :preview-expired="previewExpired"
-      :profile-name="
-        selectedProfile ? `${selectedProfile.providerName} / ${selectedProfile.label}` : ''
+      :account-name="
+        selectedAccount ? `${selectedAccount.providerName} / ${selectedAccount.label}` : ''
       "
       @close-estimate="showEstimateDialog = false"
       @proceed="askPlaceOrder"

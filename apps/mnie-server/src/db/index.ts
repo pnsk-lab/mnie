@@ -146,6 +146,18 @@ export const createDb = (path: string) => {
     )
   `)
   sqlite.run(`
+    CREATE TABLE IF NOT EXISTS physical_account_assets (
+      physical_account_id TEXT NOT NULL,
+      asset_key TEXT NOT NULL,
+      asset_kind TEXT NOT NULL CHECK (asset_kind IN ('cash', 'security')),
+      amount TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (physical_account_id, asset_key),
+      FOREIGN KEY (physical_account_id) REFERENCES financial_accounts(id)
+    )
+  `)
+  sqlite.run(`
     CREATE TABLE IF NOT EXISTS transaction_observation_snapshots (
       id TEXT PRIMARY KEY,
       profile_id TEXT NOT NULL,
@@ -367,8 +379,68 @@ export const createDb = (path: string) => {
     ['max_order_amount_jpy', 'INTEGER'],
     ['allowed_methods', 'TEXT'],
     ['scopes', 'TEXT'],
+    ['expires_at', 'INTEGER'],
   ] as const) {
     if (!apiKeyColumns.includes(name)) sqlite.run(`ALTER TABLE api_keys ADD COLUMN ${name} ${type}`)
+  }
+  {
+    const workspaceToPortfolio: Record<string, string> = {
+      'account.get': 'portfolio.accounts.get',
+      'account.balances': 'portfolio.accounts.balances',
+      'account.positions': 'portfolio.accounts.positions',
+      'account.orders': 'portfolio.accounts.orders',
+      'account.history': 'portfolio.accounts.history',
+      'portfolio.overview.get': 'portfolio.overview.get',
+      'portfolio.valuation.get': 'portfolio.valuation.get',
+      'transaction-observations.list': 'portfolio.ledger.observations.list',
+      'events.list': 'portfolio.ledger.events.list',
+      'events.get': 'portfolio.ledger.events.get',
+      'reconciliation.proposals.list': 'portfolio.ledger.reconciliation.proposals.list',
+      'reconciliation.confirm': 'portfolio.ledger.reconciliation.confirm',
+      'reconciliation.reject': 'portfolio.ledger.reconciliation.reject',
+      'account-links.list': 'portfolio.ledger.account-links.list',
+      'account-links.upsert': 'portfolio.ledger.account-links.upsert',
+      'account-links.delete': 'portfolio.ledger.account-links.delete',
+    }
+    const migrateAllowedMethods = (entry: string): string[] => {
+      if (workspaceToPortfolio[entry]) return [workspaceToPortfolio[entry]!]
+      if (entry === 'accounts.list') return ['portfolio.accounts.list', 'account.accounts.list']
+      if (entry === 'history.list') return ['portfolio.history.list', 'account.history.list']
+      if (
+        entry.startsWith('account.') ||
+        entry.startsWith('profile.') ||
+        entry.startsWith('portfolio.') ||
+        entry.startsWith('admin.') ||
+        entry.startsWith('rpc.')
+      )
+        return [entry]
+      return [`account.${entry}`]
+    }
+    const rows = sqlite
+      .query<{ id: string; allowed_methods: string | null }, []>(
+        'SELECT id, allowed_methods FROM api_keys WHERE allowed_methods IS NOT NULL',
+      )
+      .all()
+    for (const row of rows) {
+      let entries: unknown
+      try {
+        entries = JSON.parse(row.allowed_methods as string)
+      } catch {
+        continue
+      }
+      if (!Array.isArray(entries)) continue
+      const migrated = [
+        ...new Set(
+          (entries as unknown[])
+            .filter((entry): entry is string => typeof entry === 'string')
+            .flatMap(migrateAllowedMethods),
+        ),
+      ]
+      sqlite.run('UPDATE api_keys SET allowed_methods = ? WHERE id = ?', [
+        JSON.stringify(migrated),
+        row.id,
+      ])
+    }
   }
   sqlite.run(`
     CREATE TABLE IF NOT EXISTS api_key_trade_usage (
@@ -405,6 +477,82 @@ export const createDb = (path: string) => {
     )
   `)
   sqlite.run(`
+    CREATE TABLE IF NOT EXISTS virtual_accounts (
+      id TEXT PRIMARY KEY,
+      physical_account_id TEXT NOT NULL,
+      label TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('personal', 'agent', 'system')),
+      system_role TEXT CHECK (system_role IS NULL OR system_role = 'unallocated'),
+      status TEXT NOT NULL CHECK (status IN ('active', 'frozen', 'reconciliation_required', 'closed')),
+      color TEXT,
+      icon TEXT,
+      policy_json TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      closed_at INTEGER,
+      CHECK ((kind = 'system') = (system_role IS NOT NULL))
+    )
+  `)
+  sqlite.run(`CREATE UNIQUE INDEX IF NOT EXISTS virtual_accounts_physical_system_role_unique
+    ON virtual_accounts (physical_account_id, system_role) WHERE system_role IS NOT NULL`)
+  sqlite.run(`
+    CREATE TABLE IF NOT EXISTS virtual_account_assets (
+      virtual_account_id TEXT NOT NULL,
+      asset_key TEXT NOT NULL,
+      asset_kind TEXT NOT NULL CHECK (asset_kind IN ('cash', 'security')),
+      available TEXT NOT NULL,
+      reserved TEXT NOT NULL,
+      pending TEXT NOT NULL,
+      cost_basis_json TEXT,
+      version INTEGER NOT NULL DEFAULT 1,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (virtual_account_id, asset_key),
+      FOREIGN KEY (virtual_account_id) REFERENCES virtual_accounts(id)
+    )
+  `)
+  sqlite.run(`
+    CREATE TABLE IF NOT EXISTS virtual_asset_movements (
+      id TEXT PRIMARY KEY,
+      virtual_account_id TEXT NOT NULL,
+      asset_key TEXT NOT NULL,
+      available_delta TEXT NOT NULL,
+      reserved_delta TEXT NOT NULL,
+      pending_delta TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      reference_type TEXT NOT NULL,
+      reference_id TEXT NOT NULL,
+      metadata_json TEXT,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (virtual_account_id) REFERENCES virtual_accounts(id),
+      UNIQUE (virtual_account_id, asset_key, reference_type, reference_id)
+    )
+  `)
+  sqlite.run(`
+    CREATE TABLE IF NOT EXISTS virtual_operation_effects (
+      virtual_account_id TEXT NOT NULL,
+      provider_reference_id TEXT NOT NULL,
+      movement_reference_id TEXT NOT NULL,
+      changes_json TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('active', 'reversed')),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (virtual_account_id, provider_reference_id),
+      FOREIGN KEY (virtual_account_id) REFERENCES virtual_accounts(id)
+    )
+  `)
+  sqlite.run(`
+    CREATE TABLE IF NOT EXISTS api_key_virtual_accounts (
+      api_key_id TEXT NOT NULL,
+      virtual_account_id TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('read', 'trade')),
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (api_key_id, virtual_account_id),
+      FOREIGN KEY (api_key_id) REFERENCES api_keys(id),
+      FOREIGN KEY (virtual_account_id) REFERENCES virtual_accounts(id)
+    )
+  `)
+  sqlite.run(`
     CREATE TABLE IF NOT EXISTS oauth_authorization_codes (
       code TEXT PRIMARY KEY,
       client_id TEXT NOT NULL,
@@ -437,5 +585,50 @@ export const createDb = (path: string) => {
     )
   `)
 
+  sqlite.run(`CREATE TABLE IF NOT EXISTS virtual_order_quotes (
+    id TEXT PRIMARY KEY, virtual_account_id TEXT NOT NULL REFERENCES virtual_accounts(id),
+    principal TEXT NOT NULL, account_version INTEGER NOT NULL, operation TEXT NOT NULL,
+    request_hash TEXT NOT NULL, request_json TEXT NOT NULL, sealed_token TEXT NOT NULL,
+    changes_json TEXT NOT NULL, preview_json TEXT NOT NULL, expires_at INTEGER NOT NULL,
+    consumed_at INTEGER, created_at INTEGER NOT NULL
+  )`)
+  sqlite.run(`CREATE TABLE IF NOT EXISTS virtual_orders (
+    id TEXT PRIMARY KEY, virtual_account_id TEXT NOT NULL REFERENCES virtual_accounts(id),
+    physical_account_id TEXT NOT NULL REFERENCES financial_accounts(id),
+    idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, request_json TEXT NOT NULL,
+    state TEXT NOT NULL, provider_order_id TEXT, reservation_id TEXT, changes_json TEXT NOT NULL,
+    result_json TEXT, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+    UNIQUE (virtual_account_id, idempotency_key)
+  )`)
+  sqlite.run(`CREATE UNIQUE INDEX IF NOT EXISTS virtual_orders_broker_reference_unique
+    ON virtual_orders (physical_account_id, provider_order_id)
+    WHERE provider_order_id IS NOT NULL AND json_extract(request_json, '$.parentId') IS NULL`)
+  sqlite.run(`CREATE TABLE IF NOT EXISTS account_audit (
+    id TEXT PRIMARY KEY, virtual_account_id TEXT NOT NULL REFERENCES virtual_accounts(id),
+    event TEXT NOT NULL, detail_json TEXT NOT NULL, created_at INTEGER NOT NULL
+  )`)
+  // A process may have stopped after the broker accepted a request. Never resubmit it.
+  sqlite.run(`UPDATE virtual_orders SET state = 'submission_unknown'
+    WHERE state IN ('submitting', 'cancel_pending', 'replace_pending')`)
+  sqlite.run(`CREATE TABLE IF NOT EXISTS physical_position_prices (
+    physical_account_id TEXT NOT NULL REFERENCES financial_accounts(id), asset_key TEXT NOT NULL,
+    price_json TEXT NOT NULL, cost_basis_json TEXT, name TEXT, updated_at INTEGER NOT NULL,
+    PRIMARY KEY (physical_account_id, asset_key)
+  )`)
+  const physicalPositionPriceColumns = sqlite
+    .query<{ name: string }, []>('PRAGMA table_info(physical_position_prices)')
+    .all()
+    .map((column) => column.name)
+  if (!physicalPositionPriceColumns.includes('cost_basis_json'))
+    sqlite.run('ALTER TABLE physical_position_prices ADD COLUMN cost_basis_json TEXT')
+  sqlite.run(`CREATE TABLE IF NOT EXISTS virtual_account_snapshots (
+    virtual_account_id TEXT NOT NULL REFERENCES virtual_accounts(id), captured_at INTEGER NOT NULL,
+    snapshot_json TEXT NOT NULL, PRIMARY KEY (virtual_account_id, captured_at)
+  )`)
+  sqlite.run(`CREATE TABLE IF NOT EXISTS external_order_reservations (
+    physical_account_id TEXT NOT NULL REFERENCES financial_accounts(id), provider_order_id TEXT NOT NULL,
+    changes_json TEXT NOT NULL, state TEXT NOT NULL, updated_at INTEGER NOT NULL,
+    PRIMARY KEY (physical_account_id, provider_order_id)
+  )`)
   return drizzle(sqlite, { schema })
 }

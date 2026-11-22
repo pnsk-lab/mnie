@@ -1,26 +1,26 @@
 import { describe, expect, test } from 'vite-plus/test'
-import type { FinancialProvider, OperationMap } from '@mnie/types'
+import type { FinancialProvider, MethodMap } from '@mnie/types'
 import {
-  invokeAvailableOperation,
-  operationAvailability,
-  ProviderOperationUnavailableError,
+  invokeAvailableMethod,
+  methodAvailability,
+  ProviderMethodUnavailableError,
 } from './operations'
 
 const provider = (
-  availability: Awaited<ReturnType<typeof operationAvailability>>,
-): FinancialProvider<OperationMap> => ({
+  availability: Awaited<ReturnType<typeof methodAvailability>>,
+): FinancialProvider<MethodMap> => ({
   descriptor: { id: 'test-broker', name: 'Test Broker' },
   accountId: 'account',
   capabilities: () => ['investments:trade'],
-  operations: () => ['investments.orders.create'],
+  methods: () => ['investments.orders.create'],
   checkAvailability: async () => ({ ok: true }),
-  checkOperationAvailability: async () => availability,
-  invoke: async (_operation, input) => input,
+  checkMethodAvailability: async () => availability,
+  invoke: async (_method, input) => input,
   exportSession: () => ({}),
   close: () => {},
 })
 
-describe('provider operation availability gate', () => {
+describe('provider method availability gate', () => {
   test('passes provider-specific amount order rules through availability', async () => {
     const available = {
       available: true as const,
@@ -31,9 +31,9 @@ describe('provider operation availability gate', () => {
       },
     }
     expect(
-      await operationAvailability(provider(available), {
-        operation: 'investments.orders.create',
-        input: { amount: { currency: 'JPY', value: '1000' } },
+      await methodAvailability(provider(available), {
+        method: 'investments.orders.create',
+        params: { amount: { currency: 'JPY', value: '1000' } },
       }),
     ).toEqual(available)
   })
@@ -45,15 +45,15 @@ describe('provider operation availability gate', () => {
       message: 'odd-lot realtime trading is unavailable for this instrument',
     }
     await expect(
-      invokeAvailableOperation(provider(unavailable), 'investments.orders.create', {
+      invokeAvailableMethod(provider(unavailable), 'investments.orders.create', {
         instrumentId: '1234',
       }),
-    ).rejects.toBeInstanceOf(ProviderOperationUnavailableError)
+    ).rejects.toBeInstanceOf(ProviderMethodUnavailableError)
   })
 
-  test('does not invoke operations the provider did not advertise', async () => {
-    const result = await operationAvailability(provider({ available: true }), {
-      operation: 'investments.orders.cancel',
+  test('does not invoke methods the provider did not advertise', async () => {
+    const result = await methodAvailability(provider({ available: true }), {
+      method: 'investments.orders.cancel',
     })
     expect(result).toMatchObject({ available: false, reason: 'OPERATION_UNSUPPORTED' })
   })
@@ -65,8 +65,8 @@ describe('provider operation availability gate', () => {
       message: new Error('market is closed'),
     }
     await expect(
-      operationAvailability(provider(unavailable), {
-        operation: 'investments.orders.create',
+      methodAvailability(provider(unavailable), {
+        method: 'investments.orders.create',
       }),
     ).resolves.toEqual({
       available: false,

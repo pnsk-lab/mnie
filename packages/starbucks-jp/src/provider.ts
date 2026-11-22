@@ -1,7 +1,7 @@
 import type {
   Account,
   Balance,
-  CommonOperations,
+  CommonMethods,
   FinancialProvider,
   HistoryItem,
   HistoryListRequest,
@@ -114,7 +114,7 @@ const balancesForCards = (cards: StarbucksCard[]): Balance[] =>
 export const createStarbucksProvider = (
   profile: StarbucksJpSession,
   options: StarbucksJpProviderOptions = {},
-): FinancialProvider<CommonOperations> => {
+): FinancialProvider<CommonMethods> => {
   const accounts = async (): Promise<Page<Account>> => ({
     items: (await profile.listCards()).map(cardAccount),
   })
@@ -128,11 +128,11 @@ export const createStarbucksProvider = (
     if (from && from > to) throw new Error('Starbucks history from must not be after to')
 
     const cards = await profile.listCards()
-    if (request.accountId && !cards.some((card) => cardAccountId(card) === request.accountId)) {
+    if (request.account && !cards.some((card) => cardAccountId(card) === request.account)) {
       return []
     }
-    const selectedCards = request.accountId
-      ? cards.filter((card) => cardAccountId(card) === request.accountId)
+    const selectedCards = request.account
+      ? cards.filter((card) => cardAccountId(card) === request.account)
       : cards
     const records = (
       await Promise.all(
@@ -173,7 +173,7 @@ export const createStarbucksProvider = (
       },
     },
     capabilities: () => ['accounts:read', 'balances:read', 'transactions:read', 'cards:read'],
-    operations: () => ['accounts.list', 'balances.list', 'transactions.list', 'history.list'],
+    methods: () => ['accounts.list', 'balances.list', 'transactions.list', 'history.list'],
     checkAvailability: async () => {
       try {
         await profile.getBalance()
@@ -189,10 +189,10 @@ export const createStarbucksProvider = (
     invoke: async (name, request) => {
       if (name === 'accounts.list') return accounts() as never
       if (name === 'balances.list') {
-        const input = (request ?? {}) as { accountId?: string }
+        const input = (request ?? {}) as { account?: string }
         const result = await balances()
         return (
-          input.accountId ? result.filter((item) => item.accountId === input.accountId) : result
+          input.account ? result.filter((item) => item.accountId === input.account) : result
         ) as never
       }
       if (name === 'transactions.list') {

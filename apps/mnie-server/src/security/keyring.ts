@@ -87,7 +87,7 @@ const decrypt = (row: { nonce: string; tag: string; ciphertext: string }) => {
  * desktop installation this lives in the OS keyring; the SQLite keyring
  * backend encrypts it with its explicitly configured deployment secret.
  */
-const encryptionKey = async (): Promise<Buffer> => {
+const loadEncryptionKey = async (): Promise<Buffer> => {
   if (keyringBackend() === PLATFORM_BACKEND) {
     const { getPassword, setPassword } = await loadKeytar()
     const existing = await getPassword(SERVICE, ENCRYPTION_KEY_ACCOUNT)
@@ -121,7 +121,14 @@ const encryptionKey = async (): Promise<Buffer> => {
   return key
 }
 
-const sealCredential = async (payload: string) => {
+let encryptionKeyPromise: Promise<Buffer> | undefined
+const encryptionKey = () =>
+  (encryptionKeyPromise ??= loadEncryptionKey().catch((error) => {
+    encryptionKeyPromise = undefined
+    throw error
+  }))
+
+export const sealCredential = async (payload: string) => {
   const nonce = randomBytes(12)
   const cipher = createCipheriv('aes-256-gcm', await encryptionKey(), nonce)
   const ciphertext = Buffer.concat([cipher.update(payload, 'utf8'), cipher.final()])
@@ -133,7 +140,7 @@ const sealCredential = async (payload: string) => {
   })
 }
 
-const openCredential = async (payload: string) => {
+export const openCredential = async (payload: string) => {
   const value: unknown = JSON.parse(payload)
   if (!value || typeof value !== 'object' || (value as { version?: unknown }).version !== 1) {
     // Existing installations used the keyring payload directly. It is read

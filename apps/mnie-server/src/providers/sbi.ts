@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { createBitwardenPasskeyProvider } from '@mnie/auth-bitwarden'
 import { connectWithPasskey } from '@mnie/provider-sbi-sec'
-import type { FinancialProvider, OperationMap } from '@mnie/types'
+import type { FinancialProvider, MethodMap } from '@mnie/types'
 import type {
   LoginWithPasskeyOptions,
   SbiClientOptions,
@@ -19,7 +19,7 @@ export const connectSbi = async (
   db: Db,
   config: ServerConfig,
   profileId: string,
-): Promise<FinancialProvider<OperationMap>> => {
+): Promise<FinancialProvider<MethodMap>> => {
   const [row] = await db
     .select()
     .from(accountProfiles)
@@ -54,7 +54,7 @@ export const connectSbi = async (
     clientOptions,
   )
   await saveSecret(row.keyringAccount, { ...secret, session: await provider.exportSession() })
-  return provider as FinancialProvider<OperationMap>
+  return provider as FinancialProvider<MethodMap>
 }
 
 const passkeyLoginOptions = (

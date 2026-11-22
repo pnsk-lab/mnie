@@ -1,6 +1,5 @@
 import { eq } from 'drizzle-orm'
 import { createBitwardenAuthManager } from '@mnie/auth-bitwarden'
-import { captchaModelPath, createCaptchaSolver, type CaptchaSolver } from '@repo/capsolve-sp'
 import { ensureInitialAssetValuations, latestAssetValuations } from '../assets'
 import type { CronSystem } from '../cron'
 import type { Db } from '../db'
@@ -19,6 +18,20 @@ import {
 import { randomId } from '../security/crypto'
 import { deleteSecret, readSecret, saveSecret } from '../security/keyring'
 import { ADMIN_OPERATIONS } from './admin-operations'
+import { discoverPhysicalAccounts, syncInitialUnallocatedAssets } from '../physical-accounts'
+import {
+  bindApiKeyToVirtualAccount,
+  updateVirtualAccount,
+  revokeAccountAccess,
+  approvePhysicalAccountReconciliation,
+  createVirtualAccount,
+  ensureDefaultVirtualAccounts,
+  initializeVirtualAccounts,
+  listVirtualAccountInitializations,
+  listManagedVirtualAccounts,
+  transferVirtualAsset,
+  transferVirtualAssets,
+} from '../virtual-accounts'
 
 export { ADMIN_OPERATIONS } from './admin-operations'
 
@@ -32,8 +45,6 @@ const optionalString = (value: unknown) =>
   typeof value === 'string' && value.trim() ? value.trim() : undefined
 
 export class AdminRpcService {
-  #captchaSolver?: Promise<CaptchaSolver>
-
   constructor(
     readonly db: Db,
     readonly providers: ProviderRegistry,
@@ -66,6 +77,174 @@ export class AdminRpcService {
     if (operation === 'apiKeys.revoke') {
       await revokeApiKey(this.db, requiredString(input, 'id'))
       return { ok: true }
+    }
+    if (operation === 'apiKeys.bind') {
+      const role = requiredString(input, 'role')
+      if (role !== 'read' && role !== 'trade') throw new Error('role must be read or trade')
+      await bindApiKeyToVirtualAccount(
+        this.db,
+        requiredString(input, 'apiKeyId'),
+        requiredString(input, 'accountId'),
+        role,
+      )
+      return { ok: true }
+    }
+
+    if (
+      ['accounts.update', 'accounts.freeze', 'accounts.unfreeze', 'accounts.close'].includes(
+        operation,
+      )
+    ) {
+      return updateVirtualAccount(this.db, requiredString(input, 'accountId'), {
+        expectedVersion: Number(input.expectedVersion),
+        label: optionalString(input.label),
+        policy: input.policy as Record<string, unknown> | undefined,
+        status: operation.endsWith('.freeze')
+          ? 'frozen'
+          : operation.endsWith('.unfreeze')
+            ? 'active'
+            : operation.endsWith('.close')
+              ? 'closed'
+              : undefined,
+      })
+    }
+    if (operation === 'accountAccess.revoke')
+      return revokeAccountAccess(
+        this.db,
+        requiredString(input, 'apiKeyId'),
+        requiredString(input, 'accountId'),
+      )
+    if (operation === 'accountAccess.list') {
+      const { apiKeyVirtualAccounts, apiKeys } = await import('../db/schema')
+      return {
+        items: await this.db
+          .select({
+            apiKeyId: apiKeys.id,
+            label: apiKeys.label,
+            role: apiKeyVirtualAccounts.role,
+            lastUsedAt: apiKeys.lastUsedAt,
+            revokedAt: apiKeys.revokedAt,
+          })
+          .from(apiKeyVirtualAccounts)
+          .innerJoin(apiKeys, eq(apiKeys.id, apiKeyVirtualAccounts.apiKeyId))
+          .where(eq(apiKeyVirtualAccounts.virtualAccountId, requiredString(input, 'accountId'))),
+      }
+    }
+    if (operation === 'accounts.activity') {
+      const { accountActivity } = await import('../account-read-model')
+      return accountActivity(this.db, requiredString(input, 'accountId'), { owner: true })
+    }
+    if (operation === 'accounts.reconciliation.inspect') {
+      const { inspectAccountReconciliation } = await import('../account-reconciliation')
+      return inspectAccountReconciliation(this.db, requiredString(input, 'physicalAccountId'))
+    }
+    if (operation === 'accounts.orders.reconcile') {
+      const { PhysicalAccountGateway } = await import('../physical-account-gateway')
+      const { reconcileOrderReference } = await import('../account-reconciliation')
+      const gateway = new PhysicalAccountGateway(this.providers)
+      try {
+        return await reconcileOrderReference(
+          this.db,
+          gateway,
+          requiredString(input, 'orderId'),
+          requiredString(input, 'providerOrderId'),
+        )
+      } finally {
+        await gateway.close()
+      }
+    }
+    if (operation === 'accounts.migrate') {
+      const { PhysicalAccountGateway } = await import('../physical-account-gateway')
+      const { migratePhysicalAccount } = await import('../account-migration')
+      const gateway = new PhysicalAccountGateway(this.providers)
+      try {
+        return await migratePhysicalAccount(
+          this.db,
+          gateway,
+          requiredString(input, 'physicalAccountId'),
+        )
+      } finally {
+        await gateway.close()
+      }
+    }
+    if (operation === 'accounts.create') {
+      const kind = requiredString(input, 'kind')
+      if (kind !== 'personal' && kind !== 'agent' && kind !== 'system') {
+        throw new Error('kind must be personal, agent, or system')
+      }
+      return {
+        account: await createVirtualAccount(this.db, {
+          physicalAccountId: requiredString(input, 'physicalAccountId'),
+          label: requiredString(input, 'label'),
+          kind,
+          allocations: Array.isArray(input.allocations)
+            ? (input.allocations as Array<{
+                fromAccountId: string
+                assetKey: string
+                amount: string
+                expectedFromVersion: number
+                reason: string
+              }>)
+            : undefined,
+          color: optionalString(input.color),
+          icon: optionalString(input.icon),
+          policy:
+            input.policy && typeof input.policy === 'object' && !Array.isArray(input.policy)
+              ? (input.policy as Record<string, unknown>)
+              : undefined,
+        }),
+      }
+    }
+    if (operation === 'accounts.initialize') {
+      return initializeVirtualAccounts(this.db, requiredString(input, 'physicalAccountId'))
+    }
+    if (operation === 'accounts.initializations.list') {
+      return { physicalAccountIds: await listVirtualAccountInitializations(this.db) }
+    }
+    if (operation === 'accounts.defaults.ensure') {
+      await discoverPhysicalAccounts(this.db, this.providers)
+      const defaults = await ensureDefaultVirtualAccounts(this.db)
+      const assets = await syncInitialUnallocatedAssets(this.db, this.providers)
+      return { ...defaults, ...assets }
+    }
+    if (operation === 'accounts.list') {
+      const { listFinancialAccounts } = await import('../reconciliation')
+      const [virtual, physical] = await Promise.all([
+        listManagedVirtualAccounts(this.db),
+        listFinancialAccounts(this.db),
+      ])
+      return {
+        accounts: [
+          ...physical.map((account) => ({ layer: 'physical' as const, ...account })),
+          ...virtual.map((account) => ({ layer: 'virtual' as const, ...account })),
+        ],
+      }
+    }
+    if (operation === 'accounts.assets.transferBatch') {
+      if (!Array.isArray(input.transfers)) throw new Error('transfers are required')
+      return {
+        transfers: transferVirtualAssets(
+          this.db,
+          input.transfers as Array<Parameters<typeof transferVirtualAsset>[1]>,
+        ),
+      }
+    }
+    if (operation === 'accounts.assets.transfer') {
+      return transferVirtualAsset(this.db, {
+        fromAccountId: requiredString(input, 'fromAccountId'),
+        toAccountId: requiredString(input, 'toAccountId'),
+        assetKey: requiredString(input, 'assetKey'),
+        amount: requiredString(input, 'amount'),
+        expectedFromVersion: Number(input.expectedFromVersion),
+        expectedToVersion: Number(input.expectedToVersion),
+        reason: requiredString(input, 'reason'),
+      })
+    }
+    if (operation === 'accounts.reconciliation.approve') {
+      return approvePhysicalAccountReconciliation(
+        this.db,
+        requiredString(input, 'physicalAccountId'),
+      )
     }
 
     if (operation === 'authManagers.list') {
@@ -106,7 +285,7 @@ export class AdminRpcService {
             id,
             {
               ...value.result,
-              operations: value.operations,
+              methods: value.methods,
               checkedAt: value.checkedAt.toISOString(),
             },
           ]),
@@ -126,7 +305,7 @@ export class AdminRpcService {
       for (const [id, availability] of values) {
         this.cron.setAvailability(id, {
           result: availability.connection,
-          operations: availability.operations,
+          methods: availability.methods,
           checkedAt: new Date(availability.checkedAt),
         })
       }
@@ -136,7 +315,7 @@ export class AdminRpcService {
             id,
             {
               ...value.connection,
-              operations: value.operations,
+              methods: value.methods,
               checkedAt: value.checkedAt,
             },
           ]),
@@ -160,6 +339,9 @@ export class AdminRpcService {
         from: requiredString(input, 'from'),
         to: requiredString(input, 'to'),
       })
+    }
+    if (operation === 'accounts.discover') {
+      return discoverPhysicalAccounts(this.db, this.providers)
     }
     if (operation === 'history.sync.since-last') {
       return syncHistorySinceLastCoverage(
@@ -258,13 +440,8 @@ export class AdminRpcService {
     return { ok: true }
   }
 
-  private solveCaptcha(image: Uint8Array) {
-    this.#captchaSolver ??= createCaptchaSolver(captchaModelPath())
-    return this.#captchaSolver.then((solver) => solver.solve(image))
-  }
-
   private async startMobileSuicaLogin(input: Record<string, unknown>) {
-    return this.providers.startMobileSuicaLogin(input, (image) => this.solveCaptcha(image))
+    return this.providers.startMobileSuicaLogin(input)
   }
 
   private async completeMobileSuicaLogin(input: Record<string, unknown>) {

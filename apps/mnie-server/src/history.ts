@@ -42,7 +42,7 @@ const syncTransactions = async (
       if (!observationPolicy) {
         throw new Error(`${profile.provider} does not declare a transaction observation policy`)
       }
-      if (!provider.operations().includes('history.list')) {
+      if (!provider.methods().includes('history.list')) {
         throw new Error(`${profile.provider} does not provide transaction history`)
       }
       const fetchPage = async (rangeFrom: Date, rangeTo: Date): Promise<HistoryItem[]> => {

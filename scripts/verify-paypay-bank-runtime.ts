@@ -44,8 +44,12 @@ try {
     token,
     WebSocket,
   })
-  const provider = workspace.profile(profile.id)
-  const operations = await provider.operations()
+  const accountId = requiredEnv('MNIE_VERIFY_ACCOUNT_ID')
+  const account = (await workspace.accounts()).find((candidate) => candidate.id === accountId)
+  if (!account)
+    throw new Error('requested public account is not visible to the verification API key')
+  const provider = workspace.account(accountId)
+  const operations = await provider.methods()
   const availability = await provider.checkAvailability()
   if (!availability.ok) {
     throw new Error(`provider availability failed: ${String(availability.message)}`)
