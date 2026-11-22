@@ -111,7 +111,7 @@ const balancesForCards = (cards: StarbucksCard[]): Balance[] =>
   }))
 
 /** Adapts the authenticated Starbucks session to the provider-neutral RPC surface. */
-export const createStarbucksProvider = (
+export const createProvider = (
   profile: StarbucksJpSession,
   options: StarbucksJpProviderOptions = {},
 ): FinancialProvider<CommonMethods> => {

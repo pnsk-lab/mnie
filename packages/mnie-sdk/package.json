@@ -1,7 +1,15 @@
 {
   "name": "@mnie/sdk",
-  "version": "0.0.0-alpha.0",
+  "version": "0.0.0",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pnsk-lab/mnie.git",
+    "directory": "packages/mnie-sdk"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "module": "./dist/index.mjs",
   "types": "./src/index.ts",
@@ -11,11 +19,22 @@
       "import": "./dist/index.mjs"
     }
   },
+  "publishConfig": {
+    "types": "./dist/index.d.mts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      }
+    },
+    "access": "public"
+  },
   "scripts": {
     "build": "cd ../.. && vp run @mnie/types#build && cd packages/mnie-sdk && vp pack",
     "dev": "vp pack --watch",
     "clean": "rm -rf dist",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "prepublishOnly": "pnpm run build"
   },
   "dependencies": {},
   "devDependencies": {

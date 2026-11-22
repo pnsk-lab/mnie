@@ -1,6 +1,15 @@
 {
   "name": "@mnie/types",
-  "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pnsk-lab/mnie.git",
+    "directory": "packages/mnie-types"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "module": "./dist/index.mjs",
   "types": "./src/index.ts",
@@ -10,17 +19,21 @@
       "import": "./dist/index.mjs"
     }
   },
+  "publishConfig": {
+    "types": "./dist/index.d.mts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      }
+    },
+    "access": "public"
+  },
   "scripts": {
     "build": "vp pack",
     "dev": "vp pack --watch --no-clean",
     "clean": "rm -rf dist",
-    "typecheck": "tsc"
-  },
-  "devDependencies": {
-    "@repo/tsconfig": "workspace:*",
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
+    "typecheck": "tsc",
+    "prepublishOnly": "pnpm run build"
   }
 }

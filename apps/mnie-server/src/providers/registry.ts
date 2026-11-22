@@ -32,9 +32,9 @@ import {
 import {
   createStarbucksIoBlackboxRuntimeFromLogin,
   createStarbucksJpClient,
-  createStarbucksProvider,
+  createProvider as createStarbucksProvider,
   type StarbucksJpSessionData,
-} from '@mnie/starbucks-jp'
+} from '@mnie/provider-starbucks-jp'
 import type {
   FinancialProvider,
   MethodAvailability,

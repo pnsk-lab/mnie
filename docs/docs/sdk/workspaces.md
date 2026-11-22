@@ -45,7 +45,7 @@ by the remote client. Local aggregation rejects currencies that require conversi
 ## Remote client
 
 ```ts
-import { connectMnie } from '@repo/client-mnie'
+import { connectMnie } from '@mnie/provider-mnie-server'
 
 const client = await connectMnie({ baseURL, token })
 const accounts = await client.accounts()

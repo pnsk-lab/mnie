@@ -1,4 +1,4 @@
-import type { HistoryItem, HistoryListRequest } from '@repo/client-mnie'
+import type { HistoryItem, HistoryListRequest } from '@mnie/provider-mnie-server'
 import { formatBeancount } from './beancount'
 
 type CliOptions = Record<string, string | true>

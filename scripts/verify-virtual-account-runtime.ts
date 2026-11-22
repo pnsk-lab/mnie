@@ -6,7 +6,7 @@ import * as schema from '../apps/mnie-server/src/db/schema'
 import { loadConfig } from '../apps/mnie-server/src/config'
 import { createProviderRegistry } from '../apps/mnie-server/src/providers/registry'
 import { createApiKey, revokeApiKey } from '../apps/mnie-server/src/security/api-keys'
-import { connectMnie } from '../packages/client-mnie/src/index'
+import { connectMnie } from '../packages/provider-mnie-server/src/index'
 
 const required = (name: string) => {
   const value = process.env[name]?.trim()

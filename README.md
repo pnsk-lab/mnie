@@ -10,11 +10,11 @@ Self-host finance management for running your own portfolio, trading, API key, O
 
 ## Mnie SDK
 
-`@repo/client-mnie` opens a remote financial workspace. `@mnie/sdk` provides the same
+`@mnie/provider-mnie-server` opens a remote financial workspace. `@mnie/sdk` provides the same
 workspace contract locally for directly connected providers.
 
 ```ts
-import { connectMnie } from '@repo/client-mnie'
+import { connectMnie } from '@mnie/provider-mnie-server'
 
 const workspace = await connectMnie({ baseURL, token })
 const valuation = await workspace.invoke('portfolio.valuation.get', { baseCurrency: 'JPY' })
@@ -45,9 +45,9 @@ and `mnie-account-invoke`. MCP uses the same operations as WebSocket RPC;
 ## Packages
 
 - `packages/mnie-types`: shared finance SDK interfaces
-- `packages/client-mnie`: authenticated Mnie connection client
+- `packages/provider-mnie-server`: authenticated Mnie connection client
 - `packages/mnie-sdk`: high-level `mnie` SDK
-- `packages/mnie-cli`: CLI using `client-mnie`
+- `packages/mnie-cli`: CLI using `provider-mnie-server`
 - `packages/auth-bitwarden`: Bitwarden Auth Manager
 - `packages/provider-sbi-sec`: SBI Securities provider
 - `packages/provider-mobile-suica`: Mobile Suica provider

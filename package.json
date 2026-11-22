@@ -1,6 +1,6 @@
 {
   "name": "@repo/csbi",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "private": true,
   "description": "<img width=\"1672\" height=\"941\" alt=\"Your money. Your machine\" src=\"https://github.com/user-attachments/assets/9ac413e9-161f-451c-9afc-1847308aedbc\" />",
   "keywords": [],
@@ -18,12 +18,6 @@
     "doc": "docs",
     "example": "example"
   },
-  "workspaces": [
-    "apps/*",
-    "packages/*",
-    "example/",
-    "docs/"
-  ],
   "type": "module",
   "main": "index.js",
   "module": "index.ts",
@@ -62,5 +56,5 @@
     "bun": ">=1.3.0",
     "node": ">=22.12.0"
   },
-  "packageManager": "bun@1.4.4"
+  "packageManager": "pnpm@12.6.0"
 }

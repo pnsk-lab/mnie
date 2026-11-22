@@ -1,0 +1,15 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+  - 'example'
+  - 'docs'
+
+peerDependencyRules:
+  ignoreMissing:
+    - '@algolia/client-search'
+
+allowBuilds:
+  esbuild: true
+  onnxruntime-node: true
+  sharp: true
+  vue-demi: true

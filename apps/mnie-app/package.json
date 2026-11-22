@@ -1,11 +1,12 @@
 {
   "name": "@repo/mnie-app",
+  "version": "0.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "clean": "rm -rf dist ../mnie-ui/dist",
     "dev": "bun --env-file=../../.env src/dev.ts",
-    "build": "bun --filter @repo/mnie-ui build && bun build src/index.ts --target=bun --outdir=dist --external @napi-rs/keyring",
+    "build": "pnpm --filter @repo/mnie-ui build && bun build src/index.ts --target=bun --outdir=dist --external @napi-rs/keyring",
     "start": "bun --env-file=../../.env dist/index.js",
     "typecheck": "tsc"
   },

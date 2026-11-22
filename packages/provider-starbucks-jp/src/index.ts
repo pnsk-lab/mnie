@@ -94,7 +94,7 @@ export {
   type StarbucksQuickJsBrowserOptions,
   type StarbucksQuickJsBrowserRuntime,
 } from './quickjs-browser'
-export { createStarbucksProvider, type StarbucksJpProviderOptions } from './provider'
+export { createProvider, type StarbucksJpProviderOptions } from './provider'
 
 export interface StarbucksFingerprintOptions extends StarbucksNodeFingerprintOptions {
   /** Optional runtime executing the captured iOvation WDP script. */

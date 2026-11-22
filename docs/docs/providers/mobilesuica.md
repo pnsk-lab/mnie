@@ -60,11 +60,11 @@ try {
 }
 ```
 
-`@repo/capsolve-sp` is a private workspace package in this monorepo. Its model is downloaded by the root `bun install`; set `CAPSOLVE_MODEL_PATH` only when the model is stored somewhere other than the default location. A recognition error causes `login()` to reject rather than prompting for a fallback answer.
+`@repo/capsolve-sp` is a private workspace package in this monorepo. Its model is downloaded by the root `pnpm install`; set `CAPSOLVE_MODEL_PATH` only when the model is stored somewhere other than the default location. A recognition error causes `login()` to reject rather than prompting for a fallback answer.
 
 ### CAPTCHA solver
 
-The bundled `@repo/capsolve-sp` package recognizes the five-character CAPTCHA image returned by Mobile Suica. Run `bun install` at the repository root before starting the server; it downloads the ONNX model used by the solver.
+The bundled `@repo/capsolve-sp` package recognizes the five-character CAPTCHA image returned by Mobile Suica. Run `pnpm install` at the repository root before starting the server; it downloads the ONNX model used by the solver.
 
 The default model path is `../../models/model.onnx`, resolved from the process working directory. When running the SDK from another directory or when the model is stored elsewhere, provide its absolute path with `CAPSOLVE_MODEL_PATH`:
 

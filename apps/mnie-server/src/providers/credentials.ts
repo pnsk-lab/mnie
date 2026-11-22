@@ -1,5 +1,5 @@
 import type { MobileSuicaSession } from '@mnie/provider-mobile-suica'
-import type { StarbucksJpSessionData } from '@mnie/starbucks-jp'
+import type { StarbucksJpSessionData } from '@mnie/provider-starbucks-jp'
 import type { PlaintextStoredWebAuthnCredential } from '@mnie/provider-sbi-sec'
 import type {
   PayPaySecSession,

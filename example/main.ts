@@ -1,4 +1,4 @@
-import { connectMnie } from '@repo/client-mnie'
+import { connectMnie } from '@mnie/provider-mnie-server'
 
 const client = await connectMnie({
   baseURL: 'https://mnie.example.com',

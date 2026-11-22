@@ -1,9 +1,10 @@
 {
   "name": "example",
+  "version": "0.0.0",
   "private": true,
   "dependencies": {
-    "@mnie/sdk": "workspace:*",
-    "@repo/client-mnie": "workspace:*"
+    "@mnie/provider-mnie-server": "workspace:*",
+    "@mnie/sdk": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest"

@@ -17,7 +17,7 @@ export const assertCaptchaModel = async (modelPath = captchaModelPath()) => {
   try {
     await access(modelPath)
   } catch {
-    throw new Error(`capsolve-sp model is missing: ${modelPath}; run bun install again`)
+    throw new Error(`capsolve-sp model is missing: ${modelPath}; run pnpm install again`)
   }
 }
 

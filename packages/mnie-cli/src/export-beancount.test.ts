@@ -1,4 +1,4 @@
-import type { HistoryItem } from '@repo/client-mnie'
+import type { HistoryItem } from '@mnie/provider-mnie-server'
 import { expect, test, vi } from 'vite-plus/test'
 import { exportBeancount } from './export-beancount'
 
@@ -200,7 +200,7 @@ const runCli = async (...args: string[]) => {
   })
   try {
     vi.resetModules()
-    vi.doMock('@repo/client-mnie', () => ({ connectMnie: vi.fn() }))
+    vi.doMock('@mnie/provider-mnie-server', () => ({ connectMnie: vi.fn() }))
     await import('./index')
     if (args[0] !== '--help') {
       await vi.waitFor(() => expect(exitCode).toBeDefined())

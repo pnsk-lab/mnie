@@ -1,6 +1,15 @@
 {
   "name": "@mnie/provider-smbc-direct",
+  "version": "0.0.1",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pnsk-lab/mnie.git",
+    "directory": "packages/provider-smbc-direct"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "module": "./dist/index.mjs",
   "types": "./src/index.ts",
@@ -11,11 +20,22 @@
       "import": "./dist/index.mjs"
     }
   },
+  "publishConfig": {
+    "types": "./dist/index.d.mts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      }
+    },
+    "access": "public"
+  },
   "scripts": {
     "build": "cd ../.. && cd packages/provider-smbc-direct && vp pack",
     "dev": "vp pack --watch --no-clean",
     "clean": "rm -rf dist",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
     "@mnie/types": "workspace:*",
