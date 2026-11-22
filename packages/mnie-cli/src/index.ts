@@ -5,7 +5,7 @@ import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { connectMnie } from '@repo/client-mnie'
+import { connectMnie } from '@mnie/provider-mnie-server'
 import { exportBeancount } from './export-beancount'
 
 interface Profile {

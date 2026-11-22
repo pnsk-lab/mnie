@@ -1,6 +1,6 @@
 ## Rules
 
-- Run `bun fmt` and `bun typecheck` before finishing.
+- Run `pnpm fmt` and `pnpm typecheck` before finishing.
 - Do not hardcode real endpoint
   - origin のみ。パスは許可。
 

@@ -1,4 +1,4 @@
-import type { HistoryItem, Transaction } from '@repo/client-mnie'
+import type { HistoryItem, Transaction } from '@mnie/provider-mnie-server'
 import { describe, expect, test } from 'vite-plus/test'
 import { formatBeancount } from './beancount'
 

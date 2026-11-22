@@ -1,6 +1,15 @@
 {
   "name": "@mnie/provider-paypay-sec",
+  "version": "0.0.0",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pnsk-lab/mnie.git",
+    "directory": "packages/provider-paypay-sec"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "module": "./dist/index.mjs",
   "types": "./src/index.ts",
@@ -10,12 +19,23 @@
       "import": "./dist/index.mjs"
     }
   },
+  "publishConfig": {
+    "types": "./dist/index.d.mts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      }
+    },
+    "access": "public"
+  },
   "scripts": {
     "build": "cd ../.. && vp run @mnie/types#build && cd packages/provider-paypay-sec && vp pack",
     "dev": "vp pack --watch --no-clean",
     "clean": "rm -rf dist",
     "test": "vp test run",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
     "@mnie/types": "workspace:*",

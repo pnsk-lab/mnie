@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vite-plus/test'
-import { createStarbucksProvider } from './provider'
+import { createProvider } from './provider'
 import type { StarbucksJpSession } from './index'
 
 const session = (
@@ -21,7 +21,7 @@ const session = (
     history: async (cardNumber: string) => histories[cardNumber] ?? [],
   }) as StarbucksJpSession
 
-describe('createStarbucksProvider', () => {
+describe('createProvider', () => {
   test('exposes card balances and normalized transaction history', async () => {
     const cards = [
       {
@@ -38,7 +38,7 @@ describe('createStarbucksProvider', () => {
         sb_card_id: 44379064,
       },
     ]
-    const provider = createStarbucksProvider(
+    const provider = createProvider(
       session(cards, {
         '1234567890123456': [
           {

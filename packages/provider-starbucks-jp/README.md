@@ -1,9 +1,9 @@
-# @mnie/starbucks-jp
+# @mnie/provider-starbucks-jp
 
 Starbucks Japan Light Web App の Node.js クライアントです。
 
 ```ts
-import { createStarbucksJpClient } from '@mnie/starbucks-jp'
+import { createStarbucksJpClient } from '@mnie/provider-starbucks-jp'
 
 const client = createStarbucksJpClient({
   apiOrigin: process.env.STARBUCKS_API_ORIGIN!,
@@ -44,7 +44,7 @@ iOvation WDP runtime（または明示的な `deviceFingerprint`）が必須で�
 import {
   createStarbucksIoBlackboxRuntimeFromLogin,
   createStarbucksJpClient,
-} from '@mnie/starbucks-jp'
+} from '@mnie/provider-starbucks-jp'
 
 const ioBlackboxRuntime = await createStarbucksIoBlackboxRuntimeFromLogin(
   process.env.STARBUCKS_LOGIN_ORIGIN!,
@@ -117,7 +117,7 @@ node tools/analyze-kxz-contract.mjs \
 ```
 
 ```ts
-import { createStarbucksKxzRuntimeFromApp } from '@mnie/starbucks-jp'
+import { createStarbucksKxzRuntimeFromApp } from '@mnie/provider-starbucks-jp'
 
 const kxzRuntime = await createStarbucksKxzRuntimeFromApp(process.env.STARBUCKS_APP_ORIGIN!)
 const client = createStarbucksJpClient({
@@ -140,7 +140,10 @@ canvas/WebGL/audio、イベント列などブラウザ・セッション固有�
 `dynamicFields` として明示的に渡す必要があります。未指定値を Node の値で偽装する fallback はありません。
 
 ```ts
-import { createStarbucksIoBlackboxRuntime, getFingerPrintHeaders } from '@mnie/starbucks-jp'
+import {
+  createStarbucksIoBlackboxRuntime,
+  getFingerPrintHeaders,
+} from '@mnie/provider-starbucks-jp'
 
 const ioBlackboxRuntime = await createStarbucksIoBlackboxRuntime(
   await readFile(process.env.STARBUCKS_IOVATION_WDP!, 'utf8'),

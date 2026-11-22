@@ -30,6 +30,8 @@
               docker
               docker-compose
               git
+              nodejs
+              pnpm
             ];
           };
         }
@@ -53,6 +55,8 @@
             runtimeInputs = [
               pkgs.bun
               pkgs.coreutils
+              pkgs.nodejs
+              pkgs.pnpm
             ];
             text = ''
               env_file="''${MNIE_ENV_FILE:-$PWD/.env}"
@@ -73,9 +77,9 @@
               cp -R --no-preserve=mode,ownership "${self}/." "$source_dir"
 
               cd "$source_dir"
-              bun install --frozen-lockfile --linker hoisted
-              bun run sdk:build
-              bun --filter @repo/mnie-app build
+              pnpm install --frozen-lockfile
+              pnpm run sdk:build
+              pnpm --filter @repo/mnie-app build
 
               export MNIE_DATABASE_PATH="''${MNIE_DATABASE_PATH:-$data_dir/mnie-app.sqlite}"
               exec bun --env-file="$env_file" apps/mnie-app/dist/index.js "$@"
@@ -118,6 +122,8 @@
             runtimeInputs = [
               pkgs.bun
               pkgs.coreutils
+              pkgs.nodejs
+              pkgs.pnpm
             ];
             text = ''
               env_file="''${MNIE_ENV_FILE:-$PWD/.env}"
@@ -138,9 +144,9 @@
               cp -R --no-preserve=mode,ownership "${self}/." "$source_dir"
 
               cd "$source_dir"
-              bun install --frozen-lockfile --linker hoisted
-              bun run sdk:build
-              bun --filter @repo/mnie-app build
+              pnpm install --frozen-lockfile
+              pnpm run sdk:build
+              pnpm --filter @repo/mnie-app build
 
               export MNIE_DATABASE_PATH="''${MNIE_DATABASE_PATH:-$data_dir/mnie-app.sqlite}"
               exec bun --env-file="$env_file" apps/mnie-app/dist/index.js "$@"

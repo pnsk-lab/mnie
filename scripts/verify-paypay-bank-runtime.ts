@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 import { createServerApp } from '../apps/mnie-server/src/app'
 import { loadConfig } from '../apps/mnie-server/src/config'
 import { createDb } from '../apps/mnie-server/src/db'
-import { connectMnie } from '../packages/client-mnie/src/index'
+import { connectMnie } from '../packages/provider-mnie-server/src/index'
 
 const requiredEnv = (name: string) => {
   const value = process.env[name]?.trim()

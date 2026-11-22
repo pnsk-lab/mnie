@@ -1,4 +1,4 @@
-import type { HistoryItem } from '@repo/client-mnie'
+import type { HistoryItem } from '@mnie/provider-mnie-server'
 
 const decimalPattern = /^(?:0|[1-9]\d*)(?:\.\d+)?$/u
 const currencyPattern = /^[A-Z]{3}$/u

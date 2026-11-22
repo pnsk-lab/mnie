@@ -1,9 +1,13 @@
-FROM oven/bun:1 AS deps
-RUN apt-get update \
+FROM node:24-slim AS base
+COPY --from=oven/bun:1 /usr/local/bin/bun /usr/local/bin/bun
+RUN npm install -g pnpm@12.6.0 \
+  && apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY package.json bun.lock tsconfig.json vite.config.ts ./
+
+FROM base AS deps
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json vite.config.ts ./
 COPY scripts/download-capsolve-model.ts scripts/download-capsolve-model.ts
 COPY packages/auth-bitwarden/package.json packages/auth-bitwarden/package.json
 COPY packages/capsolve-sp/package.json packages/capsolve-sp/package.json
@@ -14,27 +18,27 @@ COPY packages/provider-paypay-sec/package.json packages/provider-paypay-sec/pack
 COPY packages/provider-paypay-bank/package.json packages/provider-paypay-bank/package.json
 COPY packages/provider-vpass/package.json packages/provider-vpass/package.json
 COPY packages/provider-smbc-direct/package.json packages/provider-smbc-direct/package.json
-COPY packages/starbucks-jp/package.json packages/starbucks-jp/package.json
+COPY packages/provider-starbucks-jp/package.json packages/provider-starbucks-jp/package.json
 COPY packages/mnie-types/package.json packages/mnie-types/package.json
 COPY packages/mnie-sdk/package.json packages/mnie-sdk/package.json
 COPY packages/mnie-cli/package.json packages/mnie-cli/package.json
-COPY packages/client-mnie/package.json packages/client-mnie/package.json
-COPY packages/client-nissay-401k/package.json packages/client-nissay-401k/package.json
+COPY packages/provider-mnie-server/package.json packages/provider-mnie-server/package.json
+COPY packages/provider-nissay-401k/package.json packages/provider-nissay-401k/package.json
 COPY packages/tsconfig/package.json packages/tsconfig/package.json
 COPY apps/mnie-app/package.json apps/mnie-app/package.json
 COPY apps/mnie-server/package.json apps/mnie-server/package.json
 COPY apps/mnie-ui/package.json apps/mnie-ui/package.json
 COPY example/package.json example/package.json
 COPY docs/package.json docs/package.json
-RUN bun install --frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
 COPY . .
 RUN MNIE_BUILD_DTS=false ./node_modules/.bin/vp run --no-cache sdk-build \
-  && bun --filter @repo/mnie-app build
+  && pnpm --filter @repo/mnie-app build
 RUN mkdir -p /keyring-node-modules/@napi-rs \
-  && cp -R /app/node_modules/.bun/@napi-rs+keyring@*/node_modules/@napi-rs/keyring /keyring-node-modules/@napi-rs/keyring \
-  && for package in /app/node_modules/.bun/@napi-rs+keyring-linux-*@*/node_modules/@napi-rs/keyring-linux-*; do \
+  && cp -R /app/node_modules/.pnpm/@napi-rs+keyring@*/node_modules/@napi-rs/keyring /keyring-node-modules/@napi-rs/keyring \
+  && for package in /app/node_modules/.pnpm/@napi-rs+keyring-linux-*@*/node_modules/@napi-rs/keyring-linux-*; do \
     cp -R "$package" "/keyring-node-modules/@napi-rs/$(basename "$package")"; \
   done
 

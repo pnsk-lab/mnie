@@ -6,7 +6,7 @@ on:
       - 'apps/**'
       - 'packages/**'
       - 'package.json'
-      - 'bun.lock'
+      - 'pnpm-lock.yaml'
       - 'vite.config.ts'
       - '.dockerignore'
       - '.github/workflows/container.yml'

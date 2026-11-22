@@ -1,22 +1,35 @@
 {
   "name": "@mnie/cli",
-  "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pnsk-lab/mnie.git",
+    "directory": "packages/mnie-cli"
+  },
   "bin": {
     "mnie": "./dist/index.mjs"
   },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "cd ../.. && vp run @repo/client-mnie#build && cd packages/mnie-cli && vp pack",
+    "build": "cd ../.. && vp run @mnie/provider-mnie-server#build && cd packages/mnie-cli && vp pack",
     "dev": "vp pack --watch",
     "clean": "rm -rf dist",
     "typecheck": "tsc",
-    "mnie": "bun src/index.ts"
+    "mnie": "bun src/index.ts",
+    "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@napi-rs/keyring": "^1.2.0",
-    "@repo/client-mnie": "workspace:*"
+    "@mnie/provider-mnie-server": "workspace:*",
+    "@napi-rs/keyring": "^1.2.0"
   },
   "devDependencies": {
     "@repo/tsconfig": "workspace:*",
