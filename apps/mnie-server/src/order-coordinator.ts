@@ -139,7 +139,17 @@ export const storeOrderQuote = async (
   const publicPreview = {
     ...Object.fromEntries(
       Object.entries(preview).filter(([key]) =>
-        ['estimatedAmount', 'quantity', 'price', 'exchangeRate', 'warnings', 'fees'].includes(key),
+        [
+          'estimatedAmount',
+          'tradeAmount',
+          'heldAmount',
+          'settlementCurrency',
+          'quantity',
+          'price',
+          'exchangeRate',
+          'warnings',
+          'fees',
+        ].includes(key),
       ),
     ),
     confirmationToken: id,

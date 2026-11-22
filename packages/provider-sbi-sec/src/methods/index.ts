@@ -487,17 +487,21 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
                 ),
                 options,
               ),
-        open: async (options) =>
-          options?.market && isUsMarket(options.market)
-            ? usStock.orders(options)
-            : parseOrdersLoose(
-                await callMtsReturningHeaderError(
-                  session,
-                  'F2511',
-                  recentOrdersTrin(session, options),
-                ),
-                options,
-              ),
+        open: async (options) => {
+          if (options?.market && isUsMarket(options.market)) return usStock.orders(options)
+          const domestic = parseOrdersLoose(
+            await callMtsReturningHeaderError(session, 'F2511', recentOrdersTrin(session, options)),
+            options,
+          )
+          // Without a market filter the snapshot must include US open orders
+          // or the caller cannot attribute every broker-side reservation.
+          if (options?.market || !session.foreignStock) return domestic
+          const us = await usStock.orders({
+            issueCode: options?.issueCode,
+            status: options?.status ?? 'open',
+          })
+          return { ...domestic, orders: [...domestic.orders, ...us.orders] }
+        },
         detail: async (options) => {
           if (isUsMarket(options.market)) return usStock.orderDetail(options)
           throw new Error(

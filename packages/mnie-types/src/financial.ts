@@ -430,6 +430,12 @@ export interface InvestmentOrderRequest {
   sellAll?: boolean
   /** Position identifier returned by investments.positions.list when a sale addresses one holding. */
   positionId?: string
+  /**
+   * Settlement mode for foreign securities where the provider offers a choice.
+   * `'yen'` settles in JPY while `'foreign'` settles in the instrument's trading
+   * currency. Providers default to `'yen'` when omitted.
+   */
+  settlementMethod?: 'yen' | 'foreign'
 }
 
 export type InvestmentOrderSizing =
@@ -472,7 +478,21 @@ export interface InvestmentOrderRules {
 }
 
 export interface InvestmentOrderPreview {
+  /** Estimated settlement amount in the settlement currency. */
   estimatedAmount?: Money
+  /**
+   * Estimated amount in the instrument's trading currency. Present when the
+   * trading currency differs from the settlement currency.
+   */
+  tradeAmount?: Money
+  /**
+   * Cash amount the provider will reserve for this order, in the settlement
+   * currency. For buys it includes the provider's exchange-rate buffer and
+   * fees; it may differ from `estimatedAmount`.
+   */
+  heldAmount?: Money
+  /** ISO 4217 settlement currency when the provider offers settlement modes. */
+  settlementCurrency?: string
   quantity?: string
   price?: Money
   exchangeRate?: string
@@ -553,6 +573,8 @@ export interface InvestmentOrder extends FinancialOperationEffectResult {
   statusText?: string
   cancelable?: boolean
   correctable?: boolean
+  /** ISO 4217 settlement currency when the order settles in a non-default currency. */
+  settlementCurrency?: string
   accountInformation?: string
 }
 
