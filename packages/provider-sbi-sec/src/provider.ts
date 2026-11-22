@@ -113,6 +113,9 @@ const priceCondition = (request: InvestmentOrderRequest): CashOrderPriceConditio
 const cashOrderInput = (request: InvestmentOrderRequest): CashOrderOptions => {
   if (request.amount) throw new Error('SBI Securities does not support amount-specified orders')
   const market = sbiMarket(request.execution?.venue, 'execution.venue')
+  if (request.settlementMethod && !isUsMarket(market)) {
+    throw new Error('settlementMethod is supported only for US stock orders')
+  }
   const quantity = finiteNumber(request.quantity, 'quantity')
   const accountType = sbiAccountType(request.accountType)
   const isSKabu = market === 'STK'
@@ -123,6 +126,7 @@ const cashOrderInput = (request: InvestmentOrderRequest): CashOrderOptions => {
     quantity,
     accountType,
     depositType: accountType,
+    foreignStockSettlementMethod: request.settlementMethod,
   }
   if (isSKabu) {
     if (request.execution?.priceType !== 'market' || request.execution.limitPrice) {
@@ -205,24 +209,30 @@ const ifdOrderInput = (request: InvestmentOrderRequest): IfdOrderOptions => {
 const commonPreview = (
   preview: Awaited<ReturnType<SbiClientMethods['orders']['cash']['estimate']>>,
   request: InvestmentOrderRequest,
-): InvestmentOrderPreview => ({
-  estimatedAmount: money(preview.estimatedAmount),
-  warnings: [...preview.warnings, ...(preview.message ? [preview.message] : [])],
-  confirmationToken: preview.confirmationId,
-  projectedAssetChanges: orderReservationChanges(request, money(preview.estimatedAmount)),
-})
+): InvestmentOrderPreview => {
+  const heldAmount = money(preview.heldAmount) ?? money(preview.estimatedAmount)
+  return {
+    estimatedAmount: money(preview.estimatedAmount),
+    tradeAmount: money(preview.tradeAmount),
+    heldAmount,
+    settlementCurrency: preview.settlementCurrency,
+    warnings: [...preview.warnings, ...(preview.message ? [preview.message] : [])],
+    confirmationToken: preview.confirmationId,
+    projectedAssetChanges: orderReservationChanges(request, heldAmount),
+  }
+}
 
 const orderReservationChanges = (
   request: InvestmentOrderRequest,
-  estimatedAmount?: { currency: string; value: string },
+  heldAmount?: { currency: string; value: string },
 ): FinancialAssetChange[] => {
   if (request.side === 'buy') {
-    if (!estimatedAmount) throw new Error('provider did not return the estimated order amount')
+    if (!heldAmount) throw new Error('provider did not return the settlement order amount')
     return [
       {
-        asset: { kind: 'cash', currency: estimatedAmount.currency },
-        availableDelta: `-${estimatedAmount.value}`,
-        reservedDelta: estimatedAmount.value,
+        asset: { kind: 'cash', currency: heldAmount.currency },
+        availableDelta: `-${heldAmount.value}`,
+        reservedDelta: heldAmount.value,
         pendingDelta: '0',
       },
     ]
@@ -326,6 +336,7 @@ const commonOrder = (order: Order, accountId: string): InvestmentOrder => ({
   statusText: order.statusText,
   cancelable: order.cancelable,
   correctable: order.correctable,
+  settlementCurrency: order.settlementCurrency,
   accountInformation: order.accountInformation,
 })
 
@@ -404,7 +415,6 @@ const orderEffects = (order: Order): FinancialOperationEffects | undefined => {
   const unexecuted = terminal
     ? 0
     : (order.unexecutedQuantity ?? Math.max((order.quantity ?? 0) - executed, 0))
-  const fees = (order.commission?.value ?? 0) + (order.tax?.value ?? 0)
   const security: FinancialAssetReference = {
     kind: 'security',
     instrumentId: order.issue.code,
@@ -412,8 +422,58 @@ const orderEffects = (order: Order): FinancialOperationEffects | undefined => {
     positionType: 'cash',
     ...(order.accountType ? { accountType: order.accountType } : {}),
   }
-  const cash: FinancialAssetReference = { kind: 'cash', currency: 'JPY' }
   const changes: FinancialAssetChange[] = []
+  if (order.settlementCurrency) {
+    // Settlement-currency path (foreign securities). Only amounts the broker
+    // itself reported may move the ledger: an open partial fill has no
+    // attributable remaining hold, so the effects stay unaccountable.
+    const cash: FinancialAssetReference = {
+      kind: 'cash',
+      currency: order.settlementCurrency,
+    }
+    if (executed > 0 && unexecuted > 0) return undefined
+    if (order.side === 'buy') {
+      const reserved = unexecuted > 0 ? order.heldAmount?.value : 0
+      const spent = executed > 0 ? order.settledAmount?.value : 0
+      if (reserved == null || spent == null) return undefined
+      if (reserved + spent > 0)
+        changes.push({
+          asset: cash,
+          availableDelta: `-${reserved + spent}`,
+          reservedDelta: String(reserved),
+          pendingDelta: '0',
+        })
+      if (executed > 0)
+        changes.push({
+          asset: security,
+          availableDelta: String(executed),
+          reservedDelta: '0',
+          pendingDelta: '0',
+        })
+      return { referenceId: order.id, changes }
+    }
+    const total = executed + unexecuted
+    if (total > 0)
+      changes.push({
+        asset: security,
+        availableDelta: `-${total}`,
+        reservedDelta: String(unexecuted),
+        pendingDelta: '0',
+      })
+    if (executed > 0) {
+      const settled = order.settledAmount?.value
+      if (settled == null) return undefined
+      changes.push({
+        asset: cash,
+        availableDelta: String(settled),
+        reservedDelta: '0',
+        pendingDelta: '0',
+      })
+    }
+    return { referenceId: order.id, changes }
+  }
+  const fees = (order.commission?.value ?? 0) + (order.tax?.value ?? 0)
+  const cash: FinancialAssetReference = { kind: 'cash', currency: 'JPY' }
   if (order.side === 'buy') {
     const reserved =
       unexecuted > 0 ? (order.price?.value == null ? undefined : unexecuted * order.price.value) : 0
@@ -791,6 +851,9 @@ export const createProviderFromClient = (
           return result as never
         }
         const placement = input as InvestmentOrderPlacement
+        // US confirmations mint a local token, never a broker orderSubNo, so
+        // the token must not be forwarded into the broker submission.
+        const usMarket = 'market' in options && isUsMarket(options.market)
         const receipt =
           input.strategy?.kind === 'ifd'
             ? await client.orders.ifd.place({
@@ -800,7 +863,7 @@ export const createProviderFromClient = (
               })
             : await client.orders.cash.place({
                 ...(options as CashOrderOptions),
-                confirmationId: placement.confirmationToken,
+                confirmationId: usMarket ? undefined : placement.confirmationToken,
                 allowTrading: true,
               })
         const result = commonReceipt(input, receipt, currentAccount.id)
@@ -1028,7 +1091,7 @@ export const createProviderFromClient = (
           issueCode: source?.issue.code ?? input.instrumentId,
           market,
         })
-        return commonOrder(detail, currentAccount.id) as never
+        return withOrderEffects(commonOrder(detail, currentAccount.id), detail) as never
       }
       if (name === 'investments.trades.list') {
         const input = request as { account?: string; venue?: string; limit?: number }

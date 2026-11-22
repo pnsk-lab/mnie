@@ -216,9 +216,12 @@ export const createUsStockAdapter = (session: SbiSession) => ({
     const order = objectAt(data, ['createForeignStockOrder', 'order'])
     return {
       accepted: true,
-      orderId: stringAt(order, ['orderNo']) ?? stringAt(order, ['orderSubNo']),
+      // orderSubNo is the identity used by order lists and cancellations.
+      orderId: stringAt(order, ['orderSubNo']) ?? stringAt(order, ['orderNo']),
       acceptedAt: stringAt(order, ['orderInputDatetime']),
-      message: stringAt(data, ['createForeignStockOrder', 'message']),
+      message:
+        stringAt(order, ['orderStatus']) ??
+        stringArrayAt(data, ['createForeignStockOrder', 'warningStatuses']).join(','),
     }
   },
   estimateCorrection: async (options: OrderCorrectionOptions): Promise<OrderPreview> => {
@@ -240,14 +243,14 @@ export const createUsStockAdapter = (session: SbiSession) => ({
     )
     const init = objectAt(data, ['getForeignStockUpdatedOrderInitialization'])
     const initOrder = objectAt(init, ['order'])
+    const initSettlementCurrency = usSettlementCurrency(initOrder) ?? order.settlementCurrency
     return {
       issue: order.issue,
       side: order.side,
       quantity: numberAt(initOrder, ['orderQuantity']) ?? order.quantity ?? options.quantity,
       price: usd(stringAt(initOrder, ['orderPrice']) ?? String(options.price ?? '')),
-      estimatedAmount: usd(stringAt(initOrder, ['frnNetAmount'])),
-      commission: usd(stringAt(initOrder, ['frnCommissionAmount'])),
-      tax: usd(stringAt(initOrder, ['frnCommissionCtax'])),
+      estimatedAmount: usSettlementSideAmount(initOrder) ?? order.settledAmount,
+      settlementCurrency: initSettlementCurrency,
       warnings: [],
       confirmationId: input.orderSubNo,
       correction: usOrderCorrectionPreOrderFromOrder(order, init),
@@ -294,9 +297,10 @@ export const createUsStockAdapter = (session: SbiSession) => ({
       side: order.side,
       quantity: order.unexecutedQuantity ?? order.quantity ?? undefined,
       price: order.price,
-      estimatedAmount: usd(stringAt(order, ['frnNetAmount'])),
-      commission: usd(''),
-      tax: usd(''),
+      estimatedAmount: order.settledAmount ?? order.heldAmount,
+      settlementCurrency: order.settlementCurrency,
+      commission: undefined,
+      tax: undefined,
       warnings: [],
       confirmationId: orderSubNo,
       correction: usOrderCorrectionPreOrderFromOrder(order),
@@ -435,9 +439,9 @@ const fetchUsOrders = async (
       page: { pageNum: options?.index ?? 1, pageSize: options?.limit ?? 999 },
     },
   })
-  const orders = arrayAt(data, ['listForeignStockOrders', 'orderDecodes']).map((order) =>
-    orderFromGraphql(order),
-  )
+  const rows = arrayAt(data, ['listForeignStockOrders', 'orderDecodes'])
+  const orders = rows.map((order) => orderFromGraphql(order))
+  await Promise.all(orders.map((order, index) => hydrateUsOrder(session, order, rows[index])))
   const list = objectAt(data, ['listForeignStockOrders'])
   return {
     orders: orders.filter((order) => {
@@ -472,12 +476,81 @@ const fetchUsOrderDetail = async (
   const detail = objectAt(data, ['getForeignStockOrderDetail', 'orderDetail'])
   const order = objectAt(detail, ['order'])
   if (!order) throw new Error('orders.inquiry.detail returned no US stock order detail')
-  return orderFromGraphql(order, {
+  const parsed = orderFromGraphql(order, {
     issue: base.issue,
     cancelable: booleanAt(detail, ['cancelable']),
     correctable: booleanAt(detail, ['correctable']),
   })
+  await hydrateUsOrder(session, parsed, order)
+  return parsed
 }
+
+/**
+ * Supplies the settlement-side amounts SBI never puts on order-list rows.
+ * Open buys replay the order through `confirmForeignStockCreatedOrder` so the
+ * reservation matches the broker's own hold calculation (buffered FX and
+ * fees). Orders with executions read the settled amount from the order
+ * detail. Amounts that cannot be established stay unset so callers must not
+ * substitute estimates.
+ */
+const hydrateUsOrder = async (session: SbiSession, order: Order, raw: unknown) => {
+  const executed = order.executedQuantity ?? 0
+  const unexecuted = order.unexecutedQuantity ?? 0
+  if (executed > 0) {
+    if (order.settledAmount?.value != null) return
+    const orderNo = order.orderNumber ?? stringAt(raw, ['orderNo'])
+    if (!orderNo) return
+    try {
+      const data = await callUsGraphql(
+        session,
+        'GetOrderSettlementDetail',
+        ORDER_SETTLEMENT_DETAIL,
+        { input: { orderNo } },
+      )
+      const detailOrder = objectAt(data, ['getForeignStockOrderDetail', 'orderDetail', 'order'])
+      order.settlementCurrency ??= usSettlementCurrency(detailOrder)
+      const settled = usSettledAmount(detailOrder)
+      if (settled?.value != null) order.settledAmount = settled
+    } catch {
+      // A missing settled amount leaves the order unaccountable; never guess.
+    }
+    return
+  }
+  if (order.status !== 'open' || order.side !== 'buy' || unexecuted <= 0) return
+  if (!session.tradePassword) return
+  try {
+    const data = await callUsGraphql(
+      session,
+      'ConfirmOrderCreating',
+      CONFIRM_ORDER,
+      { input: { order: usHoldConfirmInput(raw, unexecuted, order) } },
+      { tradePassword: session.tradePassword },
+    )
+    const confirmed = objectAt(data, ['confirmForeignStockCreatedOrder', 'order'])
+    order.settlementCurrency ??= usSettlementCurrency(confirmed)
+    const held = usSettlementSideAmount(confirmed)
+    if (held?.value != null) order.heldAmount = held
+  } catch {
+    // The broker hold cannot be derived; never substitute an estimate.
+  }
+}
+
+const usHoldConfirmInput = (raw: unknown, unexecuted: number, order: Order) => ({
+  countryCode: COUNTRY_US,
+  marketCode:
+    stringAt(raw, ['market', 'marketCode']) ??
+    (order.issue.market ? usGraphqlMarketCode(order.issue.market) : undefined),
+  securitiesCode: stringAt(raw, ['securities', 'securitiesCode']) || order.issue.code || undefined,
+  buySellCode: 'BUY',
+  orderQuantity: String(unexecuted),
+  orderPrice:
+    stringAt(raw, ['orderPriceKindCode']) === 'LIMIT' ? stringAt(raw, ['orderPrice']) : undefined,
+  orderPriceKindCode: stringAt(raw, ['orderPriceKindCode']),
+  orderLimitCode: stringAt(raw, ['orderLimitCode']),
+  orderTerm: stringAt(raw, ['orderTerm']),
+  specificAccountCode: stringAt(raw, ['specificAccountCode']),
+  settlementMethodCode: stringAt(raw, ['settlementMethodCode']),
+})
 
 const fetchUsTradeRecords = async (
   session: SbiSession,
@@ -672,20 +745,92 @@ const orderPreviewFromConfirmation = (
 ): OrderPreview => {
   const confirmation = objectAt(data, ['confirmForeignStockCreatedOrder'])
   const order = objectAt(confirmation, ['order'])
+  const settlementCurrency = usSettlementCurrency(order)
+  const settlementAmount = usSettlementSideAmount(order)
+  // SBI returns the settlement amount already computed with its buffered
+  // exchange rate, so it is simultaneously the reservation the broker holds.
   return {
     issue: { code: options.issueCode, market: options.market },
     side: options.side,
     quantity: options.quantity,
     price: usd(String(options.price ?? '')),
-    estimatedAmount: usd(
-      stringAt(confirmation, ['estimatePrice']) ?? stringAt(order, ['frnNetAmount']),
+    estimatedAmount: settlementAmount,
+    heldAmount: options.side === 'buy' ? settlementAmount : undefined,
+    settlementCurrency,
+    tradeAmount: usTradeAmount(order),
+    buyingPower: currencyAmount(stringAt(confirmation, ['buyPossibleAmount']), settlementCurrency),
+    exchangeRate: stringAt(order, ['exchangeRate']),
+    commission: currencyAmount(
+      stringAt(
+        order,
+        settlementCurrency === 'JPY' ? ['commissionAmount'] : ['frnCommissionAmount'],
+      ),
+      settlementCurrency,
     ),
-    commission: usd(stringAt(order, ['frnCommissionAmount'])),
-    tax: usd(stringAt(order, ['frnCommissionCtax'])),
+    tax: currencyAmount(
+      stringAt(order, settlementCurrency === 'JPY' ? ['commissionCtax'] : ['frnCommissionCtax']),
+      settlementCurrency,
+    ),
     warnings: stringArrayAt(confirmation, ['warningStatuses']),
-    confirmationId: stringAt(order, ['orderNo']) ?? stringAt(order, ['orderSubNo']),
+    // US confirmations carry no broker-side reference; mint a local token so
+    // callers can correlate the preview with a later submission.
+    confirmationId: stringAt(order, ['orderNo']) || stringAt(order, ['orderSubNo']) || randomUUID(),
   }
 }
+
+/**
+ * Resolves the settlement currency of a US stock order row.
+ * `settlementCurrencyCode` is authoritative; the method code maps to JPY or
+ * the instrument's trade currency (always USD for US stocks).
+ */
+const usSettlementCurrency = (
+  order: Record<string, unknown> | undefined,
+): 'JPY' | 'USD' | undefined => {
+  const explicit = stringAt(order, ['settlementCurrencyCode'])
+  if (explicit === 'JPY' || explicit === 'USD') return explicit
+  const method = stringAt(order, ['settlementMethodCode'])
+  if (method === 'YEN_SETTLEMENT') return 'JPY'
+  // US stocks always trade in USD, so foreign settlement settles in USD.
+  if (method === 'FOREIGN_SETTLEMENT') return 'USD'
+  return undefined
+}
+
+/**
+ * Picks the settlement-side amount from a US stock order row. SBI returns
+ * `netAmount` in JPY and `frnNetAmount` in the foreign (trade) currency; only
+ * the side matching the settlement currency is populated.
+ */
+const usSettlementSideAmount = (
+  order: Record<string, unknown> | undefined,
+): CurrencyAmount | undefined => {
+  const currency = usSettlementCurrency(order)
+  if (!currency) return undefined
+  return currencyAmount(
+    stringAt(order, currency === 'JPY' ? ['netAmount'] : ['frnNetAmount']),
+    currency,
+  )
+}
+
+/**
+ * Settlement amount actually paid or received for the executed quantity.
+ * `executionNetAmount` is the JPY-side executed total; there is no foreign
+ * counterpart, so foreign settlement keeps `frnNetAmount`.
+ */
+const usSettledAmount = (
+  order: Record<string, unknown> | undefined,
+): CurrencyAmount | undefined => {
+  const currency = usSettlementCurrency(order)
+  if (!currency) return undefined
+  const executedOnly = currency === 'JPY' ? stringAt(order, ['executionNetAmount']) : undefined
+  return currencyAmount(
+    executedOnly || stringAt(order, currency === 'JPY' ? ['netAmount'] : ['frnNetAmount']),
+    currency,
+  )
+}
+
+/** Trade-currency contract amount (`frn*` fields are always USD for US stocks). */
+const usTradeAmount = (order: Record<string, unknown> | undefined): CurrencyAmount | undefined =>
+  usd(stringAt(order, ['frnNetAmount']) || stringAt(order, ['frnGrossAmount']))
 
 const orderFromGraphql = (
   value: unknown,
@@ -695,6 +840,8 @@ const orderFromGraphql = (
   const securities = objectAt(value, ['securities'])
   const orderNo = stringAt(value, ['orderNo'])
   const orderSubNo = stringAt(value, ['orderSubNo'])
+  const executed = numberAt(value, ['executionQuantity'])
+  const row = value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined
   return {
     id: orderSubNo ?? orderNo ?? '',
     issue: {
@@ -710,7 +857,7 @@ const orderFromGraphql = (
     statusText: stringAt(value, ['orderStatus']),
     quantity: numberAt(value, ['orderQuantity']),
     unexecutedQuantity: numberAt(value, ['unexecutedQuantity']),
-    executedQuantity: numberAt(value, ['executionQuantity']),
+    executedQuantity: executed,
     price: usd(stringAt(value, ['orderPrice'])),
     executedPrice: usd(stringAt(value, ['executionAveragePrice'])),
     orderedAt: stringAt(value, ['orderInputDatetime']),
@@ -721,6 +868,8 @@ const orderFromGraphql = (
     depositType: mapUsSpecificAccount(stringAt(value, ['specificAccountCode'])),
     cancelable: extra.cancelable,
     correctable: extra.correctable,
+    settlementCurrency: usSettlementCurrency(row),
+    settledAmount: executed != null && executed > 0 ? usSettledAmount(row) : undefined,
   }
 }
 
@@ -860,14 +1009,32 @@ const orderUpdatePreviewFromConfirmation = (
 ): OrderPreview => {
   const confirmation = objectAt(data, ['confirmForeignStockUpdatedOrder'])
   const confirmedOrder = objectAt(confirmation, ['order'])
+  const settlementCurrency = usSettlementCurrency(confirmedOrder) ?? order.settlementCurrency
+  const settlementAmount = usSettlementSideAmount(confirmedOrder)
   return {
     issue: order.issue,
     side: order.side,
     quantity: options.quantity,
     price: usd(stringAt(confirmedOrder, ['orderPrice']) ?? String(options.price ?? '')),
-    estimatedAmount: usd(stringAt(confirmedOrder, ['frnNetAmount'])),
-    commission: usd(stringAt(confirmedOrder, ['frnCommissionAmount'])),
-    tax: usd(stringAt(confirmedOrder, ['frnCommissionCtax'])),
+    estimatedAmount: settlementAmount,
+    heldAmount: order.side === 'buy' ? settlementAmount : undefined,
+    settlementCurrency,
+    tradeAmount: usTradeAmount(confirmedOrder),
+    exchangeRate: stringAt(confirmedOrder, ['exchangeRate']),
+    commission: currencyAmount(
+      stringAt(
+        confirmedOrder,
+        settlementCurrency === 'JPY' ? ['commissionAmount'] : ['frnCommissionAmount'],
+      ),
+      settlementCurrency,
+    ),
+    tax: currencyAmount(
+      stringAt(
+        confirmedOrder,
+        settlementCurrency === 'JPY' ? ['commissionCtax'] : ['frnCommissionCtax'],
+      ),
+      settlementCurrency,
+    ),
     warnings: stringArrayAt(confirmation, ['warningStatuses']),
     confirmationId: stringAt(confirmedOrder, ['orderSubNo']) ?? order.orderSubNo,
     correction: usOrderCorrectionPreOrderFromOrder(order),
@@ -1078,9 +1245,9 @@ const mapOrderStatus = (value: string | undefined): Order['status'] => {
 
 const usMarketFromGraphql = (market: unknown, fallback: MarketCode = 'XNAS'): MarketCode => {
   const code = stringAt(market, ['marketCode'])
-  if (code === 'NASDAQ' || code === 'XNAS') return 'XNAS'
-  if (code === 'NYSE' || code === 'XNYS') return 'XNYS'
-  if (code === 'NYSE_ARCA' || code === 'ARCX') return 'ARCX'
+  if (code === 'NASDAQ' || code === 'US_NASDAQ' || code === 'XNAS') return 'XNAS'
+  if (code === 'NYSE' || code === 'US_NYSE' || code === 'US_AMEX' || code === 'XNYS') return 'XNYS'
+  if (code === 'NYSE_ARCA' || code === 'US_ARCA' || code === 'ARCX') return 'ARCX'
   return fallback
 }
 
@@ -1110,6 +1277,18 @@ const usd = (text: string | undefined): CurrencyAmount => ({
   text: text?.trim() ?? '',
   currency: 'USD',
 })
+
+const currencyAmount = (
+  text: string | undefined,
+  currency: CurrencyAmount['currency'] | undefined,
+): CurrencyAmount | undefined =>
+  currency == null
+    ? undefined
+    : {
+        value: parseNumber(text),
+        text: text?.trim() ?? '',
+        currency,
+      }
 
 const percent = (text: string | undefined) => ({
   value: parseNumber(text),
@@ -1261,7 +1440,11 @@ query ConfirmOrderCreating($input: Input_fstock_order_ConfirmForeignStockCreated
   confirmForeignStockCreatedOrder(input: $input) {
     buyPossibleAmount estimatePrice nisaBuyLimitAmount sellPossibleQuantity warningStatuses
     order {
-      orderNo orderSubNo orderInputDatetime orderQuantity orderPrice frnNetAmount frnCommissionAmount frnCommissionCtax
+      orderNo orderSubNo orderInputDatetime orderQuantity orderPrice
+      settlementMethodCode settlementCurrencyCode tradeCurrencyCode exchangeRate
+      grossAmount frnGrossAmount localCharge frnLocalCharge localNetAmount frnLocalNetAmount
+      commissionAmount frnCommissionAmount commissionCtax frnCommissionCtax
+      netAmount frnNetAmount
       securities { securitiesCode securitiesName securitiesShortName }
       market { marketCode marketName marketShortName }
     }
@@ -1272,11 +1455,13 @@ const SUBMIT_ORDER = `
 mutation SubmitOrderCreating($input: Input_fstock_order_CreateForeignStockOrderRequest) {
   createForeignStockOrder(input: $input) {
     order {
-      orderNo orderSubNo orderInputDatetime orderQuantity orderPrice
+      orderNo orderSubNo orderInputDatetime orderQuantity orderPrice orderStatus
+      settlementMethodCode settlementCurrencyCode tradeCurrencyCode exchangeRate
+      netAmount frnNetAmount
       securities { securitiesCode securitiesName securitiesShortName }
       market { marketCode marketName marketShortName }
     }
-    message
+    warningStatuses
   }
 }`
 
@@ -1286,6 +1471,7 @@ query GetOrderList($input: Input_fstock_order_ListForeignStockOrdersRequest) {
     orderDecodes {
       orderNo orderSubNo buySellCode orderStatus orderQuantity unexecutedQuantity executionQuantity
       orderPrice executionAveragePrice orderInputDatetime orderTerm specificAccountCode
+      orderPriceKindCode orderLimitCode settlementMethodCode executionStatus
       securities { securitiesCode securitiesName securitiesShortName }
       market { marketCode marketName marketShortName }
     }
@@ -1301,7 +1487,8 @@ query GetOrderUpdatingInitialData($countryCode: common_enums_CountryEnum_Country
     orderPriceKindCodes buyPossibleAmount
     order {
       orderNo orderSubNo buySellCode orderStatus orderQuantity unexecutedQuantity executionQuantity
-      orderPrice executionAveragePrice orderInputDatetime orderTerm frnNetAmount frnCommissionAmount frnCommissionCtax
+      orderPrice executionAveragePrice orderInputDatetime orderTerm
+      settlementMethodCode settlementCurrencyCode netAmount frnNetAmount
       securities { securitiesCode securitiesName securitiesShortName }
       market { marketCode marketName marketShortName }
     }
@@ -1323,7 +1510,10 @@ query ConfirmOrderUpdating($input: Input_fstock_order_ConfirmForeignStockUpdated
     buyPossibleAmount nisaBuyLimitAmount warningStatuses
     order {
       orderNo orderSubNo buySellCode orderStatus orderQuantity unexecutedQuantity executionQuantity
-      orderPrice executionAveragePrice orderInputDatetime orderTerm frnNetAmount frnCommissionAmount frnCommissionCtax
+      orderPrice executionAveragePrice orderInputDatetime orderTerm
+      settlementMethodCode settlementCurrencyCode tradeCurrencyCode exchangeRate
+      grossAmount frnGrossAmount commissionAmount frnCommissionAmount
+      commissionCtax frnCommissionCtax netAmount frnNetAmount
       securities { securitiesCode securitiesName securitiesShortName }
       market { marketCode marketName marketShortName }
     }
@@ -1357,6 +1547,18 @@ mutation SubmitOrderCancelling($input: Input_fstock_order_DeleteForeignStockOrde
       orderPrice executionAveragePrice orderInputDatetime orderTerm
       securities { securitiesCode securitiesName securitiesShortName }
       market { marketCode marketName marketShortName }
+    }
+  }
+}`
+
+const ORDER_SETTLEMENT_DETAIL = `
+query GetOrderSettlementDetail($input: Input_fstock_order_GetForeignStockOrderDetailRequest) {
+  getForeignStockOrderDetail(input: $input) {
+    orderDetail {
+      order {
+        orderNo orderSubNo orderStatus settlementMethodCode settlementCurrencyCode tradeCurrencyCode
+        executionQuantity unexecutedQuantity netAmount frnNetAmount executionNetAmount exchangeRate
+      }
     }
   }
 }`

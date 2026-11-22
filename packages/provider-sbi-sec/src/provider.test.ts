@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from 'vite-plus/test'
 import type { InvestmentOrderPlacement, InvestmentOrderRequest } from '@mnie/types'
 import type { SbiClientMethods } from './methods/types'
+import type { Order } from './types'
 import { createProviderFromClient } from './provider'
 
 const request = (overrides: Partial<InvestmentOrderRequest> = {}): InvestmentOrderRequest => ({
@@ -170,6 +171,7 @@ describe('SBI provider-neutral order adapter', () => {
     expect(provider.methods()).toContain('investments.orders.preview')
     await expect(provider.invoke('investments.orders.preview', request())).resolves.toEqual({
       estimatedAmount: { currency: 'JPY', value: '250000' },
+      heldAmount: { currency: 'JPY', value: '250000' },
       warnings: [],
       confirmationToken: 'confirmation',
       projectedAssetChanges: [
@@ -468,5 +470,231 @@ describe('SBI provider-neutral order adapter', () => {
     })) as { id: string; status: string; confirmed?: boolean; effects?: { changes: unknown[] } }
     expect(result).toMatchObject({ id: 'order-1', status: 'cancelled', confirmed: true })
     expect(result.effects).toEqual({ referenceId: 'order-1', changes: [] })
+  })
+})
+
+describe('US stock settlement currency handling', () => {
+  const usRequest = (overrides: Partial<InvestmentOrderRequest> = {}) =>
+    request({
+      instrumentId: 'F',
+      instrumentVenue: 'XNYS',
+      quantity: '1',
+      execution: {
+        priceType: 'limit',
+        limitPrice: { currency: 'USD', value: '5.58' },
+        timing: 'realtime',
+        venue: 'XNYS',
+        timeInForce: 'day',
+      },
+      ...overrides,
+    })
+
+  const usEstimate = (overrides: Record<string, unknown> = {}) => ({
+    issue: { code: 'F', market: 'XNYS', name: 'Ford' },
+    side: 'buy' as const,
+    quantity: 1,
+    estimatedAmount: { currency: 'JPY', value: 938 },
+    heldAmount: { currency: 'JPY', value: 938 },
+    tradeAmount: { currency: 'USD', value: 5.6 },
+    settlementCurrency: 'JPY' as const,
+    warnings: [],
+    confirmationId: 'confirmation',
+    ...overrides,
+  })
+
+  test('reserves the JPY settlement amount for a yen-settlement preview', async () => {
+    const fake = client()
+    fake.cashEstimate.mockResolvedValue(usEstimate())
+    const provider = createProviderFromClient(fake.value)
+    const preview = (await provider.invoke(
+      'investments.orders.preview',
+      usRequest({ settlementMethod: 'yen' }),
+    )) as {
+      heldAmount?: { currency: string; value: string }
+      settlementCurrency?: string
+      projectedAssetChanges?: Array<{
+        asset: { kind: string; currency?: string }
+        availableDelta: string
+        reservedDelta: string
+      }>
+    }
+
+    expect(preview.settlementCurrency).toBe('JPY')
+    expect(preview.heldAmount).toEqual({ currency: 'JPY', value: '938' })
+    expect(preview.projectedAssetChanges).toEqual([
+      {
+        asset: { kind: 'cash', currency: 'JPY' },
+        availableDelta: '-938',
+        reservedDelta: '938',
+        pendingDelta: '0',
+      },
+    ])
+    expect(fake.cashEstimate).toHaveBeenCalledWith(
+      expect.objectContaining({ foreignStockSettlementMethod: 'yen' }),
+    )
+  })
+
+  test('reserves the USD settlement amount for a foreign-settlement preview', async () => {
+    const fake = client()
+    fake.cashEstimate.mockResolvedValue(
+      usEstimate({
+        estimatedAmount: { currency: 'USD', value: 5.6 },
+        heldAmount: { currency: 'USD', value: 5.6 },
+        tradeAmount: { currency: 'USD', value: 5.6 },
+        settlementCurrency: 'USD',
+      }),
+    )
+    const provider = createProviderFromClient(fake.value)
+    const preview = (await provider.invoke(
+      'investments.orders.preview',
+      usRequest({ settlementMethod: 'foreign' }),
+    )) as { projectedAssetChanges?: Array<{ asset: { currency?: string } }> }
+
+    expect(preview.projectedAssetChanges?.[0]?.asset).toEqual({
+      kind: 'cash',
+      currency: 'USD',
+    })
+    expect(fake.cashEstimate).toHaveBeenCalledWith(
+      expect.objectContaining({ foreignStockSettlementMethod: 'foreign' }),
+    )
+  })
+
+  test('rejects a buy preview without a broker settlement amount', async () => {
+    const fake = client()
+    fake.cashEstimate.mockResolvedValue(
+      usEstimate({
+        estimatedAmount: { currency: 'JPY', value: null },
+        heldAmount: undefined,
+      }),
+    )
+    const provider = createProviderFromClient(fake.value)
+    await expect(
+      provider.invoke('investments.orders.preview', usRequest({ settlementMethod: 'yen' })),
+    ).rejects.toThrow('provider did not return the settlement order amount')
+  })
+
+  test('rejects settlementMethod outside US markets', async () => {
+    const provider = createProviderFromClient(client().value)
+    await expect(
+      provider.invoke('investments.orders.preview', request({ settlementMethod: 'yen' })),
+    ).rejects.toThrow('settlementMethod is supported only for US stock orders')
+  })
+
+  const usOpenOrder = (overrides: Record<string, unknown> = {}): Order =>
+    ({
+      id: 'sub-1',
+      orderNumber: 'number-1',
+      orderSubNo: 'sub-1',
+      issue: { code: 'F', market: 'XNYS' as const, name: 'Ford' },
+      side: 'buy' as const,
+      status: 'open' as const,
+      quantity: 1,
+      unexecutedQuantity: 1,
+      price: { currency: 'USD' as const, value: 5.58, text: '5.58' },
+      settlementCurrency: 'JPY' as const,
+      heldAmount: { currency: 'JPY' as const, value: 938, text: '938' },
+      ...overrides,
+    }) as Order
+
+  test('attributes the JPY hold of an open yen-settlement order', async () => {
+    const fake = client()
+    fake.value.orders.inquiry.open = async () => ({ orders: [usOpenOrder()] })
+    const provider = createProviderFromClient(fake.value)
+    const snapshot = (await provider.invoke('investments.orders.open', {
+      account: '12345678',
+    })) as { items: Array<{ effects?: { changes: unknown[] } }> }
+
+    expect(snapshot.items[0]?.effects).toEqual({
+      referenceId: 'sub-1',
+      changes: [
+        {
+          asset: { kind: 'cash', currency: 'JPY' },
+          availableDelta: '-938',
+          reservedDelta: '938',
+          pendingDelta: '0',
+        },
+      ],
+    })
+  })
+
+  test('attributes the USD hold of an open foreign-settlement order', async () => {
+    const fake = client()
+    fake.value.orders.inquiry.open = async () => ({
+      orders: [
+        usOpenOrder({
+          settlementCurrency: 'USD',
+          heldAmount: { currency: 'USD', value: 5.6, text: '5.6' },
+        }),
+      ],
+    })
+    const provider = createProviderFromClient(fake.value)
+    const snapshot = (await provider.invoke('investments.orders.open', {
+      account: '12345678',
+    })) as { items: Array<{ effects?: { changes: Array<{ asset: { currency?: string } }> } }> }
+
+    expect(snapshot.items[0]?.effects?.changes[0]?.asset).toEqual({
+      kind: 'cash',
+      currency: 'USD',
+    })
+  })
+
+  test('leaves an open partial fill unaccountable instead of guessing', async () => {
+    const fake = client()
+    fake.value.orders.inquiry.open = async () => ({
+      orders: [
+        usOpenOrder({
+          executedQuantity: 1,
+          unexecutedQuantity: 1,
+          settledAmount: { currency: 'JPY', value: 450, text: '450' },
+        }),
+      ],
+    })
+    const provider = createProviderFromClient(fake.value)
+    const snapshot = (await provider.invoke('investments.orders.open', {
+      account: '12345678',
+    })) as { items: Array<{ effects?: unknown }> }
+
+    expect(snapshot.items[0]?.effects).toBeUndefined()
+  })
+
+  test('settles an executed yen-settlement buy from the broker amount', async () => {
+    const fake = client()
+    fake.value.orders.inquiry.open = async () => ({
+      orders: [
+        usOpenOrder({
+          status: 'executed',
+          executedQuantity: 1,
+          unexecutedQuantity: 0,
+          settledAmount: { currency: 'JPY', value: 895, text: '895' },
+        }),
+      ],
+    })
+    const provider = createProviderFromClient(fake.value)
+    const snapshot = (await provider.invoke('investments.orders.open', {
+      account: '12345678',
+    })) as { items: Array<{ effects?: { changes: unknown[] } }> }
+
+    expect(snapshot.items[0]?.effects).toEqual({
+      referenceId: 'sub-1',
+      changes: [
+        {
+          asset: { kind: 'cash', currency: 'JPY' },
+          availableDelta: '-895',
+          reservedDelta: '0',
+          pendingDelta: '0',
+        },
+        {
+          asset: {
+            kind: 'security',
+            instrumentId: 'F',
+            venue: 'XNYS',
+            positionType: 'cash',
+          },
+          availableDelta: '1',
+          reservedDelta: '0',
+          pendingDelta: '0',
+        },
+      ],
+    })
   })
 })

@@ -691,6 +691,12 @@ export interface Order {
   commission?: CurrencyAmount
   tax?: CurrencyAmount
   daytradeTotal?: CurrencyAmount
+  /** Settlement currency reported by the provider, such as JPY or USD. */
+  settlementCurrency?: CurrencyAmount['currency']
+  /** Settlement-currency cash the provider still holds for the unexecuted part. */
+  heldAmount?: CurrencyAmount
+  /** Settlement-currency net amount settled for the executed part. */
+  settledAmount?: CurrencyAmount
 }
 
 export interface OrderList {
@@ -804,6 +810,16 @@ export interface OrderPreview {
   message?: string
   correction?: OrderCorrectionPreOrder
   error?: SbiMethodError
+  /** Settlement currency for orders that offer settlement modes. */
+  settlementCurrency?: CurrencyAmount['currency']
+  /** Estimated amount in the instrument's trading currency. */
+  tradeAmount?: CurrencyAmount
+  /** Cash amount the provider reserves, in the settlement currency. */
+  heldAmount?: CurrencyAmount
+  /** Buying power reported for the order, in the settlement currency. */
+  buyingPower?: CurrencyAmount
+  /** Exchange rate applied to settlement-currency amounts. */
+  exchangeRate?: string
 }
 
 export interface StockOrderPreOrderPriceStep {
