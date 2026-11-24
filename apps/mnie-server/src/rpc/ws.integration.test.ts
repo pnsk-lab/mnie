@@ -116,6 +116,28 @@ describe('WebSocket RPC boundaries', () => {
       socket.close()
     }
   })
+  test('exposes and authorizes only explicitly granted admin methods to an API key', async () => {
+    const previousToken = token
+    const key = await createApiKey(db, 'limited admin', {
+      scopes: ['read'],
+      allowedMethods: ['admin.providers.list'],
+    })
+    token = key.token
+    const { socket, greeting } = await connect()
+    try {
+      expect(greeting.methods).toContain('admin.providers.list')
+      expect(greeting.methods).not.toContain('admin.apiKeys.create')
+      expect(await call(socket, 41, 'rpc.methods', {})).toMatchObject({ result: greeting.methods })
+      const allowed = await call(socket, 42, 'admin.providers.list', {})
+      expect(allowed.error).toBeUndefined()
+      expect((allowed.result as { providers: unknown[] }).providers.length).toBeGreaterThan(0)
+      const denied = await call(socket, 43, 'admin.apiKeys.create', { label: 'forbidden' })
+      expect(denied.error?.message).toBe('owner session is required')
+    } finally {
+      socket.close()
+      token = previousToken
+    }
+  })
 
   test('does not expose removed HTTP application APIs or a duplicate WebSocket route', async () => {
     for (const path of [

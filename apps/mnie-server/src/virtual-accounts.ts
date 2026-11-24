@@ -25,6 +25,7 @@ import {
   virtualOperationEffects,
 } from './db/schema'
 import { randomId } from './security/crypto'
+import { legacyAccountMethods } from './security/legacy-account-methods'
 
 type Decimal = { coefficient: bigint; scale: number }
 
@@ -1045,21 +1046,6 @@ export const bindApiKeyToVirtualAccount = async (
     .where(and(eq(apiKeys.id, apiKeyId), isNull(apiKeys.revokedAt)))
     .get()
   if (!key) throw new Error('API key not found')
-  const otherBindings = db
-    .select()
-    .from(apiKeyVirtualAccounts)
-    .where(
-      and(
-        eq(apiKeyVirtualAccounts.apiKeyId, apiKeyId),
-        ne(apiKeyVirtualAccounts.virtualAccountId, virtualAccountId),
-      ),
-    )
-    .all()
-  if (
-    (role === 'trade' && otherBindings.length) ||
-    otherBindings.some((binding) => binding.role === 'trade')
-  )
-    throw new Error('a trade key must be bound to exactly one account')
   db.delete(virtualOrderQuotes)
     .where(
       and(
@@ -1079,7 +1065,13 @@ export const bindApiKeyToVirtualAccount = async (
     .run()
   await db
     .insert(apiKeyVirtualAccounts)
-    .values({ apiKeyId, virtualAccountId, role, createdAt: new Date() })
+    .values({
+      apiKeyId,
+      virtualAccountId,
+      role,
+      allowedMethods: legacyAccountMethods(key.allowedMethods),
+      createdAt: new Date(),
+    })
     .onConflictDoUpdate({
       target: [apiKeyVirtualAccounts.apiKeyId, apiKeyVirtualAccounts.virtualAccountId],
       set: { role },

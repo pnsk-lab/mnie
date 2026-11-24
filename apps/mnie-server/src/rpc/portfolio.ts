@@ -27,6 +27,8 @@ import {
   listVirtualAccounts,
 } from '../virtual-accounts'
 import { STATIC_METHODS } from './methods'
+import { apiKeys, apiKeyVirtualAccounts } from '../db/schema'
+import { and, eq } from 'drizzle-orm'
 
 export const PORTFOLIO_METHODS = (STATIC_METHODS as readonly string[]).filter((method) =>
   method.startsWith('portfolio.'),
@@ -60,8 +62,27 @@ export const invokePortfolio = async (
       'portfolio.valuation.get',
     ].includes(method)
   ) {
-    await accountSelection(db, access, input)
-    await assertApiKeyMethodAllowed(db, access.apiKeyId, method)
+    const accounts = await accountSelection(db, access, input)
+    if (method === 'portfolio.accounts.list')
+      await assertApiKeyMethodAllowed(db, access.apiKeyId, method)
+    else
+      for (const account of accounts) {
+        const binding = db
+          .select()
+          .from(apiKeyVirtualAccounts)
+          .where(
+            and(
+              eq(apiKeyVirtualAccounts.apiKeyId, access.apiKeyId),
+              eq(apiKeyVirtualAccounts.virtualAccountId, account.id),
+            ),
+          )
+          .get()
+        if (
+          !binding ||
+          (binding.allowedMethods !== null && !binding.allowedMethods.includes(method))
+        )
+          throw new Error(`API key is not allowed to call ${method} for this account`)
+      }
   }
   if (method === 'portfolio.accounts.list')
     return { accounts: await listVirtualAccounts(db, access) }
@@ -90,8 +111,19 @@ export const invokePortfolio = async (
     )
   if (method === 'portfolio.valuation.get') return accountValuation(db, access, input)
   if (method === 'portfolio.history.list') return accountHistory(db, access, input)
-  // Physical observations and reconciliation evidence are owner-only.
-  if (!access.owner) throw new Error('owner session is required')
+  // These methods operate on the global ledger, not an individual virtual
+  // account. Legacy NULL means ordinary reads, never implicit global access.
+  if (!access.owner) {
+    const key =
+      access.apiKeyId && db.select().from(apiKeys).where(eq(apiKeys.id, access.apiKeyId)).get()
+    if (
+      !key ||
+      key.revokedAt ||
+      (key.expiresAt && key.expiresAt <= new Date()) ||
+      !key.allowedMethods?.includes(method)
+    )
+      throw new Error('owner session is required')
+  }
 
   if (method === 'portfolio.ledger.observations.list') {
     return listTransactionObservations(db)

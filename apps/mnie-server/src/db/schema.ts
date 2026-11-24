@@ -373,6 +373,7 @@ export const apiKeyVirtualAccounts = sqliteTable(
     apiKeyId: text('api_key_id').notNull(),
     virtualAccountId: text('virtual_account_id').notNull(),
     role: text('role', { enum: ['read', 'trade'] }).notNull(),
+    allowedMethods: text('allowed_methods', { mode: 'json' }).$type<string[] | null>(),
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   },
   (table) => [primaryKey({ columns: [table.apiKeyId, table.virtualAccountId] })],

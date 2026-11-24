@@ -30,8 +30,10 @@ describing its background refresh policy.
   `/api/rpc/{method}` (POST-only; the request body is a JSON-RPC request whose `method` must
   match the path), and
   Streamable HTTP MCP at `/api/mcp` (also available at `/mcp`). MCP tools delegate
-  to the same RPC handler, including account access, scopes, and trade limits. Owner-only
-  admin tools are available only to owner sessions. There are no application REST endpoints.
+  to the same RPC handler, including account access, scopes, and per-order monetary limits.
+  API keys may call explicitly granted `admin.*` methods. Account-scoped admin methods also
+  require an explicit grant for each affected virtual account; legacy unrestricted keys do not
+  implicitly receive admin or global ledger access. There are no application REST endpoints.
 
 ## Physical and virtual balances
 

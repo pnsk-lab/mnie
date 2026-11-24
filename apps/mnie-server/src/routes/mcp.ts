@@ -26,7 +26,7 @@ export const createMcpRoutes = (db: Db, providers: ProviderRegistry, admin: Admi
     }
     const active = store.entry(auth)
     const server = new McpServer({ name: 'mnie', version: '0.3.0' })
-    for (const method of callerMethods(active.state)) {
+    for (const method of callerMethods(active.state, db)) {
       server.registerTool(
         `mnie-${method.replaceAll('.', '-')}`,
         {

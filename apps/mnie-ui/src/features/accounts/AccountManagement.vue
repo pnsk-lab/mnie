@@ -1,14 +1,11 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import {
-  bindAccountAccess,
   getAccountAccess,
   getAccountActivity,
-  listApiKeys,
   revokeAccountAccess,
   setVirtualAccountState,
   updateVirtualAccount,
-  type ApiKey,
   type ManagedVirtualAccount,
 } from '../../api'
 import { ui } from '../../styles/ui'
@@ -37,9 +34,6 @@ const access = ref<
   Array<{ apiKeyId: string; label: string; role: 'read' | 'trade'; revokedAt?: string | null }>
 >([])
 const activity = ref<Array<{ id: string; event: string; createdAt: string }>>([])
-const keys = ref<ApiKey[]>([])
-const keyId = ref('')
-const role = ref<'read' | 'trade'>('read')
 watch(
   () => props.account,
   async (account) => {
@@ -59,15 +53,10 @@ watch(
     error.value = ''
     const id = account.id
     try {
-      const [bindings, events, result] = await Promise.all([
-        getAccountAccess(id),
-        getAccountActivity(id),
-        listApiKeys(),
-      ])
+      const [bindings, events] = await Promise.all([getAccountAccess(id), getAccountActivity(id)])
       if (props.account.id !== id) return
       access.value = bindings.items.filter((binding) => !binding.revokedAt)
       activity.value = events.items.filter((event) => event.event !== 'external_activity.detected')
-      keys.value = result.apiKeys
     } catch (cause) {
       if (props.account.id === id)
         error.value = cause instanceof Error ? cause.message : String(cause)
@@ -246,20 +235,6 @@ const save = () =>
           解除
         </button>
       </div>
-      <form
-        class="flex flex-wrap gap-3"
-        @submit.prevent="run(() => bindAccountAccess(account.id, keyId, role))"
-      >
-        <select v-model="keyId" :class="ui.input" aria-label="API key" required>
-          <option value="" disabled>API keyを選択</option>
-          <option v-for="key in keys" :key="key.id" :value="key.id">{{ key.label }}</option>
-        </select>
-        <select v-model="role" :class="ui.input" aria-label="口座アクセス権限">
-          <option value="read">参照</option>
-          <option value="trade">参照・取引</option>
-        </select>
-        <button :class="ui.primaryButton" type="submit" :disabled="busy || !keyId">割り当て</button>
-      </form>
     </section>
     <section class="grid gap-3 rounded-xl border border-border p-5">
       <h3 class="font-bold">操作履歴</h3>

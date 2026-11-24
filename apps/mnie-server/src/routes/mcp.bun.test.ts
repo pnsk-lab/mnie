@@ -113,6 +113,26 @@ describe('Streamable HTTP MCP', () => {
     }
   })
 
+  test('MCP exposes only explicitly granted admin tools to API keys', async () => {
+    const key = await createApiKey(db, 'MCP admin', {
+      scopes: ['read'],
+      allowedMethods: ['admin.providers.list'],
+    })
+    const client = await connect('/api/mcp', `Bearer ${key.token}`)
+    try {
+      const { tools } = await client.listTools()
+      expect(tools.map((tool) => tool.name)).toContain('mnie-admin-providers-list')
+      expect(tools.map((tool) => tool.name)).not.toContain('mnie-admin-apiKeys-create')
+      const result = await client.callTool({
+        name: 'mnie-admin-providers-list',
+        arguments: { params: {} },
+      })
+      expect(result.isError).not.toBe(true)
+    } finally {
+      await client.close()
+    }
+  })
+
   test('preserves read, reconcile, and owner restrictions', async () => {
     const { token: limitedToken } = await createApiKey(db, 'no read', { scopes: ['trade'] })
     const limited = await connect('/api/mcp', `Bearer ${limitedToken}`)

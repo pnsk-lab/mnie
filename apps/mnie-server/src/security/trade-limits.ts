@@ -1,9 +1,7 @@
 import { canonicalDecimal, compareDecimal, multiplyDecimal } from '../virtual-accounts'
-import { and, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import type { Db } from '../db'
-import { apiKeyTradeUsage, apiKeys } from '../db/schema'
-
-type WindowName = '1h' | '6h' | '1d'
+import { apiKeys } from '../db/schema'
 
 interface TradeLimitInput {
   apiKeyId: string
@@ -15,17 +13,6 @@ export const isTransactionOperation = (operation: string, input?: unknown) => {
   const params = record(input)
   if (params?.allowTransaction === true || params?.allowTrading === true) return true
   return /\.(create|send|place|cancel|change|replace|placeCorrection|placeCancel)$/.test(operation)
-}
-
-const windowBucket = (date: Date, window: WindowName) => {
-  const year = date.getUTCFullYear()
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0')
-  const day = String(date.getUTCDate()).padStart(2, '0')
-  if (window === '1d') return `${year}-${month}-${day}`
-
-  const hour = date.getUTCHours()
-  const bucketHour = window === '6h' ? Math.floor(hour / 6) * 6 : hour
-  return `${year}-${month}-${day}T${String(bucketHour).padStart(2, '0')}`
 }
 
 const record = (value: unknown) =>
@@ -80,34 +67,6 @@ const assertPriceLimits = (
     throw new Error(`order amount exceeds API key limit (${settings.maxOrderAmountJpy} JPY)`)
 }
 
-const checkAndConsumeWindow = (
-  db: Db,
-  apiKeyId: string,
-  window: WindowName,
-  limit: number | null,
-  now: Date,
-) => {
-  if (limit == null) return
-  const hourBucket = windowBucket(now, window)
-  const where = and(
-    eq(apiKeyTradeUsage.apiKeyId, apiKeyId),
-    eq(apiKeyTradeUsage.window, window),
-    eq(apiKeyTradeUsage.hourBucket, hourBucket),
-  )
-  const usage = db.select().from(apiKeyTradeUsage).where(where).get()
-  const currentCount = usage?.tradeCount ?? 0
-  if (currentCount >= limit) throw new Error(`${window} trade limit exceeded for API key`)
-  if (usage)
-    db.update(apiKeyTradeUsage)
-      .set({ tradeCount: currentCount + 1, updatedAt: now })
-      .where(where)
-      .run()
-  else
-    db.insert(apiKeyTradeUsage)
-      .values({ apiKeyId, window, hourBucket, tradeCount: 1, updatedAt: now })
-      .run()
-}
-
 export const consumeApiKeyTradeLimitsSync = ({
   db,
   apiKeyId,
@@ -123,10 +82,6 @@ export const consumeApiKeyTradeLimitsSync = ({
         maxOrderPriceJpy: key.maxOrderPriceJpy,
         maxOrderAmountJpy: key.maxOrderAmountJpy,
       })
-    const now = new Date()
-    checkAndConsumeWindow(db, apiKeyId, '1h', key.maxTradesPerHour, now)
-    checkAndConsumeWindow(db, apiKeyId, '6h', key.maxTradesPer6Hours, now)
-    checkAndConsumeWindow(db, apiKeyId, '1d', key.maxTradesPerDay, now)
   })
 
 export const assertAndConsumeApiKeyTradeLimits = async (input: TradeLimitInput & { db: Db }) =>

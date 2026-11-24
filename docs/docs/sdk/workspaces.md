@@ -60,9 +60,26 @@ to send each call as a JSON-RPC request over `POST /api/rpc/{method}` instead. C
 
 ## Account access and orders
 
-API keys and OAuth grants must name their accounts with `accountBindings`. A trade key is bound to
-one account; unbound keys cannot discover account assets. System / Unallocated accounts are
-owner-only. Portfolio reads apply the same account visibility checks.
+API keys and OAuth grants can bind multiple virtual accounts with `accountBindings`. Each binding
+has a `read` or `trade` role and its own `allowedMethods` list, using wire names such as
+`account.investments.orders.preview` and `portfolio.accounts.positions`. A null per-account list
+allows the existing account-scoped methods; an empty list denies them. The role, OAuth scopes and
+account status still apply. Unbound keys cannot access account assets, and aggregate portfolio
+requests must be permitted for every selected account. System / Unallocated accounts remain
+owner-only.
+
+Global `allowedMethods` controls common `portfolio.*` and `profile.*` methods and explicit
+`admin.*` grants. A null global list does **not** grant admin or global ledger methods. Scoped
+account administration additionally requires the same admin method in each affected account's
+binding; a physical-account reconciliation requires permission on all affected non-system
+accounts. Admin key-management permissions can grant additional privileges, so grant them only
+to trusted callers. API-key time-window trade quotas are no longer enforced; per-order monetary
+limits and virtual-account risk policies remain available.
+
+On upgrade, each existing binding inherits the effective legacy account-method restrictions.
+Previously inert `admin.*` and global ledger entries are removed from legacy keys and must be
+granted explicitly. Legacy order methods that were blocked by the former additional unprefixed
+check remain blocked until an owner explicitly grants them in the account binding.
 
 Use `client.call('portfolio.accounts.balances', { account })`, `portfolio.accounts.positions`, `portfolio.accounts.orders`, or
 `portfolio.accounts.history` for account projections. `portfolio.history.list` accepts

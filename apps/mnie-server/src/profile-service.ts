@@ -52,15 +52,22 @@ export class ProfileRpcService {
       if (!backed.has(profileId)) throw new Error('profile is not accessible')
     }
     const advertised = await this.gateway.methods(profileId)
+    const forApiKey = access.owner && method === 'profile.operations' && params.forApiKey === true
     let operations = advertised.filter(
       (name) =>
         !isTransactionOperation(name) &&
-        (access.owner || PUBLIC_READ_METHODS.has(name) || name === 'accounts.list'),
+        ((access.owner && !forApiKey) || PUBLIC_READ_METHODS.has(name) || name === 'accounts.list'),
     )
     if (access.apiKeyId) {
       const key = this.db.select().from(apiKeys).where(eq(apiKeys.id, access.apiKeyId)).get()
       if (!key || key.revokedAt || (key.expiresAt && key.expiresAt <= new Date()))
         throw new Error('API key is not active')
+      if (
+        ['profile.operations', 'profile.capabilities', 'profile.availability'].includes(method) &&
+        key.allowedMethods !== null &&
+        !key.allowedMethods.includes(method)
+      )
+        throw new Error('profile method not found')
       if (key.allowedMethods !== null)
         operations = operations.filter((name) => key.allowedMethods!.includes(`profile.${name}`))
     }

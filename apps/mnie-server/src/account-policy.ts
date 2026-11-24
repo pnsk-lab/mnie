@@ -41,8 +41,11 @@ export const assertAccountTrade = (
       .get()
     if (!binding || (binding.api_keys.expiresAt && binding.api_keys.expiresAt <= new Date()))
       throw new Error('account does not allow trading')
-    if (binding.api_keys.allowedMethods && !binding.api_keys.allowedMethods.includes(operation))
-      throw new Error(`API key is not allowed to call ${operation}`)
+    if (
+      binding.api_key_virtual_accounts.allowedMethods &&
+      !binding.api_key_virtual_accounts.allowedMethods.includes(`account.${operation}`)
+    )
+      throw new Error(`API key is not allowed to call ${operation} for this account`)
     if (binding.api_keys.scopes && !binding.api_keys.scopes.includes('trade'))
       throw new Error('missing OAuth scope: trade')
   }

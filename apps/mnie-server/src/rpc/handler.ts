@@ -7,6 +7,9 @@ import { objectParams, rpcError, rpcResult } from './protocol'
 import { assertPortfolioScope, invokePortfolio, PORTFOLIO_METHODS } from './portfolio'
 import type { AdminRpcService } from './admin'
 import { STATIC_METHODS } from './methods'
+import { apiKeys } from '../db/schema'
+import { eq } from 'drizzle-orm'
+import { assertAdminAccountScope } from '../security/admin-account-scope'
 
 export interface RpcSocketState {
   service?: FinancialAccountService
@@ -19,10 +22,21 @@ export interface RpcSocketState {
 export { STATIC_METHODS }
 export const RPC_METHODS = STATIC_METHODS
 
-export const callerMethods = (state: RpcSocketState): readonly string[] =>
-  state.owner
-    ? STATIC_METHODS
-    : (STATIC_METHODS as readonly string[]).filter((method) => !method.startsWith('admin.'))
+export const callerMethods = (state: RpcSocketState, db?: Db): readonly string[] => {
+  if (state.owner) return STATIC_METHODS
+  const methods = (STATIC_METHODS as readonly string[]).filter(
+    (method) => !method.startsWith('admin.'),
+  )
+  if (!db || !state.apiKeyId) return methods
+  const key = db.select().from(apiKeys).where(eq(apiKeys.id, state.apiKeyId)).get()
+  if (key && !key.revokedAt && (!key.expiresAt || key.expiresAt > new Date()) && key.allowedMethods)
+    methods.push(
+      ...STATIC_METHODS.filter(
+        (method) => method.startsWith('admin.') && key.allowedMethods!.includes(method),
+      ),
+    )
+  return methods
+}
 
 const SESSION_METHODS = new Set([
   'admin.profiles.connect',
@@ -60,10 +74,21 @@ export const handleRpc = async (
   state: RpcSocketState,
   request: JsonRpcRequest,
 ) => {
-  if (request.method === 'rpc.methods') return rpcResult(request.id, callerMethods(state))
+  if (request.method === 'rpc.methods') return rpcResult(request.id, callerMethods(state, db))
 
   if (typeof request.method === 'string' && request.method.startsWith('admin.')) {
-    if (!state.owner) throw new Error('owner session is required')
+    if (!state.owner) {
+      const key =
+        state.apiKeyId && db.select().from(apiKeys).where(eq(apiKeys.id, state.apiKeyId)).get()
+      if (
+        !key ||
+        key.revokedAt ||
+        (key.expiresAt && key.expiresAt <= new Date()) ||
+        !key.allowedMethods?.includes(request.method)
+      )
+        throw new Error('owner session is required')
+      assertAdminAccountScope(db, key.id, request.method, objectParams(request.params))
+    }
     const operation = request.method.slice('admin.'.length)
     if (
       operation === 'profiles.connect' ||
@@ -73,7 +98,10 @@ export const handleRpc = async (
       state.service ??= new FinancialAccountService(db, providers)
       return rpcResult(
         request.id,
-        await state.service.dispatch(request.method, objectParams(request.params), state),
+        await state.service.dispatch(request.method, objectParams(request.params), {
+          ...state,
+          adminAuthorized: true,
+        }),
       )
     }
     try {
