@@ -8,6 +8,7 @@ import type { PhysicalAccountGateway } from './physical-account-gateway'
 import { reconcileVirtualOrder } from './order-coordinator'
 import { reconcilePhysicalAccount } from './virtual-accounts'
 import { syncExternalOrderReservations } from './external-order-reservations'
+import { summarizeSyncFailure } from './account-sync-diagnostics'
 
 export const syncAccountOrdersUnlocked = async (
   db: Db,
@@ -20,9 +21,11 @@ export const syncAccountOrdersUnlocked = async (
     .where(eq(financialAccounts.id, physicalAccountId))
     .get()
   if (!physical) throw new Error('physical account not found')
+  let stage = 'provider_capabilities'
   try {
     if (physical.kind === 'brokerage') {
       await gateway.assertVirtualTrading(physical.profileId)
+      stage = 'open_orders'
       const open = (await gateway.openOrders(physical.profileId, {
         account: physical.providerAccountId,
       })) as { items: InvestmentOrder[]; complete?: boolean }
@@ -38,6 +41,7 @@ export const syncAccountOrdersUnlocked = async (
           !order.providerOrderId
         )
           continue
+        stage = 'order_snapshot'
         const result = await gateway.orderSnapshot(physical.profileId, {
           account: physical.providerAccountId,
           orderId: order.providerOrderId,
@@ -48,12 +52,15 @@ export const syncAccountOrdersUnlocked = async (
         })
         reconcileVirtualOrder(db, order.id, result as Record<string, unknown>)
       }
+      stage = 'external_order_reservations'
       syncExternalOrderReservations(db, physicalAccountId, open)
     }
+    stage = 'physical_assets'
     await gateway.snapshot(db, physical)
     db.delete(appState)
       .where(eq(appState.key, `physical_snapshot_error:${physicalAccountId}`))
       .run()
+    stage = 'reconciliation'
     const reconciliation = await reconcilePhysicalAccount(db, physicalAccountId)
     const accounts = db
       .select()
@@ -61,12 +68,24 @@ export const syncAccountOrdersUnlocked = async (
       .where(eq(virtualAccounts.physicalAccountId, physicalAccountId))
       .all()
       .filter((account) => account.status !== 'closed')
+    stage = 'virtual_account_snapshots'
     await saveAccountSnapshots(
       db,
       accounts.map((account) => account.id),
     )
     return reconciliation
   } catch (cause) {
+    // Persist only a known broker error code; arbitrary exception messages may
+    // contain credentials, account details or upstream response bodies.
+    console.error(
+      JSON.stringify({
+        event: 'account_sync.failed',
+        physicalAccountId,
+        stage,
+        ...summarizeSyncFailure(cause),
+        at: new Date().toISOString(),
+      }),
+    )
     db.insert(appState)
       .values({
         key: `physical_snapshot_error:${physicalAccountId}`,

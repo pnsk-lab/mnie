@@ -735,6 +735,8 @@ export const reconcilePhysicalAccount = async (db: Db, physicalAccountId: string
               previousStatus: account.status,
               deficitAssetKeys: deficits.map((asset) => asset.assetKey),
               orderIds: unresolved.map((order) => order.id),
+              externalOrderReviewRequired: externalUnknown,
+              snapshotError,
             },
             createdAt: new Date(),
           })
