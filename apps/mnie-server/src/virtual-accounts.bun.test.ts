@@ -3,6 +3,8 @@ import { eq } from 'drizzle-orm'
 import { createDb } from './db'
 import {
   apiKeys,
+  accountAudit,
+  appState,
   financialAccounts,
   physicalAccountAssets,
   virtualAccountAssets,
@@ -266,6 +268,17 @@ describe('virtual account ledger', () => {
     expect(await listVirtualAccountAssets(db, unallocated.id, { owner: true })).toEqual([
       expect.objectContaining({ available: '0' }),
     ])
+  })
+
+  test('records snapshot error and external order review as distinct lock reasons', async () => {
+    const db = createDb(':memory:')
+    await addPhysicalAccount(db)
+    await initializeVirtualAccounts(db, 'physical-1')
+    await db.insert(appState).values({ key: 'physical_snapshot_error:physical-1', value: 'BROKER_SNAPSHOT_UNAVAILABLE', updatedAt: new Date() })
+    await reconcilePhysicalAccount(db, 'physical-1')
+    const locks = await db.select().from(accountAudit).where(eq(accountAudit.event, 'reconciliation.locked'))
+    expect(locks).toHaveLength(1)
+    expect(locks[0]?.detail).toMatchObject({ snapshotError: true, externalOrderReviewRequired: false })
   })
 
   test('reserves provider changes within the virtual balance and releases them on cancellation', async () => {
