@@ -24,9 +24,15 @@ import {
   publicOrder,
   storeOrderQuote,
 } from './order-coordinator'
-import { virtualOrders, virtualOrderQuotes, apiKeys, financialAccounts } from './db/schema'
+import {
+  virtualOrders,
+  virtualOrderQuotes,
+  apiKeys,
+  apiKeyVirtualAccounts,
+  financialAccounts,
+} from './db/schema'
 import { ProviderMethodUnavailableError } from './providers/operations'
-import { assertApiKeyMethodAllowed, isTransactionOperation } from './security/trade-limits'
+import { isTransactionOperation } from './security/trade-limits'
 
 const localOps = new Set([
   'accounts.list',
@@ -145,14 +151,17 @@ export class FinancialAccountService {
   async dispatch(
     method: string,
     params: Record<string, unknown>,
-    access: AccountAccess & { scopes?: string[] },
+    access: AccountAccess & { scopes?: string[]; adminAuthorized?: boolean },
   ) {
     if (
       method === 'admin.profiles.connect' ||
       method === 'admin.profiles.connection.complete' ||
       method === 'admin.profiles.sync'
     ) {
-      if (!access.owner) throw new Error('owner session is required for connection lifecycle')
+      if (!access.owner && !access.adminAuthorized)
+        throw new Error(
+          'owner session or explicit admin permission is required for connection lifecycle',
+        )
       if (method === 'admin.profiles.connect')
         return this.connectProfile(String(params.profileId ?? ''))
       if (method === 'admin.profiles.sync') return this.syncProfile(String(params.profileId ?? ''))
@@ -186,12 +195,13 @@ export class FinancialAccountService {
     if ('accountId' in input) throw new Error('raw account IDs are not accepted')
     const physicalInput = { ...input, account: target.providerAccountId }
     const available = await this.gateway.methods(target.profileId)
+    const forApiKey = access.owner && method === 'account.operations' && params.forApiKey === true
     const passthrough = available.filter(
       (name) =>
         !localOps.has(name) &&
         !writes.has(name) &&
         !isTransactionOperation(name) &&
-        (access.owner || PUBLIC_READ_METHODS.has(name)),
+        ((access.owner && !forApiKey) || PUBLIC_READ_METHODS.has(name)),
     )
     let operations = [
       ...new Set([...localOps, ...available.filter((name) => writes.has(name)), ...passthrough]),
@@ -200,8 +210,27 @@ export class FinancialAccountService {
       const key = this.db.select().from(apiKeys).where(eq(apiKeys.id, access.apiKeyId)).get()
       if (!key || key.revokedAt || (key.expiresAt && key.expiresAt <= new Date()))
         throw new Error('API key is not active')
-      if (key.allowedMethods !== null)
-        operations = operations.filter((name) => key.allowedMethods!.includes(`account.${name}`))
+      const binding = this.db
+        .select()
+        .from(apiKeyVirtualAccounts)
+        .where(
+          and(
+            eq(apiKeyVirtualAccounts.apiKeyId, access.apiKeyId),
+            eq(apiKeyVirtualAccounts.virtualAccountId, accountId),
+          ),
+        )
+        .get()
+      if (!binding) throw new Error('account access is not granted')
+      if (
+        ['account.operations', 'account.capabilities', 'account.availability'].includes(method) &&
+        binding.allowedMethods !== null &&
+        !binding.allowedMethods.includes(method)
+      )
+        throw new Error('account method not found')
+      if (binding.allowedMethods !== null)
+        operations = operations.filter((name) =>
+          binding.allowedMethods!.includes(`account.${name}`),
+        )
     }
     const wire = (name: string) => `account.${name}`
     if (method === 'account.operations') return operations.map(wire)
@@ -246,7 +275,7 @@ export class FinancialAccountService {
         if (!operations.includes(requestedOp)) throw new Error('method is unavailable')
         if (writes.has(requestedOp)) {
           await this.gateway.assertVirtualTrading(target.profileId)
-          assertAccountTrade(this.db, accountId, access, input)
+          assertAccountTrade(this.db, accountId, access, input, requestedOp)
         }
         const status = localOps.has(requestedOp)
           ? { available: true }
@@ -276,7 +305,6 @@ export class FinancialAccountService {
       }
     }
     if (!operations.includes(op)) throw new Error('account method not found')
-    if (access.apiKeyId) await assertApiKeyMethodAllowed(this.db, access.apiKeyId, method)
     const transaction = isTransactionOperation(op, input)
     if (access.apiKeyId && !(access.scopes ?? []).includes(transaction ? 'trade' : 'read'))
       throw new Error(`missing OAuth scope: ${transaction ? 'trade' : 'read'}`)

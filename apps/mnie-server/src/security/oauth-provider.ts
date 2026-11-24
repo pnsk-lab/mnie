@@ -12,7 +12,6 @@ import type { Db } from '../db'
 import {
   apiKeys,
   apiKeyVirtualAccounts,
-  apiKeyTradeUsage,
   virtualOrderQuotes,
   oauthAuthorizationCodes,
   oauthClients,
@@ -20,6 +19,7 @@ import {
 } from '../db/schema'
 import { createApiKeySync, type ApiKeySettings, verifyApiKey } from './api-keys'
 import { randomToken, sha256 } from './crypto'
+import { hasUnscopedAdminPermission } from './admin-account-scope'
 
 const CODE_TTL_MS = 10 * 60 * 1000
 const ACCESS_TOKEN_TTL_SECONDS = 60 * 60
@@ -209,28 +209,19 @@ export const createOAuthServerProvider = (db: Db, config: ServerConfig): OAuthSe
         .from(apiKeyVirtualAccounts)
         .where(eq(apiKeyVirtualAccounts.apiKeyId, current.id))
         .all()
-      if (!bindings.length) throw new Error('OAuth grant has no assigned accounts')
+      if (!bindings.length && !hasUnscopedAdminPermission(current.allowedMethods))
+        throw new Error('OAuth grant has no assigned accounts or unscoped admin methods')
       const newAccess = createApiKeySync(db, current.label, {
         scopes: nextScopes,
         allowedMethods: current.allowedMethods,
-        maxTradesPerHour: current.maxTradesPerHour,
-        maxTradesPer6Hours: current.maxTradesPer6Hours,
-        maxTradesPerDay: current.maxTradesPerDay,
         maxOrderPriceJpy: current.maxOrderPriceJpy,
         maxOrderAmountJpy: current.maxOrderAmountJpy,
         accountBindings: bindings.map((binding) => ({
           accountId: binding.virtualAccountId,
           role: binding.role,
+          allowedMethods: binding.allowedMethods,
         })),
       })
-      for (const usage of tx
-        .select()
-        .from(apiKeyTradeUsage)
-        .where(eq(apiKeyTradeUsage.apiKeyId, current.id))
-        .all())
-        tx.insert(apiKeyTradeUsage)
-          .values({ ...usage, apiKeyId: newAccess.id })
-          .run()
       tx.update(apiKeys)
         .set({ expiresAt: new Date(Date.now() + ACCESS_TOKEN_TTL_SECONDS * 1000) })
         .where(eq(apiKeys.id, newAccess.id))

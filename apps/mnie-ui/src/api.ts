@@ -6,10 +6,11 @@ export interface AuthStatus {
 export interface ApiKey {
   id: string
   label: string
-  accountBindings?: Array<{ accountId: string; role: 'read' | 'trade' }>
-  maxTradesPerHour?: number | null
-  maxTradesPer6Hours?: number | null
-  maxTradesPerDay?: number | null
+  accountBindings?: Array<{
+    accountId: string
+    role: 'read' | 'trade'
+    allowedMethods?: string[] | null
+  }>
   maxOrderPriceJpy?: number | null
   maxOrderAmountJpy?: number | null
   allowedMethods?: string[] | null
@@ -22,14 +23,7 @@ export interface ApiKey {
 
 export type ApiKeySettings = Pick<
   ApiKey,
-  | 'accountBindings'
-  | 'maxTradesPerHour'
-  | 'maxTradesPer6Hours'
-  | 'maxTradesPerDay'
-  | 'maxOrderPriceJpy'
-  | 'maxOrderAmountJpy'
-  | 'allowedMethods'
-  | 'scopes'
+  'accountBindings' | 'maxOrderPriceJpy' | 'maxOrderAmountJpy' | 'allowedMethods' | 'scopes'
 >
 
 export interface SbiPasskey {

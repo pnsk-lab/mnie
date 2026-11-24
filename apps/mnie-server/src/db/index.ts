@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import * as schema from './schema'
+import { legacyAccountMethods } from '../security/legacy-account-methods'
 
 export type Db = ReturnType<typeof createDb>
 
@@ -552,6 +553,78 @@ export const createDb = (path: string) => {
       FOREIGN KEY (virtual_account_id) REFERENCES virtual_accounts(id)
     )
   `)
+  const bindingColumns = sqlite
+    .query<{ name: string }, []>('PRAGMA table_info(api_key_virtual_accounts)')
+    .all()
+  if (!bindingColumns.some((column) => column.name === 'allowed_methods'))
+    sqlite.transaction(() => {
+      sqlite.run('ALTER TABLE api_key_virtual_accounts ADD COLUMN allowed_methods TEXT')
+      // Preserve the prior global account-method ceiling for existing keys.
+      // NULL previously meant all account methods; [] meant none.
+      const bindings = sqlite
+        .query<
+          { api_key_id: string; virtual_account_id: string; allowed_methods: string | null },
+          []
+        >(
+          'SELECT b.api_key_id, b.virtual_account_id, k.allowed_methods FROM api_key_virtual_accounts b JOIN api_keys k ON k.id = b.api_key_id',
+        )
+        .all()
+      for (const binding of bindings) {
+        if (binding.allowed_methods == null) continue
+        let methods: unknown
+        try {
+          methods = JSON.parse(binding.allowed_methods)
+        } catch {
+          methods = []
+        }
+        const valid = Array.isArray(methods)
+          ? methods.filter((method): method is string => typeof method === 'string')
+          : []
+        const accountMethods = Array.isArray(methods) ? (legacyAccountMethods(valid) ?? []) : []
+        sqlite.run(
+          'UPDATE api_key_virtual_accounts SET allowed_methods = ? WHERE api_key_id = ? AND virtual_account_id = ?',
+          [JSON.stringify(accountMethods), binding.api_key_id, binding.virtual_account_id],
+        )
+      }
+      // admin.* and global ledger entries in legacy keys were inert because only
+      // owner sessions could call them. Never activate them during an upgrade.
+      const oldKeys = sqlite
+        .query<{ id: string; allowed_methods: string }, []>(
+          'SELECT id, allowed_methods FROM api_keys WHERE allowed_methods IS NOT NULL',
+        )
+        .all()
+      for (const key of oldKeys) {
+        let methods: unknown
+        try {
+          methods = JSON.parse(key.allowed_methods)
+        } catch {
+          methods = []
+        }
+        const safe = Array.isArray(methods)
+          ? methods.filter(
+              (method): method is string =>
+                typeof method === 'string' &&
+                !method.startsWith('admin.') &&
+                !method.startsWith('portfolio.ledger.'),
+            )
+          : []
+        // Profile discovery was previously available regardless of the global list.
+        const migrated = Array.isArray(methods)
+          ? [
+              ...new Set([
+                ...safe,
+                'profile.operations',
+                'profile.capabilities',
+                'profile.availability',
+              ]),
+            ]
+          : []
+        sqlite.run('UPDATE api_keys SET allowed_methods = ? WHERE id = ?', [
+          JSON.stringify(migrated),
+          key.id,
+        ])
+      }
+    })()
   sqlite.run(`
     CREATE TABLE IF NOT EXISTS oauth_authorization_codes (
       code TEXT PRIMARY KEY,

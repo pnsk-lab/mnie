@@ -226,7 +226,12 @@ describe('public account isolation and durable orders', () => {
       open: async () => ({
         profile: { id: 'connection' },
         provider: {
-          methods: () => ['accounts.list', 'investments.orders.list'],
+          methods: () => [
+            'accounts.list',
+            'investments.orders.list',
+            'market.issue.chart',
+            'private.history',
+          ],
           invoke: async () => {
             throw new Error('raw read must not execute')
           },
@@ -236,6 +241,16 @@ describe('public account isolation and durable orders', () => {
       }),
     } as unknown as ProviderRegistry
     const service = new FinancialAccountService(db, gateway)
+    const keyEligible = (await service.dispatch(
+      'account.operations',
+      { account: a.id, forApiKey: true },
+      owner,
+    )) as string[]
+    expect(keyEligible).toContain('account.market.issue.chart')
+    expect(keyEligible).not.toContain('account.private.history')
+    expect(await service.dispatch('account.operations', { account: a.id }, owner)).toContain(
+      'account.private.history',
+    )
     const result = await service.dispatch('account.accounts.list', { account: a.id }, owner)
     expect(JSON.stringify(result)).not.toContain('secret-physical-id')
     expect(
@@ -251,6 +266,60 @@ describe('public account isolation and durable orders', () => {
         owner,
       ),
     ).rejects.toThrow('raw account IDs')
+    await service.close()
+  })
+  test('dynamic account RPC methods are isolated per account', async () => {
+    const { db, a, b } = await setup()
+    const key = await createApiKey(db, 'scoped', {
+      scopes: ['read'],
+      accountBindings: [
+        {
+          accountId: a.id,
+          role: 'read',
+          allowedMethods: ['account.operations', 'account.accounts.list'],
+        },
+        {
+          accountId: b.id,
+          role: 'read',
+          allowedMethods: ['account.operations', 'account.investments.orders.list'],
+        },
+      ],
+    })
+    const gateway = {
+      open: async () => ({
+        profile: { id: 'connection' },
+        provider: { methods: () => ['accounts.list', 'investments.orders.list'] },
+        persist: async () => {},
+        release: async () => {},
+      }),
+    } as unknown as ProviderRegistry
+    const service = new FinancialAccountService(db, gateway)
+    const access = { owner: false, apiKeyId: key.id, scopes: ['read'] }
+    expect(await service.dispatch('account.operations', { account: a.id }, access)).toEqual([
+      'account.accounts.list',
+    ])
+    expect(await service.dispatch('account.operations', { account: b.id }, access)).toEqual([
+      'account.investments.orders.list',
+    ])
+    await expect(
+      service.dispatch('account.investments.orders.list', { account: a.id }, access),
+    ).rejects.toThrow('account method not found')
+    expect(
+      await service.dispatch('account.investments.orders.list', { account: b.id }, access),
+    ).toEqual({ items: [] })
+    const hidden = await createApiKey(db, 'no discovery', {
+      scopes: ['read'],
+      accountBindings: [
+        { accountId: a.id, role: 'read', allowedMethods: ['account.accounts.list'] },
+      ],
+    })
+    await expect(
+      service.dispatch(
+        'account.operations',
+        { account: a.id },
+        { owner: false, apiKeyId: hidden.id, scopes: ['read'] },
+      ),
+    ).rejects.toThrow('account method not found')
     await service.close()
   })
   test('rolls back every asset in a batch when one transfer conflicts', async () => {
@@ -365,11 +434,10 @@ describe('public account isolation and durable orders', () => {
     expect(db.select().from(virtualAccounts).all()).toHaveLength(before)
     expect((await listVirtualAccountAssets(db, a.id, owner))[0]?.available).toBe('100')
   })
-  test('an idempotent retry consumes one API-key trade allowance', async () => {
+  test('an idempotent retry does not submit twice without time quotas', async () => {
     const { db, a } = await setup()
     const key = await createApiKey(db, 'trader', {
       scopes: ['read', 'trade'],
-      maxTradesPerHour: 1,
       accountBindings: [{ accountId: a.id, role: 'trade' }],
     })
     const access = { owner: false, apiKeyId: key.id }
@@ -390,7 +458,7 @@ describe('public account isolation and durable orders', () => {
     await createCoordinatedOrder(db, a.id, access, input, execute)
     await createCoordinatedOrder(db, a.id, access, input, execute)
     expect(calls).toBe(1)
-    expect(db.select().from(apiKeyTradeUsage).get()?.tradeCount).toBe(1)
+    expect(db.select().from(apiKeyTradeUsage).get()).toBeUndefined()
   })
   test('a provider without a complete account-isolation contract cannot trade', async () => {
     const { db, a } = await setup()

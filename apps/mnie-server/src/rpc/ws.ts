@@ -36,7 +36,7 @@ export const createRpcWebSocket = (db: Db, providers: ProviderRegistry, admin: A
       let queue = Promise.resolve()
       return {
         onOpen(_event, ws) {
-          send(ws, rpcResult(null, { connected: true, methods: callerMethods(state) }))
+          send(ws, rpcResult(null, { connected: true, methods: callerMethods(state, db) }))
         },
         onMessage(event, ws) {
           const data = String(event.data)

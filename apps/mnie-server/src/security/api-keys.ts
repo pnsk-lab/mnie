@@ -8,12 +8,15 @@ import {
   virtualOrderQuotes,
 } from '../db/schema'
 import { randomId, randomToken, sha256 } from './crypto'
+import { accountScopedPortfolioMethods, legacyAccountMethods } from './legacy-account-methods'
+import { scopedAdminMethods } from './admin-account-scope'
 
 export interface ApiKeySettings {
-  accountBindings?: Array<{ accountId: string; role: 'read' | 'trade' }>
-  maxTradesPerHour?: number | null
-  maxTradesPer6Hours?: number | null
-  maxTradesPerDay?: number | null
+  accountBindings?: Array<{
+    accountId: string
+    role: 'read' | 'trade'
+    allowedMethods?: string[] | null
+  }>
   maxOrderPriceJpy?: number | null
   maxOrderAmountJpy?: number | null
   allowedMethods?: string[] | null
@@ -29,9 +32,6 @@ const normalizeLimit = (value: unknown) => {
 }
 
 export const normalizeApiKeySettings = (settings: ApiKeySettings = {}) => ({
-  maxTradesPerHour: normalizeLimit(settings.maxTradesPerHour),
-  maxTradesPer6Hours: normalizeLimit(settings.maxTradesPer6Hours),
-  maxTradesPerDay: normalizeLimit(settings.maxTradesPerDay),
   maxOrderPriceJpy: normalizeLimit(settings.maxOrderPriceJpy),
   maxOrderAmountJpy: normalizeLimit(settings.maxOrderAmountJpy),
   allowedMethods:
@@ -44,9 +44,6 @@ export const listApiKeys = async (db: Db) => {
     .select({
       id: apiKeys.id,
       label: apiKeys.label,
-      maxTradesPerHour: apiKeys.maxTradesPerHour,
-      maxTradesPer6Hours: apiKeys.maxTradesPer6Hours,
-      maxTradesPerDay: apiKeys.maxTradesPerDay,
       maxOrderPriceJpy: apiKeys.maxOrderPriceJpy,
       maxOrderAmountJpy: apiKeys.maxOrderAmountJpy,
       allowedMethods: apiKeys.allowedMethods,
@@ -64,7 +61,11 @@ export const listApiKeys = async (db: Db) => {
     ...row,
     accountBindings: bindings
       .filter((binding) => binding.apiKeyId === row.id)
-      .map((binding) => ({ accountId: binding.virtualAccountId, role: binding.role })),
+      .map((binding) => ({
+        accountId: binding.virtualAccountId,
+        role: binding.role,
+        allowedMethods: binding.allowedMethods,
+      })),
   }))
 }
 
@@ -75,9 +76,19 @@ export const validateAccountBindings = (
   if (!Array.isArray(bindings)) throw new Error('accountBindings must be an array')
   if (new Set(bindings.map((binding) => binding.accountId)).size !== bindings.length)
     throw new Error('duplicate account binding')
-  if (bindings.some((binding) => binding.role === 'trade') && bindings.length !== 1)
-    throw new Error('a trade key requires exactly one account')
   for (const binding of bindings) {
+    if (
+      binding.allowedMethods != null &&
+      (!Array.isArray(binding.allowedMethods) ||
+        binding.allowedMethods.some(
+          (m) =>
+            typeof m !== 'string' ||
+            (!m.startsWith('account.') &&
+              !accountScopedPortfolioMethods.has(m) &&
+              !scopedAdminMethods.includes(m)),
+        ))
+    )
+      throw new Error('invalid account methods')
     if (!['read', 'trade'].includes(binding.role)) throw new Error('invalid account role')
     const account = db
       .select()
@@ -95,6 +106,7 @@ const writeBindings = (
   id: string,
   bindings: NonNullable<ApiKeySettings['accountBindings']>,
 ) => {
+  const key = db.select().from(apiKeys).where(eq(apiKeys.id, id)).get()
   db.delete(apiKeyVirtualAccounts).where(eq(apiKeyVirtualAccounts.apiKeyId, id)).run()
   db.delete(virtualOrderQuotes).where(eq(virtualOrderQuotes.principal, id)).run()
   for (const binding of bindings) {
@@ -103,6 +115,10 @@ const writeBindings = (
         apiKeyId: id,
         virtualAccountId: binding.accountId,
         role: binding.role,
+        allowedMethods:
+          binding.allowedMethods === undefined
+            ? legacyAccountMethods(key?.allowedMethods)
+            : binding.allowedMethods,
         createdAt: new Date(),
       })
       .run()

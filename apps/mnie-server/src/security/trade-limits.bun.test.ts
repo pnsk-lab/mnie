@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { eq } from 'drizzle-orm'
 import { createDb } from '../db'
 import { apiKeys } from '../db/schema'
 import { assertAndConsumeApiKeyTradeLimits, isTransactionOperation } from './trade-limits'
@@ -16,6 +17,16 @@ const database = async (maxOrderAmountJpy = 10_000) => {
 }
 
 describe('provider-neutral trade limits', () => {
+  test('legacy time-window quota values no longer block orders', async () => {
+    const db = await database()
+    await db
+      .update(apiKeys)
+      .set({ maxTradesPerHour: 0, maxTradesPer6Hours: 0, maxTradesPerDay: 0 })
+      .where(eq(apiKeys.id, 'key'))
+    const input = { db, apiKeyId: 'key', params: { amount: { currency: 'JPY', value: '1000' } } }
+    await expect(assertAndConsumeApiKeyTradeLimits(input)).resolves.toBeUndefined()
+    await expect(assertAndConsumeApiKeyTradeLimits(input)).resolves.toBeUndefined()
+  })
   test('classifies common create, replace and cancel operations as transactions', () => {
     expect(isTransactionOperation('investments.orders.preview', {})).toBe(false)
     expect(isTransactionOperation('investments.orders.create', {})).toBe(true)

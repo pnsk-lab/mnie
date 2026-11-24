@@ -5,6 +5,7 @@ import type { AppBindings } from '../context'
 import { oauthClients } from '../db/schema'
 import { validateAccountBindings, type ApiKeySettings } from '../security/api-keys'
 import { createOAuthAuthorizationCode } from '../security/oauth-provider'
+import { hasUnscopedAdminPermission } from '../security/admin-account-scope'
 
 const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]'])
 const supportedScopes = new Set(['read', 'trade', 'reconcile'])
@@ -84,7 +85,8 @@ export const createOAuthRoutes = () => {
     if (!grantedScopes.length) return c.json({ error: 'select at least one requested scope' }, 400)
     try {
       const bindings = validateAccountBindings(c.get('db'), body.settings?.accountBindings)
-      if (!bindings.length) return c.json({ error: 'select at least one account' }, 400)
+      if (!bindings.length && !hasUnscopedAdminPermission(body.settings?.allowedMethods))
+        return c.json({ error: 'select at least one account or an unscoped admin method' }, 400)
       if (bindings.some((binding) => binding.role === 'trade') && !grantedScopes.includes('trade'))
         return c.json({ error: 'trade role requires trade scope' }, 400)
     } catch (error) {

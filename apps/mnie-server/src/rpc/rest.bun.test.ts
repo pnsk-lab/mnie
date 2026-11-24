@@ -84,6 +84,24 @@ describe('REST RPC transport', () => {
     expect(body.error.code).toBe(-32603)
     expect(body.error.message).toContain('owner session is required')
   })
+  test('allows only explicitly granted admin methods over HTTP', async () => {
+    const previousToken = token
+    const key = await createApiKey(db, 'limited admin', {
+      scopes: ['read'],
+      allowedMethods: ['admin.providers.list'],
+    })
+    token = key.token
+    try {
+      const allowed = await rpc('admin.providers.list', {})
+      const body = (await allowed.json()) as { result?: { providers: unknown[] }; error?: unknown }
+      expect(body.error).toBeUndefined()
+      expect(body.result?.providers.length).toBeGreaterThan(0)
+      const denied = await rpc('admin.apiKeys.create', { label: 'forbidden' })
+      expect(rpcErrorBody(await denied.json()).error.message).toContain('owner session is required')
+    } finally {
+      token = previousToken
+    }
+  })
 
   test('lists RPC methods', async () => {
     const response = await rpc('rpc.methods', {})
