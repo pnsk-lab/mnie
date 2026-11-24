@@ -76,9 +76,12 @@ describe('WebSocket RPC boundaries', () => {
     expect(admin.invoke).toHaveBeenCalledWith('providers.list', {})
   })
   test('rejects owner methods for API keys before dispatch', async () => {
+    const missingKeyDb = {
+      select: () => ({ from: () => ({ where: () => ({ get: () => undefined }) }) }),
+    } as unknown as Db
     await expect(
       handleRpc(
-        db,
+        missingKeyDb,
         providers,
         admin,
         { owner: false, apiKeyId: 'key', scopes: ['read'] },
