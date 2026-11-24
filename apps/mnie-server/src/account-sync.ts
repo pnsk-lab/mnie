@@ -8,6 +8,7 @@ import type { PhysicalAccountGateway } from './physical-account-gateway'
 import { reconcileVirtualOrder } from './order-coordinator'
 import { reconcilePhysicalAccount } from './virtual-accounts'
 import { syncExternalOrderReservations } from './external-order-reservations'
+import { summarizeSyncFailure } from './account-sync-diagnostics'
 
 export const syncAccountOrdersUnlocked = async (
   db: Db,
@@ -76,9 +77,15 @@ export const syncAccountOrdersUnlocked = async (
   } catch (cause) {
     // Persist only a known broker error code; arbitrary exception messages may
     // contain credentials, account details or upstream response bodies.
-    const message = cause instanceof Error ? cause.message : String(cause)
-    const code = message.match(/\bECOMN\d{4}\b/)?.[0]
-    console.error(JSON.stringify({ event: 'account_sync.failed', physicalAccountId, stage, ...(code ? { code } : {}), at: new Date().toISOString() }))
+    console.error(
+      JSON.stringify({
+        event: 'account_sync.failed',
+        physicalAccountId,
+        stage,
+        ...summarizeSyncFailure(cause),
+        at: new Date().toISOString(),
+      }),
+    )
     db.insert(appState)
       .values({
         key: `physical_snapshot_error:${physicalAccountId}`,
