@@ -24,6 +24,8 @@ import type {
   IssueSearchItem,
   IssueSearchResult,
   IssueSearchStatus,
+  IssueTick,
+  IssueTickList,
   MarginPosition,
   MarginPositionList,
   MarketCode,
@@ -70,6 +72,7 @@ import type {
   IssueChartOptions,
   IssueSearchOptions,
   IssueOptions,
+  IssueTicksOptions,
   ExchangeOrderOptions,
   ExchangeRateOptions,
   MarginClosePositionOrder,
@@ -81,6 +84,7 @@ import type {
   MarginOpenOrderOptions,
   MarginOpenTradeType,
   MarketIssueBoardPollingOptions,
+  MarketIssueTicksPollingOptions,
   MarginPositionOptions,
   OrderCancelOptions,
   OrderCorrectionOptions,
@@ -237,6 +241,25 @@ async function* pollMarketIssueBoard(
 
   while (!options.signal?.aborted) {
     yield await fetchBoard()
+    await waitForPollingInterval(intervalMs, options.signal)
+  }
+
+  if (options.signal?.aborted) throw abortError(options.signal)
+}
+
+async function* pollMarketIssueTicks(
+  fetchTicks: (afterSequenceNumber?: string) => Promise<IssueTickList>,
+  options: MarketIssueTicksPollingOptions,
+): AsyncIterableIterator<IssueTickList> {
+  const intervalMs = pollingIntervalMs(options.intervalSeconds)
+  let afterSequenceNumber = normalizedIssueTicksOptions(options).afterSequenceNumber
+
+  while (!options.signal?.aborted) {
+    const batch = await fetchTicks(afterSequenceNumber)
+    if (batch.latestSequenceNumber) {
+      afterSequenceNumber = batch.latestSequenceNumber
+    }
+    yield batch
     await waitForPollingInterval(intervalMs, options.signal)
   }
 
@@ -421,6 +444,28 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
                 await callMtsReturningHeaderError(session, 'F1851', issueChartTrin(options)),
                 options,
               ),
+        ticks: async (options) =>
+          rejectUsMarket(options, 'market.issue.ticks') ??
+          parseIssueTicks(
+            await callMts(session, 'F1802', issueTicksTrin(options, 'market.issue.ticks')),
+            options,
+            'market.issue.ticks',
+          ),
+        pollTicks: (options) =>
+          pollMarketIssueTicks(
+            async (afterSequenceNumber) =>
+              rejectUsMarket(options, 'market.issue.pollTicks') ??
+              parseIssueTicks(
+                await callMts(
+                  session,
+                  'F1802',
+                  issueTicksTrin({ ...options, afterSequenceNumber }, 'market.issue.pollTicks'),
+                ),
+                { ...options, afterSequenceNumber },
+                'market.issue.pollTicks',
+              ),
+            options,
+          ),
         openOrders: async (options) =>
           isUsMarket(options.market)
             ? usStock.openOrders(options)
@@ -2534,6 +2579,52 @@ const parseIssueChart = (response: MtsResponse, options: IssueChartOptions): Iss
   }
 }
 
+const formatTickTime = (value: string) =>
+  /^\d{4}$/.test(value) ? `${value.slice(0, 2)}:${value.slice(2, 4)}` : value
+
+const parseIssueTicks = (
+  response: MtsResponse,
+  options: IssueTicksOptions,
+  methodName = 'market.issue.ticks',
+): IssueTickList => {
+  if (response.buffer.length <= MTS_HEADER_BYTES) {
+    return {
+      issue: { code: options.issueCode, market: options.market },
+      ticks: [],
+    }
+  }
+
+  const reader = readerFor(response)
+  const code = reader.text(5)
+  const market = reader.text(3)
+  const recordCount = reader.int(4) ?? 0
+  const ticks: IssueTick[] = []
+
+  for (let i = 0; i < recordCount && reader.remaining >= 35; i++) {
+    const sequenceNumber = reader.text(8)
+    const time = formatTickTime(reader.text(4))
+    const price = yen(reader.text(11))
+    reader.skip(1)
+    const volume = parseNumber(reader.text(11))
+    if (!sequenceNumber && price.value == null) continue
+    ticks.push({
+      sequenceNumber,
+      time,
+      price,
+      volume,
+    })
+  }
+
+  return {
+    issue: {
+      code: emptyToUndefined(code) ?? options.issueCode,
+      market: publicDomesticMarket(market, methodName) ?? options.market,
+    },
+    ticks,
+    latestSequenceNumber: emptyToUndefined(ticks[0]?.sequenceNumber),
+  }
+}
+
 const parseBoardResponse = (
   response: MtsResponse,
   options: IssueOptions,
@@ -4229,6 +4320,28 @@ const issueChartTrin = (options: IssueChartOptions) => {
     { width: 8, value: '' },
     { width: 8, value: '' },
     { width: 4, value: count },
+  ])
+}
+
+const normalizedIssueTicksOptions = (options: IssueTicksOptions) => {
+  const afterSequenceNumber = options.afterSequenceNumber?.trim()
+  if (afterSequenceNumber) {
+    if (afterSequenceNumber.length > 8 || /\s/.test(afterSequenceNumber)) {
+      throw new Error('afterSequenceNumber must be at most 8 non-whitespace characters')
+    }
+  }
+  return {
+    afterSequenceNumber: afterSequenceNumber || undefined,
+  }
+}
+
+const issueTicksTrin = (options: IssueTicksOptions, methodName = 'market.issue.ticks') => {
+  const { afterSequenceNumber } = normalizedIssueTicksOptions(options)
+  return fixedTrin([
+    { width: 5, value: options.issueCode },
+    { width: 3, value: domesticMarketToMts(options.market, methodName) },
+    { width: 8, value: afterSequenceNumber ?? '' },
+    { width: 1, value: 'D' },
   ])
 }
 

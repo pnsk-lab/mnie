@@ -77,6 +77,8 @@ market.issue.allowedPrices
 market.issue.board
 market.issue.pollBoard
 market.issue.chart
+market.issue.ticks
+market.issue.pollTicks
 market.issue.openOrders
 market.issue.tradingInfo
 market.index.major

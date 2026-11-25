@@ -47,6 +47,18 @@ const client = (orderFlags: { cancelable?: boolean; correctable?: boolean } = {}
     orderId: 'order-1',
     acceptedAt: '2026-07-13T12:00:00.000Z',
   }))
+  const issueTicks = vi.fn(async () => ({
+    issue: { code: '7203', market: 'XTKS' as const },
+    latestSequenceNumber: '00014282',
+    ticks: [
+      {
+        sequenceNumber: '00014282',
+        time: '15:30',
+        price: { currency: 'JPY' as const, value: 3406, text: '3406' },
+        volume: 5195800,
+      },
+    ],
+  }))
   const placeCancel = vi.fn(async () => ({ accepted: true, orderId: 'order-1' }))
   const value = {
     session: {
@@ -96,6 +108,7 @@ const client = (orderFlags: { cancelable?: boolean; correctable?: boolean } = {}
       index: { major: async () => [] },
       issue: {
         chart: async () => ({}),
+        ticks: issueTicks,
         search: async () => ({}),
         suggest: async () => ({}),
         board: async () => ({}),
@@ -160,7 +173,7 @@ const client = (orderFlags: { cancelable?: boolean; correctable?: boolean } = {}
     },
     banking: { detailHistory: async () => [] },
   } as unknown as SbiClientMethods
-  return { value, cashPreOrder, cashEstimate, cashPlace, placeCancel }
+  return { value, cashPreOrder, cashEstimate, cashPlace, placeCancel, issueTicks }
 }
 
 describe('SBI provider-neutral order adapter', () => {
@@ -695,6 +708,35 @@ describe('US stock settlement currency handling', () => {
           pendingDelta: '0',
         },
       ],
+    })
+  })
+
+  test('advertises and invokes market.issue.ticks', async () => {
+    const fake = client()
+    const provider = createProviderFromClient(fake.value)
+
+    expect(provider.methods()).toContain('market.issue.ticks')
+    await expect(
+      provider.checkMethodAvailability?.({
+        method: 'market.issue.ticks',
+        params: { issueCode: '7203', market: 'XTKS' },
+      }),
+    ).resolves.toEqual({ available: true })
+
+    await expect(
+      provider.invoke('market.issue.ticks', {
+        issueCode: '7203',
+        market: 'XTKS',
+        afterSequenceNumber: '00014280',
+      }),
+    ).resolves.toMatchObject({
+      issue: { code: '7203', market: 'XTKS' },
+      latestSequenceNumber: '00014282',
+    })
+    expect(fake.issueTicks).toHaveBeenCalledWith({
+      issueCode: '7203',
+      market: 'XTKS',
+      afterSequenceNumber: '00014280',
     })
   })
 })

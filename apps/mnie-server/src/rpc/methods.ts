@@ -84,6 +84,7 @@ export const PUBLIC_READ_METHODS = new Set([
   'market.index.major',
   'market.issue.board',
   'market.issue.chart',
+  'market.issue.ticks',
   'market.issue.search',
   'market.issue.suggest',
   'market.issue.detail',

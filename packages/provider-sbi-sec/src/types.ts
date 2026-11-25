@@ -357,6 +357,20 @@ export interface IssueChart {
   error?: SbiMethodError
 }
 
+export interface IssueTick {
+  sequenceNumber: string
+  time: string
+  price: CurrencyAmount
+  volume: number | null
+}
+
+export interface IssueTickList {
+  issue: IssueRef
+  /** Executed ticks ordered from newest to oldest. */
+  ticks: IssueTick[]
+  latestSequenceNumber?: string
+}
+
 export interface SessionInfo {
   sessionId: string
   loginType: LoginType
