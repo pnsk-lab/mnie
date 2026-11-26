@@ -120,6 +120,7 @@ const DEFAULT_PAGE_INDEX = 0
 const DEFAULT_PAGE_LIMIT = 999
 const DEFAULT_MARKET_POLL_INTERVAL_SECONDS = 5
 const DEFAULT_CHART_COUNT = 120
+const MTS_TICK_PAGE_MAX = 500
 const CHART_PERIOD_MTS_CODES = {
   minute: '1',
   day: '2',
@@ -248,16 +249,22 @@ async function* pollMarketIssueBoard(
 }
 
 async function* pollMarketIssueTicks(
-  fetchTicks: (afterSequenceNumber?: string) => Promise<IssueTickList>,
+  fetchTicks: (afterCursor?: string) => Promise<IssueTickList>,
   options: MarketIssueTicksPollingOptions,
 ): AsyncIterableIterator<IssueTickList> {
   const intervalMs = pollingIntervalMs(options.intervalSeconds)
-  let afterSequenceNumber = normalizedIssueTicksOptions(options).afterSequenceNumber
+  if ('cursor' in options && (options as IssueTicksOptions).cursor != null) {
+    throw new Error('market.issue.pollTicks does not accept cursor; use afterCursor instead')
+  }
+  const normalized = normalizedIssueTicksOptions(options)
+  let afterCursor = normalized.afterSequenceNumber
+    ? encodeAfterTickCursor(normalized.afterSequenceNumber)
+    : undefined
 
   while (!options.signal?.aborted) {
-    const batch = await fetchTicks(afterSequenceNumber)
-    if (batch.latestSequenceNumber) {
-      afterSequenceNumber = batch.latestSequenceNumber
+    const batch = await fetchTicks(afterCursor)
+    if (batch.latestCursor) {
+      afterCursor = batch.latestCursor
     }
     yield batch
     await waitForPollingInterval(intervalMs, options.signal)
@@ -453,15 +460,15 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
           ),
         pollTicks: (options) =>
           pollMarketIssueTicks(
-            async (afterSequenceNumber) =>
+            async (afterCursor) =>
               rejectUsMarket(options, 'market.issue.pollTicks') ??
               parseIssueTicks(
                 await callMts(
                   session,
                   'F1802',
-                  issueTicksTrin({ ...options, afterSequenceNumber }, 'market.issue.pollTicks'),
+                  issueTicksTrin({ ...options, afterCursor }, 'market.issue.pollTicks'),
                 ),
-                { ...options, afterSequenceNumber },
+                { ...options, afterCursor },
                 'market.issue.pollTicks',
               ),
             options,
@@ -2582,15 +2589,29 @@ const parseIssueChart = (response: MtsResponse, options: IssueChartOptions): Iss
 const formatTickTime = (value: string) =>
   /^\d{4}$/.test(value) ? `${value.slice(0, 2)}:${value.slice(2, 4)}` : value
 
+const encodeBeforeTickCursor = (sequenceNumber: string) => `before:${sequenceNumber}`
+const encodeAfterTickCursor = (sequenceNumber: string) => `after:${sequenceNumber}`
+
+const hasOlderTicksAfterIncremental = (
+  oldestSequenceNumber: string,
+  afterSequenceNumber: string,
+) => {
+  if (/^\d+$/.test(oldestSequenceNumber) && /^\d+$/.test(afterSequenceNumber)) {
+    return BigInt(oldestSequenceNumber) > BigInt(afterSequenceNumber) + 1n
+  }
+  return true
+}
+
 const parseIssueTicks = (
   response: MtsResponse,
   options: IssueTicksOptions,
   methodName = 'market.issue.ticks',
 ): IssueTickList => {
+  const { afterSequenceNumber, limit } = normalizedIssueTicksOptions(options)
   if (response.buffer.length <= MTS_HEADER_BYTES) {
     return {
       issue: { code: options.issueCode, market: options.market },
-      ticks: [],
+      items: [],
     }
   }
 
@@ -2598,7 +2619,7 @@ const parseIssueTicks = (
   const code = reader.text(5)
   const market = reader.text(3)
   const recordCount = reader.int(4) ?? 0
-  const ticks: IssueTick[] = []
+  const rawTicks: IssueTick[] = []
 
   for (let i = 0; i < recordCount && reader.remaining >= 35; i++) {
     const sequenceNumber = reader.text(8)
@@ -2607,7 +2628,7 @@ const parseIssueTicks = (
     reader.skip(1)
     const volume = parseNumber(reader.text(11))
     if (!sequenceNumber && price.value == null) continue
-    ticks.push({
+    rawTicks.push({
       sequenceNumber,
       time,
       price,
@@ -2615,13 +2636,35 @@ const parseIssueTicks = (
     })
   }
 
+  const items = limit != null ? rawTicks.slice(0, limit) : rawTicks
+  const latestSequenceNumber = emptyToUndefined(items[0]?.sequenceNumber)
+  const oldestSequenceNumber = emptyToUndefined(items[items.length - 1]?.sequenceNumber)
+  const atOpeningTick = oldestSequenceNumber != null && /^0+$/.test(oldestSequenceNumber)
+  const truncatedByLimit = limit != null && rawTicks.length > limit
+  const mayHaveMoreOlder =
+    oldestSequenceNumber != null &&
+    !atOpeningTick &&
+    (truncatedByLimit ||
+      (rawTicks.length >= MTS_TICK_PAGE_MAX &&
+        (afterSequenceNumber == null ||
+          hasOlderTicksAfterIncremental(oldestSequenceNumber, afterSequenceNumber))))
+
+  const nextCursor =
+    mayHaveMoreOlder && oldestSequenceNumber
+      ? encodeBeforeTickCursor(oldestSequenceNumber)
+      : undefined
+  const latestCursor = latestSequenceNumber
+    ? encodeAfterTickCursor(latestSequenceNumber)
+    : undefined
+
   return {
     issue: {
       code: emptyToUndefined(code) ?? options.issueCode,
       market: publicDomesticMarket(market, methodName) ?? options.market,
     },
-    ticks,
-    latestSequenceNumber: emptyToUndefined(ticks[0]?.sequenceNumber),
+    items,
+    ...(nextCursor ? { nextCursor } : {}),
+    ...(latestCursor ? { latestCursor } : {}),
   }
 }
 
@@ -4323,25 +4366,57 @@ const issueChartTrin = (options: IssueChartOptions) => {
   ])
 }
 
+const parseTickCursor = (
+  value: string | undefined,
+  expectedDirection: 'before' | 'after',
+  fieldName: 'cursor' | 'afterCursor',
+) => {
+  const trimmed = value?.trim()
+  if (!trimmed) return undefined
+  const match = /^(before|after):(\S+)$/.exec(trimmed)
+  if (!match) {
+    throw new Error(`${fieldName} must be a valid tick cursor`)
+  }
+  const [, direction, sequenceNumber] = match
+  if (direction !== expectedDirection) {
+    throw new Error(
+      expectedDirection === 'before'
+        ? 'cursor expects a nextCursor token; pass latestCursor to afterCursor instead'
+        : 'afterCursor expects a latestCursor token; pass nextCursor to cursor instead',
+    )
+  }
+  if (!sequenceNumber || sequenceNumber.length > 8) {
+    throw new Error(`${fieldName} sequence number must be at most 8 non-whitespace characters`)
+  }
+  return sequenceNumber
+}
+
 const normalizedIssueTicksOptions = (options: IssueTicksOptions) => {
-  const afterSequenceNumber = options.afterSequenceNumber?.trim()
-  if (afterSequenceNumber) {
-    if (afterSequenceNumber.length > 8 || /\s/.test(afterSequenceNumber)) {
-      throw new Error('afterSequenceNumber must be at most 8 non-whitespace characters')
-    }
+  const beforeSequenceNumber = parseTickCursor(options.cursor, 'before', 'cursor')
+  const afterSequenceNumber = parseTickCursor(options.afterCursor, 'after', 'afterCursor')
+  if (beforeSequenceNumber && afterSequenceNumber) {
+    throw new Error('cursor and afterCursor cannot be used together')
+  }
+  const limit = options.limit
+  if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
+    throw new Error('limit must be a positive integer')
   }
   return {
-    afterSequenceNumber: afterSequenceNumber || undefined,
+    beforeSequenceNumber,
+    afterSequenceNumber,
+    limit,
   }
 }
 
 const issueTicksTrin = (options: IssueTicksOptions, methodName = 'market.issue.ticks') => {
-  const { afterSequenceNumber } = normalizedIssueTicksOptions(options)
+  const { beforeSequenceNumber, afterSequenceNumber } = normalizedIssueTicksOptions(options)
+  const sequenceNumber = beforeSequenceNumber ?? afterSequenceNumber ?? ''
+  const directionFlag = beforeSequenceNumber ? 'A' : 'D'
   return fixedTrin([
     { width: 5, value: options.issueCode },
     { width: 3, value: domesticMarketToMts(options.market, methodName) },
-    { width: 8, value: afterSequenceNumber ?? '' },
-    { width: 1, value: 'D' },
+    { width: 8, value: sequenceNumber },
+    { width: 1, value: directionFlag },
   ])
 }
 

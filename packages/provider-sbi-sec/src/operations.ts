@@ -43,7 +43,7 @@ import type {
   TradeSide,
   Watchlist,
 } from './types'
-import type { Transaction } from '@mnie/types'
+import type { IncrementalPageRequest, Transaction } from '@mnie/types'
 
 export interface PagingOptions {
   /** Start index for the result list. Defaults to the first item when omitted. */
@@ -82,12 +82,9 @@ export type IssueChartOptions = IssueOptions & {
   count?: number
 }
 
-export type IssueTicksOptions = IssueOptions & {
-  /** Returns only ticks newer than this sequence number (from a previous `ticks()` call). */
-  afterSequenceNumber?: string
-}
+export type IssueTicksOptions = IssueOptions & IncrementalPageRequest
 
-export type MarketIssueTicksPollingOptions = IssueTicksOptions & {
+export type MarketIssueTicksPollingOptions = Omit<IssueTicksOptions, 'cursor'> & {
   /** Poll interval in seconds. Defaults to 5 seconds. */
   intervalSeconds?: number
   /** Stops the polling iterator when aborted. */
@@ -662,7 +659,7 @@ export interface SbiClientMethodMarketIssue {
   chart(options: IssueChartOptions): Promise<IssueChart>
   /** Fetches executed ticks (time and sales / 歩み値) for a domestic issue. */
   ticks(options: IssueTicksOptions): Promise<IssueTickList>
-  /** Polls executed ticks for a domestic issue, advancing `afterSequenceNumber` automatically. */
+  /** Polls executed ticks for a domestic issue, advancing `afterCursor` from `latestCursor` automatically. */
   pollTicks(options: MarketIssueTicksPollingOptions): AsyncIterableIterator<IssueTickList>
   /** Fetches open orders for an issue. */
   openOrders(options: IssueOptions): Promise<OrderList>

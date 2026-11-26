@@ -1,3 +1,5 @@
+import type { IncrementalPage } from '@mnie/types'
+
 export type WebAuthnAlgorithm = -7 | -257
 
 export type WebAuthnUserVerification = 'required' | 'preferred' | 'discouraged'
@@ -364,11 +366,8 @@ export interface IssueTick {
   volume: number | null
 }
 
-export interface IssueTickList {
+export interface IssueTickList extends IncrementalPage<IssueTick> {
   issue: IssueRef
-  /** Executed ticks ordered from newest to oldest. */
-  ticks: IssueTick[]
-  latestSequenceNumber?: string
 }
 
 export interface SessionInfo {

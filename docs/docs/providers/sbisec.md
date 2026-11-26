@@ -94,7 +94,7 @@ const ticks = await profile.market.issue.ticks({
 const positions = await profile.account.positions.cash({ market: 'XTKS' })
 ```
 
-To continuously retrieve the order book or domestic time and sales, consume the async iterator returned by `pollBoard()` or `pollTicks()`. Pass an `AbortSignal` to stop polling. `ticks()` also accepts `afterSequenceNumber` (for example `ticks.latestSequenceNumber`) for incremental fetches.
+To continuously retrieve the order book or domestic time and sales, consume the async iterator returned by `pollBoard()` or `pollTicks()`. Pass an `AbortSignal` to stop polling. `ticks()` implements `@mnie/types`'s `IncrementalPage` contract: pass `cursor: ticks.nextCursor` to page backward through older executions of the latest trading day, `afterCursor: ticks.latestCursor` for incremental forward fetches, and `limit` (1–500) to cap items per page.
 
 ## Order example
 

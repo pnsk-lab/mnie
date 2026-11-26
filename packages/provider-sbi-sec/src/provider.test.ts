@@ -49,8 +49,9 @@ const client = (orderFlags: { cancelable?: boolean; correctable?: boolean } = {}
   }))
   const issueTicks = vi.fn(async () => ({
     issue: { code: '7203', market: 'XTKS' as const },
-    latestSequenceNumber: '00014282',
-    ticks: [
+    nextCursor: 'before:00014282',
+    latestCursor: 'after:00014282',
+    items: [
       {
         sequenceNumber: '00014282',
         time: '15:30',
@@ -727,16 +728,19 @@ describe('US stock settlement currency handling', () => {
       provider.invoke('market.issue.ticks', {
         issueCode: '7203',
         market: 'XTKS',
-        afterSequenceNumber: '00014280',
+        afterCursor: 'after:00014280',
+        limit: 50,
       }),
     ).resolves.toMatchObject({
       issue: { code: '7203', market: 'XTKS' },
-      latestSequenceNumber: '00014282',
+      nextCursor: 'before:00014282',
+      latestCursor: 'after:00014282',
     })
     expect(fake.issueTicks).toHaveBeenCalledWith({
       issueCode: '7203',
       market: 'XTKS',
-      afterSequenceNumber: '00014280',
+      afterCursor: 'after:00014280',
+      limit: 50,
     })
   })
 })

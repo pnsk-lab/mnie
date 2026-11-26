@@ -91,8 +91,11 @@ These are the most common params objects agents need to construct. For exact fie
 
 ```ts
 type PagingOptions = { index?: number; limit?: number }
+type PageRequest = { cursor?: string; limit?: number }
+type IncrementalPageRequest = PageRequest & { afterCursor?: string }
 type DateRangeOptions = { from?: string; to?: string }
 type IssueOptions = { issueCode: string; market: MarketCode }
+type IssueTicksOptions = IssueOptions & IncrementalPageRequest
 type IssueSearchOptions = { query: string; market: MarketCode; limit?: number }
 type AccountPowerOptions = { includeMarginAccount?: boolean }
 type ProfitLossOptions = { market?: MarketCode }
