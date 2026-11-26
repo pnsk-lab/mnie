@@ -36,6 +36,8 @@ export type {
   ChartPeriod,
   ChartPrice,
   IssueChart,
+  IssueTick,
+  IssueTickList,
   IssueSearchItem,
   IssueSearchResult,
   IssueSearchStatus,

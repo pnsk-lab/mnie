@@ -68,13 +68,13 @@ A trading password is required to place orders. When an operation requires phone
 
 ## Capabilities
 
-| Category              | Available operations                                                                                  |
-| --------------------- | ----------------------------------------------------------------------------------------------------- |
-| Account               | Profile, buying power, cash and margin positions, profit and loss, and asset valuations               |
-| Market                | Issue search, order books, charts, market overview, indexes, rankings, and news                       |
-| Management            | Watchlists, order inquiries, and execution history                                                    |
-| Domestic stocks       | Estimates, placement, correction, and cancellation for cash, margin, IFD, and theme investment orders |
-| Foreign stocks and FX | US stock data and orders, exchange rates, and foreign exchange orders                                 |
+| Category              | Available operations                                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------------------------- |
+| Account               | Profile, buying power, cash and margin positions, profit and loss, and asset valuations                 |
+| Market                | Issue search, order books, charts, time and sales (ticks), market overview, indexes, rankings, and news |
+| Management            | Watchlists, order inquiries, and execution history                                                      |
+| Domestic stocks       | Estimates, placement, correction, and cancellation for cash, margin, IFD, and theme investment orders   |
+| Foreign stocks and FX | US stock data and orders, exchange rates, and foreign exchange orders                                   |
 
 Some operations are available only when their additional endpoints are configured. The client throws an explicit error when an endpoint is missing or a market is unsupported.
 
@@ -86,10 +86,15 @@ const board = await profile.market.issue.board({
   market: 'XTKS',
 })
 
+const ticks = await profile.market.issue.ticks({
+  issueCode: '7203',
+  market: 'XTKS',
+})
+
 const positions = await profile.account.positions.cash({ market: 'XTKS' })
 ```
 
-To continuously retrieve the order book, consume the async iterator returned by `pollBoard()`. Pass an `AbortSignal` to stop polling.
+To continuously retrieve the order book or domestic time and sales, consume the async iterator returned by `pollBoard()` or `pollTicks()`. Pass an `AbortSignal` to stop polling. `ticks()` implements `@mnie/types`'s `IncrementalPage` contract: pass `cursor: ticks.nextCursor` to page backward through older executions of the latest trading day, `afterCursor: ticks.latestCursor` for incremental forward fetches, and `limit` (1–500) to cap items per page.
 
 ## Order example
 

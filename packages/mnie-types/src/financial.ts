@@ -289,6 +289,14 @@ export interface PageRequest {
   limit?: number
 }
 
+/**
+ * Page request supporting both backward pagination (`cursor` from `nextCursor`)
+ * and forward incremental fetches (`afterCursor` from `latestCursor`).
+ */
+export interface IncrementalPageRequest extends PageRequest {
+  afterCursor?: string
+}
+
 export interface DateRangeRequest extends PageRequest {
   account?: string
   from?: string
@@ -327,6 +335,14 @@ export interface HistoryListResult extends Page<HistoryItem> {
 export interface Page<Item> {
   items: Item[]
   nextCursor?: string
+}
+
+/**
+ * Page response supporting both backward pagination (`nextCursor` -> `cursor`)
+ * and forward incremental fetches (`latestCursor` -> `afterCursor`).
+ */
+export interface IncrementalPage<Item> extends Page<Item> {
+  latestCursor?: string
 }
 
 export interface TransferRecipient {

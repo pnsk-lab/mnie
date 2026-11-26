@@ -30,6 +30,7 @@ import type {
   IssueChartOptions,
   IssueOptions,
   IssueSearchOptions,
+  IssueTicksOptions,
   OrderCancelOptions,
   OrderCorrectionOptions,
 } from './operations'
@@ -41,6 +42,7 @@ import type {
   CashPosition,
   IssueChart,
   IssueSearchResult,
+  IssueTickList,
   LoginWithPasskeyOptions,
   MarketCode,
   MarketIndex,
@@ -54,6 +56,7 @@ export type SbiSecOperations = CommonMethods &
   InvestmentMethods & {
     'market.index.major': MethodDefinition<Record<string, never>, MarketIndex[]>
     'market.issue.chart': MethodDefinition<IssueChartOptions, IssueChart>
+    'market.issue.ticks': MethodDefinition<IssueTicksOptions, IssueTickList>
     'market.issue.search': MethodDefinition<IssueSearchOptions, IssueSearchResult>
     'market.issue.suggest': MethodDefinition<IssueSearchOptions, IssueSearchResult>
     'market.issue.board': MethodDefinition<IssueOptions, Board>
@@ -599,6 +602,7 @@ export const createProviderFromClient = (
       'investments.orders.cancel',
       'market.index.major',
       'market.issue.chart',
+      'market.issue.ticks',
       'market.issue.search',
       'market.issue.suggest',
       'market.issue.board',
@@ -705,6 +709,9 @@ export const createProviderFromClient = (
       if (name === 'market.index.major') return (await client.market.index.major()) as never
       if (name === 'market.issue.chart') {
         return (await client.market.issue.chart(request as IssueChartOptions)) as never
+      }
+      if (name === 'market.issue.ticks') {
+        return (await client.market.issue.ticks(request as IssueTicksOptions)) as never
       }
       if (name === 'market.issue.search') {
         return (await client.market.issue.search(request as IssueSearchOptions)) as never

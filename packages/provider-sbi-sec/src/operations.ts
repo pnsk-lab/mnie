@@ -18,6 +18,7 @@ import type {
   IssueCode,
   IssueChart,
   IssueSearchResult,
+  IssueTickList,
   MarginPositionList,
   MarginTradeSide,
   MarketCode,
@@ -42,7 +43,7 @@ import type {
   TradeSide,
   Watchlist,
 } from './types'
-import type { Transaction } from '@mnie/types'
+import type { IncrementalPageRequest, Transaction } from '@mnie/types'
 
 export interface PagingOptions {
   /** Start index for the result list. Defaults to the first item when omitted. */
@@ -79,6 +80,15 @@ export type IssueChartOptions = IssueOptions & {
   unit?: number
   /** Number of historical prices to request. Defaults to 120. */
   count?: number
+}
+
+export type IssueTicksOptions = IssueOptions & IncrementalPageRequest
+
+export type MarketIssueTicksPollingOptions = Omit<IssueTicksOptions, 'cursor'> & {
+  /** Poll interval in seconds. Defaults to 5 seconds. */
+  intervalSeconds?: number
+  /** Stops the polling iterator when aborted. */
+  signal?: AbortSignal
 }
 
 export interface IssueSearchOptions {
@@ -647,6 +657,10 @@ export interface SbiClientMethodMarketIssue {
   pollBoard(options: MarketIssueBoardPollingOptions): AsyncIterableIterator<Board>
   /** Fetches historical chart prices for an issue. */
   chart(options: IssueChartOptions): Promise<IssueChart>
+  /** Fetches executed ticks (time and sales / 歩み値) for a domestic issue. */
+  ticks(options: IssueTicksOptions): Promise<IssueTickList>
+  /** Polls executed ticks for a domestic issue, advancing `afterCursor` from `latestCursor` automatically. */
+  pollTicks(options: MarketIssueTicksPollingOptions): AsyncIterableIterator<IssueTickList>
   /** Fetches open orders for an issue. */
   openOrders(options: IssueOptions): Promise<OrderList>
   /** Fetches board and issue information useful before placing an order. */
@@ -867,6 +881,11 @@ export interface MnieOperationMap {
     AsyncIterableIterator<Board>
   >
   'market.issue.chart': MnieOperationDefinition<IssueChartOptions, IssueChart>
+  'market.issue.ticks': MnieOperationDefinition<IssueTicksOptions, IssueTickList>
+  'market.issue.pollTicks': MnieOperationDefinition<
+    MarketIssueTicksPollingOptions,
+    AsyncIterableIterator<IssueTickList>
+  >
   'market.issue.openOrders': MnieOperationDefinition<IssueOptions, OrderList>
   'market.issue.tradingInfo': MnieOperationDefinition<BoardOptions, Board>
   'market.index.major': MnieOperationDefinition<{}, MarketIndex[]>

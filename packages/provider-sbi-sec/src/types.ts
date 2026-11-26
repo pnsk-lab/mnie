@@ -1,3 +1,5 @@
+import type { IncrementalPage } from '@mnie/types'
+
 export type WebAuthnAlgorithm = -7 | -257
 
 export type WebAuthnUserVerification = 'required' | 'preferred' | 'discouraged'
@@ -355,6 +357,17 @@ export interface IssueChart {
   lowPrice?: CurrencyAmount
   latestDateTime?: string
   error?: SbiMethodError
+}
+
+export interface IssueTick {
+  sequenceNumber: string
+  time: string
+  price: CurrencyAmount
+  volume: number | null
+}
+
+export interface IssueTickList extends IncrementalPage<IssueTick> {
+  issue: IssueRef
 }
 
 export interface SessionInfo {

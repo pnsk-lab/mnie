@@ -12,76 +12,78 @@ Omit `'<json-params>'` for methods with no params. Keep identifiers such as `iss
 
 `none` means omit the JSON params argument. A trailing `?` means the params object is optional.
 
-| Method                                    | Input                                 | Output                         |
-| ----------------------------------------- | ------------------------------------- | ------------------------------ |
-| `session.profile`                         | none                                  | `AccountProfile`               |
-| `account.profile`                         | none                                  | `AccountProfile`               |
-| `account.assets.current`                  | none                                  | `AccountAssetsValuations`      |
-| `account.power.buyingPower`               | `AccountPowerOptions?`                | `BuyingPower`                  |
-| `account.power.collateralRatio`           | `AccountPowerOptions?`                | `BuyingPower`                  |
-| `account.positions.cash`                  | `CashPositionOptions?`                | `CashPositionList`             |
-| `account.positions.cashDetail`            | `CashPositionOptions?`                | `CashPositionList`             |
-| `account.positions.cashForIssue`          | `IssueOptions`                        | `CashPositionList`             |
-| `account.positions.margin`                | `MarginPositionOptions?`              | `MarginPositionList`           |
-| `account.positions.marginDetail`          | `MarginPositionOptions?`              | `MarginPositionList`           |
-| `account.positions.marginForIssue`        | `IssueOptions`                        | `MarginPositionList`           |
-| `account.positions.marginSummaryForIssue` | `IssueOptions`                        | `MarginPositionList`           |
-| `account.positions.marginDetailsForIssue` | `IssueOptions`                        | `MarginPositionList`           |
-| `account.positions.closeableMargin`       | `MarginPositionOptions`               | `MarginPositionList`           |
-| `account.positions.deliverableMargin`     | `MarginPositionOptions`               | `MarginPositionList`           |
-| `account.profitLoss.unrealized`           | `ProfitLossOptions?`                  | `ProfitLossSummary`            |
-| `market.issue.search`                     | `IssueSearchOptions`                  | `IssueSearchResult`            |
-| `market.issue.suggest`                    | `IssueSearchOptions`                  | `IssueSearchResult`            |
-| `market.issue.allowedPrices`              | `IssueOptions`                        | `Quote`                        |
-| `market.issue.board`                      | `IssueOptions`                        | `Board`                        |
-| `market.issue.pollBoard`                  | `MarketIssueBoardPollingOptions`      | `AsyncIterableIterator<Board>` |
-| `market.issue.chart`                      | `IssueChartOptions`                   | `IssueChart`                   |
-| `market.issue.openOrders`                 | `IssueOptions`                        | `OrderList`                    |
-| `market.issue.tradingInfo`                | `BoardOptions`                        | `Board`                        |
-| `market.index.major`                      | none                                  | `MarketIndex[]`                |
-| `market.overview`                         | none                                  | `DomesticMarket`               |
-| `market.ranking.market`                   | none                                  | `Ranking`                      |
-| `market.ranking.sector`                   | none                                  | `Ranking`                      |
-| `market.ranking.sbi`                      | none                                  | `Ranking`                      |
-| `news.list`                               | none                                  | `NewsList`                     |
-| `watchlist.list`                          | none                                  | `Watchlist[]`                  |
-| `orders.inquiry.executionsToday`          | `OrderInquiryOptions?`                | `OrderList`                    |
-| `orders.inquiry.open`                     | `OrderInquiryOptions?`                | `OrderList`                    |
-| `orders.inquiry.detail`                   | `OrderDetailOptions`                  | `Order`                        |
-| `orders.inquiry.tradeRecords`             | `TradeRecordInquiryOptions`           | `TradeRecordList`              |
-| `orders.cash.preOrder`                    | `CashOrderPreOrderOptions`            | `StockOrderPreOrder`           |
-| `orders.cash.estimate`                    | `CashOrderOptions`                    | `OrderPreview`                 |
-| `orders.cash.place`                       | `PlaceCashOrderOptions`               | `OrderReceipt`                 |
-| `orders.cash.estimateCorrection`          | `OrderCorrectionOptions`              | `OrderPreview`                 |
-| `orders.cash.estimateCorrectionConfirm`   | `OrderCorrectionOptions`              | `OrderPreview`                 |
-| `orders.cash.placeCorrection`             | `PlaceOrderCorrectionOptions`         | `OrderReceipt`                 |
-| `orders.cash.estimateCancel`              | `OrderCancelOptions`                  | `OrderPreview`                 |
-| `orders.cash.placeCancel`                 | `PlaceOrderCancelOptions`             | `OrderReceipt`                 |
-| `orders.margin.preOrderOpen`              | `MarginOpenOrderPreOrderOptions`      | `StockOrderPreOrder`           |
-| `orders.margin.estimateOpen`              | `MarginOpenOrderOptions`              | `OrderPreview`                 |
-| `orders.margin.open`                      | `PlaceMarginOpenOrderOptions`         | `OrderReceipt`                 |
-| `orders.margin.preOrderClose`             | `MarginCloseOrderPreOrderOptions`     | `StockOrderPreOrder`           |
-| `orders.margin.estimateClose`             | `MarginCloseOrderOptions`             | `OrderPreview`                 |
-| `orders.margin.close`                     | `PlaceMarginCloseOrderOptions`        | `OrderReceipt`                 |
-| `orders.margin.estimateCloseSummary`      | `MarginCloseOrderOptions`             | `OrderPreview`                 |
-| `orders.margin.closeSummary`              | `PlaceMarginCloseOrderOptions`        | `OrderReceipt`                 |
-| `orders.margin.estimateSummary`           | `MarginCloseSummaryOrderOptions`      | `OrderPreview`                 |
-| `orders.margin.placeSummary`              | `PlaceMarginCloseSummaryOrderOptions` | `OrderReceipt`                 |
-| `orders.margin.preOrderActualDelivery`    | `ActualDeliveryOrderPreOrderOptions`  | `StockOrderPreOrder`           |
-| `orders.margin.estimateActualDelivery`    | `ActualDeliveryOrderOptions`          | `OrderPreview`                 |
-| `orders.margin.actualDelivery`            | `PlaceActualDeliveryOrderOptions`     | `OrderReceipt`                 |
-| `orders.ifd.estimate`                     | `IfdOrderOptions`                     | `OrderPreview`                 |
-| `orders.ifd.place`                        | `PlaceIfdOrderOptions`                | `OrderReceipt`                 |
-| `orders.ifd.estimateCorrection`           | `OrderCorrectionOptions`              | `OrderPreview`                 |
-| `orders.ifd.placeCorrection`              | `PlaceOrderCorrectionOptions`         | `OrderReceipt`                 |
-| `orders.ifd.estimateCancel`               | `OrderCancelOptions`                  | `OrderPreview`                 |
-| `orders.ifd.placeCancel`                  | `PlaceOrderCancelOptions`             | `OrderReceipt`                 |
-| `orders.themeInvestment.list`             | `ThemeInvestmentPreOrderOptions`      | `ThemeInvestmentList`          |
-| `orders.themeInvestment.estimate`         | `ThemeInvestmentOrderOptions`         | `OrderPreview`                 |
-| `orders.themeInvestment.place`            | `PlaceThemeInvestmentOrderOptions`    | `OrderReceipt`                 |
-| `orders.exchange.rate`                    | `ExchangeRateOptions`                 | `ExchangeRateInfo`             |
-| `orders.exchange.estimate`                | `ExchangeOrderOptions`                | `ExchangeOrderPreview`         |
-| `orders.exchange.place`                   | `PlaceExchangeOrderOptions`           | `ExchangeOrderReceipt`         |
+| Method                                    | Input                                 | Output                                 |
+| ----------------------------------------- | ------------------------------------- | -------------------------------------- |
+| `session.profile`                         | none                                  | `AccountProfile`                       |
+| `account.profile`                         | none                                  | `AccountProfile`                       |
+| `account.assets.current`                  | none                                  | `AccountAssetsValuations`              |
+| `account.power.buyingPower`               | `AccountPowerOptions?`                | `BuyingPower`                          |
+| `account.power.collateralRatio`           | `AccountPowerOptions?`                | `BuyingPower`                          |
+| `account.positions.cash`                  | `CashPositionOptions?`                | `CashPositionList`                     |
+| `account.positions.cashDetail`            | `CashPositionOptions?`                | `CashPositionList`                     |
+| `account.positions.cashForIssue`          | `IssueOptions`                        | `CashPositionList`                     |
+| `account.positions.margin`                | `MarginPositionOptions?`              | `MarginPositionList`                   |
+| `account.positions.marginDetail`          | `MarginPositionOptions?`              | `MarginPositionList`                   |
+| `account.positions.marginForIssue`        | `IssueOptions`                        | `MarginPositionList`                   |
+| `account.positions.marginSummaryForIssue` | `IssueOptions`                        | `MarginPositionList`                   |
+| `account.positions.marginDetailsForIssue` | `IssueOptions`                        | `MarginPositionList`                   |
+| `account.positions.closeableMargin`       | `MarginPositionOptions`               | `MarginPositionList`                   |
+| `account.positions.deliverableMargin`     | `MarginPositionOptions`               | `MarginPositionList`                   |
+| `account.profitLoss.unrealized`           | `ProfitLossOptions?`                  | `ProfitLossSummary`                    |
+| `market.issue.search`                     | `IssueSearchOptions`                  | `IssueSearchResult`                    |
+| `market.issue.suggest`                    | `IssueSearchOptions`                  | `IssueSearchResult`                    |
+| `market.issue.allowedPrices`              | `IssueOptions`                        | `Quote`                                |
+| `market.issue.board`                      | `IssueOptions`                        | `Board`                                |
+| `market.issue.pollBoard`                  | `MarketIssueBoardPollingOptions`      | `AsyncIterableIterator<Board>`         |
+| `market.issue.chart`                      | `IssueChartOptions`                   | `IssueChart`                           |
+| `market.issue.ticks`                      | `IssueTicksOptions`                   | `IssueTickList`                        |
+| `market.issue.pollTicks`                  | `MarketIssueTicksPollingOptions`      | `AsyncIterableIterator<IssueTickList>` |
+| `market.issue.openOrders`                 | `IssueOptions`                        | `OrderList`                            |
+| `market.issue.tradingInfo`                | `BoardOptions`                        | `Board`                                |
+| `market.index.major`                      | none                                  | `MarketIndex[]`                        |
+| `market.overview`                         | none                                  | `DomesticMarket`                       |
+| `market.ranking.market`                   | none                                  | `Ranking`                              |
+| `market.ranking.sector`                   | none                                  | `Ranking`                              |
+| `market.ranking.sbi`                      | none                                  | `Ranking`                              |
+| `news.list`                               | none                                  | `NewsList`                             |
+| `watchlist.list`                          | none                                  | `Watchlist[]`                          |
+| `orders.inquiry.executionsToday`          | `OrderInquiryOptions?`                | `OrderList`                            |
+| `orders.inquiry.open`                     | `OrderInquiryOptions?`                | `OrderList`                            |
+| `orders.inquiry.detail`                   | `OrderDetailOptions`                  | `Order`                                |
+| `orders.inquiry.tradeRecords`             | `TradeRecordInquiryOptions`           | `TradeRecordList`                      |
+| `orders.cash.preOrder`                    | `CashOrderPreOrderOptions`            | `StockOrderPreOrder`                   |
+| `orders.cash.estimate`                    | `CashOrderOptions`                    | `OrderPreview`                         |
+| `orders.cash.place`                       | `PlaceCashOrderOptions`               | `OrderReceipt`                         |
+| `orders.cash.estimateCorrection`          | `OrderCorrectionOptions`              | `OrderPreview`                         |
+| `orders.cash.estimateCorrectionConfirm`   | `OrderCorrectionOptions`              | `OrderPreview`                         |
+| `orders.cash.placeCorrection`             | `PlaceOrderCorrectionOptions`         | `OrderReceipt`                         |
+| `orders.cash.estimateCancel`              | `OrderCancelOptions`                  | `OrderPreview`                         |
+| `orders.cash.placeCancel`                 | `PlaceOrderCancelOptions`             | `OrderReceipt`                         |
+| `orders.margin.preOrderOpen`              | `MarginOpenOrderPreOrderOptions`      | `StockOrderPreOrder`                   |
+| `orders.margin.estimateOpen`              | `MarginOpenOrderOptions`              | `OrderPreview`                         |
+| `orders.margin.open`                      | `PlaceMarginOpenOrderOptions`         | `OrderReceipt`                         |
+| `orders.margin.preOrderClose`             | `MarginCloseOrderPreOrderOptions`     | `StockOrderPreOrder`                   |
+| `orders.margin.estimateClose`             | `MarginCloseOrderOptions`             | `OrderPreview`                         |
+| `orders.margin.close`                     | `PlaceMarginCloseOrderOptions`        | `OrderReceipt`                         |
+| `orders.margin.estimateCloseSummary`      | `MarginCloseOrderOptions`             | `OrderPreview`                         |
+| `orders.margin.closeSummary`              | `PlaceMarginCloseOrderOptions`        | `OrderReceipt`                         |
+| `orders.margin.estimateSummary`           | `MarginCloseSummaryOrderOptions`      | `OrderPreview`                         |
+| `orders.margin.placeSummary`              | `PlaceMarginCloseSummaryOrderOptions` | `OrderReceipt`                         |
+| `orders.margin.preOrderActualDelivery`    | `ActualDeliveryOrderPreOrderOptions`  | `StockOrderPreOrder`                   |
+| `orders.margin.estimateActualDelivery`    | `ActualDeliveryOrderOptions`          | `OrderPreview`                         |
+| `orders.margin.actualDelivery`            | `PlaceActualDeliveryOrderOptions`     | `OrderReceipt`                         |
+| `orders.ifd.estimate`                     | `IfdOrderOptions`                     | `OrderPreview`                         |
+| `orders.ifd.place`                        | `PlaceIfdOrderOptions`                | `OrderReceipt`                         |
+| `orders.ifd.estimateCorrection`           | `OrderCorrectionOptions`              | `OrderPreview`                         |
+| `orders.ifd.placeCorrection`              | `PlaceOrderCorrectionOptions`         | `OrderReceipt`                         |
+| `orders.ifd.estimateCancel`               | `OrderCancelOptions`                  | `OrderPreview`                         |
+| `orders.ifd.placeCancel`                  | `PlaceOrderCancelOptions`             | `OrderReceipt`                         |
+| `orders.themeInvestment.list`             | `ThemeInvestmentPreOrderOptions`      | `ThemeInvestmentList`                  |
+| `orders.themeInvestment.estimate`         | `ThemeInvestmentOrderOptions`         | `OrderPreview`                         |
+| `orders.themeInvestment.place`            | `PlaceThemeInvestmentOrderOptions`    | `OrderReceipt`                         |
+| `orders.exchange.rate`                    | `ExchangeRateOptions`                 | `ExchangeRateInfo`                     |
+| `orders.exchange.estimate`                | `ExchangeOrderOptions`                | `ExchangeOrderPreview`                 |
+| `orders.exchange.place`                   | `PlaceExchangeOrderOptions`           | `ExchangeOrderReceipt`                 |
 
 ## Common Input Shapes
 
@@ -89,8 +91,11 @@ These are the most common params objects agents need to construct. For exact fie
 
 ```ts
 type PagingOptions = { index?: number; limit?: number }
+type PageRequest = { cursor?: string; limit?: number }
+type IncrementalPageRequest = PageRequest & { afterCursor?: string }
 type DateRangeOptions = { from?: string; to?: string }
 type IssueOptions = { issueCode: string; market: MarketCode }
+type IssueTicksOptions = IssueOptions & IncrementalPageRequest
 type IssueSearchOptions = { query: string; market: MarketCode; limit?: number }
 type AccountPowerOptions = { includeMarginAccount?: boolean }
 type ProfitLossOptions = { market?: MarketCode }
@@ -177,11 +182,12 @@ mnie rpc call market.issue.suggest '{"query":"トヨタ","market":"T","limit":10
 mnie rpc call market.issue.allowedPrices '{"issueCode":"7203","market":"T"}' --profile local --passkey-id sbi_xxx
 mnie rpc call market.issue.board '{"issueCode":"7203","market":"T"}' --profile local --passkey-id sbi_xxx
 mnie rpc call market.issue.chart '{"issueCode":"7203","market":"T","period":"day","count":120}' --profile local --passkey-id sbi_xxx
+mnie rpc call market.issue.ticks '{"issueCode":"7203","market":"XTKS"}' --profile local --passkey-id sbi_xxx
 mnie rpc call market.issue.openOrders '{"issueCode":"7203","market":"T"}' --profile local --passkey-id sbi_xxx
 mnie rpc call market.issue.tradingInfo '{"issueCode":"7203","market":"T","side":"cashBuy"}' --profile local --passkey-id sbi_xxx
 ```
 
-`market.issue.pollBoard` is a polling/iterator method. Prefer `market.issue.board` for one-shot CLI output unless `mnie rpc call market.issue.pollBoard ...` is known to serialize streaming results in the target environment.
+`market.issue.pollBoard` and `market.issue.pollTicks` are polling/iterator methods. Prefer `market.issue.board` and `market.issue.ticks` for one-shot CLI output unless streaming serialization is supported in the target environment.
 
 Indexes, overview, rankings:
 
