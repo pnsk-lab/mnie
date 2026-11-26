@@ -1,4 +1,4 @@
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { resolve } from 'node:path'
 
@@ -87,6 +87,11 @@ export const publishPackage = async (
     }
     console.log(`${pkg.name}: ${latest || pkg.version} -> ${next}`)
 
+    execSync(`pnpm exec vp run --no-cache "${pkg.name}#build"`, {
+      cwd: root,
+      stdio: 'inherit',
+    })
+
     const updated = JSON.parse(readFileSync(pkgPath, 'utf8'))
     for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies']) {
       for (const [dep, spec] of Object.entries(updated[field] ?? {})) {
@@ -108,18 +113,16 @@ export const publishPackage = async (
     }
     writeFileSync(pkgPath, `${JSON.stringify(updated, null, 2)}\n`)
 
-    execSync(`pnpm exec vp run --no-cache "${updated.name}#build"`, {
-      cwd: root,
-      stdio: 'inherit',
-    })
-
     if (opts.dryRun) {
-      execSync('pnpm pack', { cwd: pkgDir, stdio: 'inherit' })
+      execSync('pnpm publish --no-git-checks --ignore-scripts --dry-run', {
+        cwd: pkgDir,
+        stdio: 'inherit',
+      })
       return { name: updated.name, version: next, status: 'dry-run' }
     }
 
     const doPublish = (otp?: string) =>
-      execSync(`pnpm publish --no-git-checks${otp ? ` --otp ${otp}` : ''}`, {
+      execSync(`pnpm publish --no-git-checks --ignore-scripts${otp ? ` --otp ${otp}` : ''}`, {
         cwd: pkgDir,
         stdio: 'inherit',
       })
