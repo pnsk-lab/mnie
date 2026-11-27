@@ -711,58 +711,80 @@ export const reconcileVirtualOrder = (db: Db, orderId: string, result: Record<st
   const reference = `${order.id}:${requestHash({ state, changes })}`
   if (order.state === state && requestHash({ changes: order.changes }) === requestHash({ changes }))
     return
-  db.transaction((tx) => {
-    applyAssetChanges(tx, {
-      accountId: order.accountId,
-      changes: invertChanges(order.changes),
-      eventType: 'order_sync_release',
-      referenceType: 'order_sync_release',
-      referenceId: reference,
-      settlement: true,
-    })
-    if (changes.length)
+  try {
+    db.transaction((tx) => {
       applyAssetChanges(tx, {
         accountId: order.accountId,
-        changes,
-        eventType: 'order_sync',
-        referenceType: 'order_sync',
+        changes: invertChanges(order.changes),
+        eventType: 'order_sync_release',
+        referenceType: 'order_sync_release',
         referenceId: reference,
         settlement: true,
       })
-    applyPhysicalAccountAssetChanges(db, order.physicalAccountId, [
-      ...invertChanges(order.changes),
-      ...changes,
-    ])
-    tx.update(virtualOrders)
-      .set({
-        state,
-        changes,
-        result: {
-          ...order.result,
-          status: state,
-          executedQuantity: result.executedQuantity,
-          unexecutedQuantity: result.unexecutedQuantity,
-        },
-        updatedAt: new Date(),
-      })
-      .where(eq(virtualOrders.id, order.id))
-      .run()
-    // A confirmed cancellation also resolves its pending command.
-    for (const command of tx
-      .select()
-      .from(virtualOrders)
-      .where(eq(virtualOrders.accountId, order.accountId))
-      .all()) {
-      if (
-        command.request.parentId === order.id &&
-        command.request.operation === 'cancel' &&
-        state === 'cancelled'
-      )
-        tx.update(virtualOrders)
-          .set({ state: 'filled', updatedAt: new Date() })
-          .where(eq(virtualOrders.id, command.id))
-          .run()
+      if (changes.length)
+        applyAssetChanges(tx, {
+          accountId: order.accountId,
+          changes,
+          eventType: 'order_sync',
+          referenceType: 'order_sync',
+          referenceId: reference,
+          settlement: true,
+        })
+      applyPhysicalAccountAssetChanges(db, order.physicalAccountId, [
+        ...invertChanges(order.changes),
+        ...changes,
+      ])
+      tx.update(virtualOrders)
+        .set({
+          state,
+          changes,
+          error: null,
+          result: {
+            ...order.result,
+            status: state,
+            executedQuantity: result.executedQuantity,
+            unexecutedQuantity: result.unexecutedQuantity,
+          },
+          updatedAt: new Date(),
+        })
+        .where(eq(virtualOrders.id, order.id))
+        .run()
+      // A confirmed cancellation also resolves its pending command.
+      for (const command of tx
+        .select()
+        .from(virtualOrders)
+        .where(eq(virtualOrders.accountId, order.accountId))
+        .all()) {
+        if (
+          command.request.parentId === order.id &&
+          command.request.operation === 'cancel' &&
+          state === 'cancelled'
+        )
+          tx.update(virtualOrders)
+            .set({ state: 'filled', updatedAt: new Date() })
+            .where(eq(virtualOrders.id, command.id))
+            .run()
+      }
+      audit(db, order.accountId, `order.${state}`, { orderId: order.id })
+    })
+  } catch (cause) {
+    if (cause instanceof Error && cause.message.startsWith('insufficient virtual asset:')) {
+      db.update(virtualOrders)
+        .set({
+          state: 'reconciliation_required',
+          error: cause.message,
+          updatedAt: new Date(),
+        })
+        .where(eq(virtualOrders.id, order.id))
+        .run()
+      if (order.state !== 'reconciliation_required' || order.error !== cause.message) {
+        audit(db, order.accountId, 'order.reconciliation_required', {
+          orderId: order.id,
+          reason: cause.message,
+        })
+      }
+      return
     }
-    audit(db, order.accountId, `order.${state}`, { orderId: order.id })
-  })
+    throw cause
+  }
 }

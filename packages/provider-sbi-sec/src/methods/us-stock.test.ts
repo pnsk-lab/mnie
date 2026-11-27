@@ -347,5 +347,99 @@ describe('US stock place/cancel identity', () => {
     expect(submit?.variables.input).toMatchObject({
       order: { settlementMethodCode: 'YEN_SETTLEMENT' },
     })
+    expect(
+      (submit?.variables.input as { order: Record<string, unknown> }).order.noLimitPrice,
+    ).toBeUndefined()
+  })
+
+  test('returns estimatePrice and noLimitPrice for a market buy preview and forwards noLimitPrice on submit', async () => {
+    const calls = mockGraphql((body) => {
+      if (body.operationName === 'ConfirmOrderCreating') {
+        return {
+          data: {
+            confirmForeignStockCreatedOrder: {
+              buyPossibleAmount: '170000',
+              estimatePrice: '12.34',
+              nisaBuyLimitAmount: '',
+              sellPossibleQuantity: '',
+              warningStatuses: [],
+              order: {
+                orderNo: '',
+                orderSubNo: '',
+                orderInputDatetime: '',
+                orderQuantity: '1',
+                orderPrice: '',
+                noLimitPrice: '14.19',
+                settlementMethodCode: 'YEN_SETTLEMENT',
+                settlementCurrencyCode: 'JPY',
+                exchangeRate: '159.59',
+                tradeCurrencyCode: 'USD',
+                grossAmount: '2264',
+                frnGrossAmount: '14.19',
+                localCharge: '0',
+                frnLocalCharge: '0',
+                localNetAmount: '2264',
+                frnLocalNetAmount: '14.19',
+                commissionAmount: '10',
+                frnCommissionAmount: '0.06',
+                commissionCtax: '1',
+                frnCommissionCtax: '0.01',
+                netAmount: '2275',
+                frnNetAmount: '',
+                securities: { securitiesCode: 'F' },
+                market: { marketCode: 'US_NYSE' },
+              },
+            },
+          },
+        }
+      }
+      if (body.operationName === 'SubmitOrderCreating') {
+        return {
+          data: {
+            createForeignStockOrder: {
+              order: {
+                orderNo: 'I01',
+                orderSubNo: 'A01',
+                orderInputDatetime: '2026-11-22T22:42:52.929+09:00',
+                orderStatus: 'ORDERING',
+              },
+              warningStatuses: [],
+            },
+          },
+        }
+      }
+      throw new Error(`unexpected ${body.operationName}`)
+    })
+    const adapter = createUsStockAdapter(session)
+    const marketInput: CashOrderOptions = {
+      issueCode: 'F',
+      market: 'XNYS',
+      side: 'buy',
+      quantity: 1,
+      accountType: 'specific',
+      depositType: 'specific',
+      kind: 'market',
+      orderTerm: 'day',
+    }
+    const preview = await adapter.estimate(marketInput)
+    expect(preview.price).toMatchObject({ currency: 'USD', value: 12.34 })
+    expect(preview.heldAmount).toMatchObject({ currency: 'JPY', value: 2275 })
+    expect(preview.noLimitPrice).toBe('14.19')
+    const confirmOrder = (calls[0]!.variables.input as { order: Record<string, unknown> }).order
+    expect(confirmOrder).toMatchObject({ orderPriceKindCode: 'MARKET' })
+    expect(confirmOrder.orderPrice).toBeUndefined()
+
+    const receipt = await adapter.place({
+      ...marketInput,
+      noLimitPrice: preview.noLimitPrice,
+      allowTrading: true,
+    })
+    expect(receipt.orderId).toBe('A01')
+    const submitOrder = (calls[1]!.variables.input as { order: Record<string, unknown> }).order
+    expect(submitOrder).toMatchObject({
+      orderPriceKindCode: 'MARKET',
+      noLimitPrice: '14.19',
+    })
+    expect(submitOrder.orderPrice).toBeUndefined()
   })
 })

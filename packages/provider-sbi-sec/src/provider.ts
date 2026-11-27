@@ -551,6 +551,7 @@ export const createProviderFromClient = (
   client: SbiClientMethods,
 ): FinancialProvider<SbiSecOperations> => {
   const projectedChanges = new Map<string, FinancialAssetChange[]>()
+  const previewNoLimitPrices = new Map<string, string>()
   const profile = client.session.profile
   const account = async (): Promise<Account> => {
     const value = await profile()
@@ -857,12 +858,19 @@ export const createProviderFromClient = (
           if (result.confirmationToken && result.projectedAssetChanges) {
             projectedChanges.set(result.confirmationToken, result.projectedAssetChanges)
           }
+          if (result.confirmationToken && preview.noLimitPrice) {
+            previewNoLimitPrices.set(result.confirmationToken, preview.noLimitPrice)
+          }
           return result as never
         }
         const placement = input as InvestmentOrderPlacement
         // US confirmations mint a local token, never a broker orderSubNo, so
         // the token must not be forwarded into the broker submission.
         const usMarket = 'market' in options && isUsMarket(options.market)
+        const noLimitPrice =
+          usMarket && placement.confirmationToken
+            ? previewNoLimitPrices.get(placement.confirmationToken)
+            : undefined
         const receipt =
           input.strategy?.kind === 'ifd'
             ? await client.orders.ifd.place({
@@ -873,6 +881,7 @@ export const createProviderFromClient = (
             : await client.orders.cash.place({
                 ...(options as CashOrderOptions),
                 confirmationId: usMarket ? undefined : placement.confirmationToken,
+                ...(noLimitPrice ? { noLimitPrice } : {}),
                 allowTrading: true,
               })
         const result = commonReceipt(input, receipt, currentAccount.id)
@@ -886,8 +895,10 @@ export const createProviderFromClient = (
             changes,
           }
           projectedChanges.delete(placement.confirmationToken!)
+          previewNoLimitPrices.delete(placement.confirmationToken!)
         } else if (placement.confirmationToken) {
           projectedChanges.delete(placement.confirmationToken)
+          previewNoLimitPrices.delete(placement.confirmationToken)
         }
         return result as never
       }

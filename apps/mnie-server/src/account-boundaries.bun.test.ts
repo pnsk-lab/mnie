@@ -669,4 +669,265 @@ describe('public account isolation and durable orders', () => {
       ),
     ).rejects.toThrow('internal order fields')
   })
+
+  test('quantity-based market buy previews, reserves, executes, and releases unused buffer on fill', async () => {
+    const { db, a } = await setup()
+    const marketRequest = {
+      ...request,
+      execution: { priceType: 'market', venue: 'TSE' },
+    }
+    const marketReservation = [
+      {
+        asset: { kind: 'cash' as const, currency: 'JPY' },
+        availableDelta: '-80',
+        reservedDelta: '80',
+        pendingDelta: '0',
+      },
+    ]
+    const provider = {
+      accountIsolation: {
+        physicalCashIncludesReservations: true,
+        stableOrderReferences: true,
+        attributableSettlementEffects: true,
+        completeOpenOrderSnapshot: true,
+      },
+      methods: () => [
+        'balances.list',
+        'investments.positions.list',
+        'investments.orders.open',
+        'investments.orders.get',
+        'investments.orders.preview',
+        'investments.orders.create',
+      ],
+      checkMethodAvailability: async () => ({ available: true }),
+      invoke: async (method: string) => {
+        if (method === 'balances.list') {
+          return [
+            {
+              accountId: 'secret-physical-id',
+              type: 'current',
+              amount: { kind: 'money', money: { currency: 'JPY', value: '200' } },
+              asOf: new Date().toISOString(),
+            },
+          ]
+        }
+        if (method === 'investments.positions.list') return { items: [] }
+        if (method === 'investments.orders.open') return { items: [], complete: true }
+        if (method === 'investments.orders.preview') {
+          return {
+            confirmationToken: 'market-confirm-1',
+            estimatedAmount: { currency: 'JPY', value: '80' },
+            heldAmount: { currency: 'JPY', value: '80' },
+            projectedAssetChanges: marketReservation,
+            warnings: [],
+          }
+        }
+        return {
+          id: 'broker-market-1',
+          status: 'open',
+          effects: { referenceId: 'broker-market-1', changes: marketReservation },
+        }
+      },
+    }
+    const registry = {
+      open: async () => ({
+        profile: { id: 'connection' },
+        provider,
+        persist: async () => {},
+        release: async () => {},
+      }),
+    } as unknown as ProviderRegistry
+    const service = new FinancialAccountService(db, registry)
+    try {
+      const availability = (await service.dispatch(
+        'account.availability',
+        { account: a.id, method: 'account.investments.orders.preview', params: marketRequest },
+        owner,
+      )) as { methods: Record<string, { available: boolean }> }
+      expect(availability.methods['account.investments.orders.preview']?.available).toBe(true)
+
+      const preview = (await service.dispatch(
+        'account.investments.orders.preview',
+        { account: a.id, ...marketRequest },
+        owner,
+      )) as { confirmationToken: string }
+      expect(preview.confirmationToken).toBeTruthy()
+
+      const created = (await service.dispatch(
+        'account.investments.orders.create',
+        {
+          account: a.id,
+          ...marketRequest,
+          confirmationToken: preview.confirmationToken,
+          idempotencyKey: 'market-buy-1',
+          allowTransaction: true,
+        },
+        owner,
+      )) as { id: string; status: string }
+      expect(created.status).toBe('open')
+      expect((await listVirtualAccountAssets(db, a.id, owner))[0]).toMatchObject({
+        available: '20',
+        reserved: '80',
+      })
+
+      // Actual execution fills below the stop-high / buffered reservation (65 < 80).
+      reconcileVirtualOrder(db, created.id, {
+        id: 'broker-market-1',
+        status: 'executed',
+        executedQuantity: '1',
+        unexecutedQuantity: '0',
+        effects: {
+          referenceId: 'broker-market-1',
+          changes: [
+            {
+              asset: { kind: 'cash', currency: 'JPY' },
+              availableDelta: '-65',
+              reservedDelta: '0',
+              pendingDelta: '0',
+            },
+            {
+              asset: { kind: 'security', instrumentId: '7203', venue: 'TSE', positionType: 'cash' },
+              availableDelta: '1',
+              reservedDelta: '0',
+              pendingDelta: '0',
+            },
+          ],
+        },
+      })
+      const assets = await listVirtualAccountAssets(db, a.id, owner)
+      expect(assets.find((asset) => asset.assetKey === 'cash:JPY')).toMatchObject({
+        available: '35',
+        reserved: '0',
+      })
+      expect(
+        assets.find((asset) => asset.assetKey === 'security:7203:TSE:cash:unspecified'),
+      ).toMatchObject({
+        available: '1',
+        reserved: '0',
+      })
+    } finally {
+      await service.close()
+    }
+  })
+
+  test('market buy without projectedAssetChanges is still rejected', async () => {
+    const { db, a } = await setup()
+    await expect(
+      storeOrderQuote(
+        db,
+        a.id,
+        owner,
+        'investments.orders.preview',
+        { ...request, execution: { priceType: 'market', venue: 'TSE' } },
+        { confirmationToken: 'missing-reservation', warnings: [] },
+      ),
+    ).rejects.toThrow('provider cannot determine a safe reservation')
+  })
+
+  test('account policy allowedOrderTypes can restrict a virtual account to limit orders', async () => {
+    const { db, a } = await setup()
+    await updateVirtualAccount(db, a.id, {
+      expectedVersion: a.version,
+      policy: { allowedOrderTypes: ['limit'] },
+    })
+    await expect(
+      storeOrderQuote(
+        db,
+        a.id,
+        owner,
+        'investments.orders.preview',
+        { ...request, execution: { priceType: 'market', venue: 'TSE' } },
+        { confirmationToken: 'denied-market', projectedAssetChanges: changes, warnings: [] },
+      ),
+    ).rejects.toThrow('account policy denies orderType')
+  })
+
+  test('settlement overrun marks order reconciliation_required without touching sibling virtual accounts', async () => {
+    const { db, a, b } = await setup()
+    const marketRequest = {
+      ...request,
+      execution: { priceType: 'market', venue: 'TSE' },
+    }
+    const preview = await storeOrderQuote(
+      db,
+      a.id,
+      owner,
+      'investments.orders.preview',
+      marketRequest,
+      { confirmationToken: 'market-overrun', projectedAssetChanges: changes, warnings: [] },
+    )
+    const order = await createCoordinatedOrder(
+      db,
+      a.id,
+      owner,
+      {
+        ...marketRequest,
+        confirmationToken: preview.confirmationToken,
+        idempotencyKey: 'market-overrun-1',
+        allowTransaction: true,
+      },
+      async () => ({
+        id: 'broker-overrun',
+        status: 'open',
+        effects: { referenceId: 'broker-overrun', changes },
+      }),
+    )
+
+    // Actual fill costs 120 JPY, exceeding account A's 100 JPY total (40 available + 60 reserved).
+    const overrunFill = {
+      id: 'broker-overrun',
+      status: 'executed',
+      executedQuantity: '1',
+      unexecutedQuantity: '0',
+      effects: {
+        referenceId: 'broker-overrun',
+        changes: [
+          {
+            asset: { kind: 'cash', currency: 'JPY' },
+            availableDelta: '-120',
+            reservedDelta: '0',
+            pendingDelta: '0',
+          },
+          {
+            asset: { kind: 'security', instrumentId: '7203', venue: 'TSE', positionType: 'cash' },
+            availableDelta: '1',
+            reservedDelta: '0',
+            pendingDelta: '0',
+          },
+        ],
+      },
+    }
+    reconcileVirtualOrder(db, order.id, overrunFill)
+
+    const orderRow = db.select().from(virtualOrders).get()
+    expect(orderRow?.state).toBe('reconciliation_required')
+    expect(orderRow?.error).toContain('insufficient virtual asset: cash:JPY')
+    // Account A keeps its original reservation; sibling account B is completely untouched.
+    const aCash = (await listVirtualAccountAssets(db, a.id, owner))[0]!
+    const bCash = (await listVirtualAccountAssets(db, b.id, owner))[0]!
+    expect(aCash).toMatchObject({ available: '40', reserved: '60' })
+    expect(bCash).toMatchObject({ available: '100', reserved: '0' })
+
+    // Once the owner transfers 30 JPY from B to A, reconciliation settles cleanly and clears error.
+    transferVirtualAssets(db, [
+      {
+        fromAccountId: b.id,
+        toAccountId: a.id,
+        assetKey: 'cash:JPY',
+        amount: '30',
+        expectedFromVersion: bCash.version,
+        expectedToVersion: aCash.version,
+        reason: 'top-up after market buy fill',
+      },
+    ])
+    reconcileVirtualOrder(db, order.id, overrunFill)
+    const settledRow = db.select().from(virtualOrders).get()
+    expect(settledRow?.state).toBe('filled')
+    expect(settledRow?.error).toBeNull()
+    expect(
+      (await listVirtualAccountAssets(db, a.id, owner)).find(
+        (asset) => asset.assetKey === 'cash:JPY',
+      ),
+    ).toMatchObject({ available: '10', reserved: '0' })
+  })
 })

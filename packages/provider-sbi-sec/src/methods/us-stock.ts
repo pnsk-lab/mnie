@@ -747,19 +747,25 @@ const orderPreviewFromConfirmation = (
   const order = objectAt(confirmation, ['order'])
   const settlementCurrency = usSettlementCurrency(order)
   const settlementAmount = usSettlementSideAmount(order)
+  const priceText =
+    stringAt(confirmation, ['estimatePrice']) ||
+    stringAt(order, ['orderPrice']) ||
+    (options.price == null ? '' : String(options.price))
+  const noLimitPrice = stringAt(order, ['noLimitPrice']) || undefined
   // SBI returns the settlement amount already computed with its buffered
   // exchange rate, so it is simultaneously the reservation the broker holds.
   return {
     issue: { code: options.issueCode, market: options.market },
     side: options.side,
     quantity: options.quantity,
-    price: usd(String(options.price ?? '')),
+    price: usd(priceText),
     estimatedAmount: settlementAmount,
     heldAmount: options.side === 'buy' ? settlementAmount : undefined,
     settlementCurrency,
     tradeAmount: usTradeAmount(order),
     buyingPower: currencyAmount(stringAt(confirmation, ['buyPossibleAmount']), settlementCurrency),
     exchangeRate: stringAt(order, ['exchangeRate']),
+    ...(noLimitPrice ? { noLimitPrice } : {}),
     commission: currencyAmount(
       stringAt(
         order,
@@ -1132,6 +1138,9 @@ const usOrderInput = (options: CashOrderOptions | PlaceCashOrderOptions, orderDa
   buySellCode: buySellCode(options.side),
   orderQuantity: String(options.quantity),
   orderPrice: usOrderIsMarket(options) ? undefined : String(options.price),
+  ...(usOrderIsMarket(options) && 'noLimitPrice' in options && options.noLimitPrice
+    ? { noLimitPrice: options.noLimitPrice }
+    : {}),
   orderPriceKindCode: usOrderIsMarket(options) ? 'MARKET' : 'LIMIT',
   orderLimitCode: orderDate ? 'CARRY_OVER_ORDER' : 'TODAY_ORDER',
   orderTerm: orderDate,
@@ -1440,7 +1449,7 @@ query ConfirmOrderCreating($input: Input_fstock_order_ConfirmForeignStockCreated
   confirmForeignStockCreatedOrder(input: $input) {
     buyPossibleAmount estimatePrice nisaBuyLimitAmount sellPossibleQuantity warningStatuses
     order {
-      orderNo orderSubNo orderInputDatetime orderQuantity orderPrice
+      orderNo orderSubNo orderInputDatetime orderQuantity orderPrice noLimitPrice
       settlementMethodCode settlementCurrencyCode tradeCurrencyCode exchangeRate
       grossAmount frnGrossAmount localCharge frnLocalCharge localNetAmount frnLocalNetAmount
       commissionAmount frnCommissionAmount commissionCtax frnCommissionCtax

@@ -327,6 +327,8 @@ export type ActualDeliveryOrderPreOrderOptions = Pick<
 export type PlaceCashOrderOptions = CashOrderOptions & {
   /** Confirmation ID returned by the confirmation step. */
   confirmationId?: string
+  /** Market-order reference price returned by US order confirmation. */
+  noLimitPrice?: string
   /** APK confirmation-screen omission flag. Only valid for live submit calls. */
   omitConfirmation?: boolean
   /** Explicitly allows sending a live order. */

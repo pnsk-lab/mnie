@@ -3071,7 +3071,7 @@ const filterOrders = (list: OrderList, options?: OrderInquiryOptions | IssueOpti
   }
 }
 
-const CASH_ORDER_CONFIRM_TR_CODES = new Set(['F2104', 'F2124'])
+const CASH_ORDER_CONFIRM_TR_CODES = new Set(['F2104', 'F2124', 'F2151', 'F2152'])
 
 const readConfirmYen = (
   response: MtsResponse,
@@ -3084,14 +3084,20 @@ const readConfirmYen = (
 }
 
 const parseCashOrderConfirm = (response: MtsResponse) => {
-  const settlementAmount = readConfirmYen(response, 296, 12)
+  // Fixed-width Shift_JIS layout after the 70-byte MTS header (F2104/F2124/F2151/F2152):
+  // 219(12) estimatePrice, 231(17) amountF, 248(26) commissionTypeF,
+  // 274(17) consumptionTax, 291(17) netAmount1, 308(17) acBalance.
+  const settlementAmount = readConfirmYen(response, 291, 17)
   if (!settlementAmount) return undefined
-  const commissionFee = readShiftJisField(response.buffer, 248, 18).split('/').at(-1) ?? ''
+  const commissionFee =
+    response.buffer.length >= 248 + 26
+      ? (readShiftJisField(response.buffer, 248, 26).split('/').at(-1) ?? '')
+      : ''
   return {
-    unitPrice: readConfirmYen(response, 216, 15),
-    orderAmount: readConfirmYen(response, 236, 12),
+    unitPrice: readConfirmYen(response, 219, 12),
+    orderAmount: readConfirmYen(response, 231, 17),
     commission: parseNumber(commissionFee) == null ? undefined : yen(commissionFee),
-    tax: readConfirmYen(response, 286, 10),
+    tax: readConfirmYen(response, 274, 17),
     settlementAmount,
     buyingPower: readConfirmYen(response, 308, 17),
   }
