@@ -62,13 +62,6 @@ export const assertAccountTrade = (
   const execution = input.execution as
     | { priceType?: string; venue?: string; limitPrice?: { currency: string; value: string } }
     | undefined
-  if (
-    operation !== 'investments.orders.cancel' &&
-    input.side === 'buy' &&
-    execution?.priceType === 'market' &&
-    !input.amount
-  )
-    throw new Error('provider cannot guarantee a maximum reservation for market buys')
   const scopedInput: Record<string, unknown> = {
     ...input,
     venue: input.instrumentVenue ?? input.venue ?? execution?.venue,

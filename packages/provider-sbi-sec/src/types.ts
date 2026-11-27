@@ -833,6 +833,8 @@ export interface OrderPreview {
   buyingPower?: CurrencyAmount
   /** Exchange rate applied to settlement-currency amounts. */
   exchangeRate?: string
+  /** Market-order cap/reference price returned by US order confirmation for submission. */
+  noLimitPrice?: string
 }
 
 export interface StockOrderPreOrderPriceStep {

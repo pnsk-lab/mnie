@@ -744,4 +744,64 @@ describe('US stock settlement currency handling', () => {
       limit: 50,
     })
   })
+
+  test('caches and forwards US market buy noLimitPrice from preview to create without leaking confirmationId', async () => {
+    const fake = client()
+    fake.cashEstimate.mockResolvedValueOnce(
+      usEstimate({
+        price: { currency: 'USD', value: 12.34 },
+        estimatedAmount: { currency: 'JPY', value: 2275 },
+        heldAmount: { currency: 'JPY', value: 2275 },
+        tradeAmount: { currency: 'USD', value: 14.19 },
+        noLimitPrice: '14.19',
+        confirmationId: 'local-us-token',
+      }),
+    )
+    const provider = createProviderFromClient(fake.value)
+    const usMarketRequest = usRequest({
+      settlementMethod: 'yen',
+      execution: {
+        priceType: 'market',
+        timing: 'realtime',
+        venue: 'XNYS',
+        timeInForce: 'day',
+      },
+    })
+
+    const preview = (await provider.invoke(
+      'investments.orders.preview',
+      usMarketRequest,
+    )) as unknown as Record<string, unknown>
+    expect(preview).toMatchObject({
+      price: { currency: 'USD', value: '12.34' },
+      heldAmount: { currency: 'JPY', value: '2275' },
+      confirmationToken: 'local-us-token',
+      projectedAssetChanges: [
+        {
+          asset: { kind: 'cash', currency: 'JPY' },
+          availableDelta: '-2275',
+          reservedDelta: '2275',
+          pendingDelta: '0',
+        },
+      ],
+    })
+    expect('noLimitPrice' in preview).toBe(false)
+
+    const placement: InvestmentOrderPlacement = {
+      ...usMarketRequest,
+      confirmationToken: 'local-us-token',
+      allowTransaction: true,
+    }
+    await provider.invoke('investments.orders.create', placement)
+    expect(fake.cashPlace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        issueCode: 'F',
+        market: 'XNYS',
+        kind: 'market',
+        confirmationId: undefined,
+        noLimitPrice: '14.19',
+        allowTrading: true,
+      }),
+    )
+  })
 })
