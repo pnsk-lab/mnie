@@ -444,6 +444,44 @@ describe('SBI provider-neutral order adapter', () => {
     ).rejects.toThrow('E_0001')
   })
 
+  test('propagates partial venue completeness and failedScopes when one market fails', async () => {
+    const fake = client()
+    const baseOpen = fake.value.orders.inquiry.open
+    fake.value.orders.inquiry.open = async (options) => {
+      const base = await baseOpen(options)
+      return {
+        ...base,
+        completeVenues: ['XTKS', 'XNGO', 'XFKA', 'XSAP'],
+        failedScopes: [{ scope: 'us', venues: ['XNAS', 'XNYS', 'ARCX'], reason: 'timeout' }],
+      }
+    }
+    const provider = createProviderFromClient(fake.value)
+    const snapshot = (await provider.invoke('investments.orders.open', {
+      account: '12345678',
+    })) as {
+      items: Array<{ id: string }>
+      complete?: boolean
+      completeVenues?: string[]
+      failedScopes?: Array<{ scope: string; venues?: string[]; reason?: string }>
+    }
+    expect(snapshot.complete).toBe(false)
+    expect(snapshot.items.map((item) => item.id)).toEqual(['order-1'])
+    expect(snapshot.completeVenues).toEqual(['XTKS', 'XNGO', 'XFKA', 'XSAP'])
+    expect(snapshot.failedScopes).toEqual([
+      { scope: 'us', venues: ['XNAS', 'XNYS', 'ARCX'], reason: 'timeout' },
+    ])
+
+    // Missing order during a partial outage reports scope unavailability instead of 'open order was not found'.
+    const availability = await provider.checkMethodAvailability?.({
+      method: 'investments.orders.cancel',
+      params: { account: '12345678', orderId: 'us-order-missing' },
+    })
+    expect(availability).toMatchObject({
+      available: false,
+      message: 'open order snapshot unavailable for us',
+    })
+  })
+
   test('resolves domestic order state with effects without the US detail endpoint', async () => {
     const provider = createProviderFromClient(client().value)
     const order = (await provider.invoke('investments.orders.get', {

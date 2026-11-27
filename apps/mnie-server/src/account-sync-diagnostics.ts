@@ -1,5 +1,8 @@
 /** Return diagnostic metadata without persisting upstream response bodies or credentials. */
-export function summarizeSyncFailure(cause: unknown) {
+export function summarizeSyncFailure(cause: unknown): {
+  reason: 'maintenance' | 'timeout' | 'authentication' | 'unknown'
+  code?: string
+} {
   const message = cause instanceof Error ? cause.message : String(cause)
   const code = message.match(/\bECOMN\d{4}\b/)?.[0]
   const reason = /ECOMN0004|メンテナンス|maintenance/i.test(message)

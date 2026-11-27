@@ -662,6 +662,13 @@ export const createProviderFromClient = (
             candidate.orderNumber === request.orderId,
         )
         if (!order) {
+          if (open.failedScopes?.length) {
+            return {
+              available: false,
+              reason: 'PROVIDER_RESTRICTED',
+              message: `open order snapshot unavailable for ${open.failedScopes.map((item) => item.scope).join(', ')}`,
+            }
+          }
           return {
             available: false,
             reason: 'PROVIDER_RESTRICTED',
@@ -911,7 +918,14 @@ export const createProviderFromClient = (
         if (input.account !== currentAccount.id) throw new Error('order account was not found')
         const openOrders = await client.orders.inquiry.open({})
         const source = openOrders.orders.find((order) => matchesOrderId(order, input.orderId))
-        if (!source) throw new Error('open order was not found')
+        if (!source) {
+          if (openOrders.failedScopes?.length) {
+            throw new Error(
+              `open order snapshot unavailable for ${openOrders.failedScopes.map((item) => item.scope).join(', ')}`,
+            )
+          }
+          throw new Error('open order was not found')
+        }
         const lookupOrder = async () => {
           const recent = await client.orders.inquiry.open({
             issueCode: source.issue.code,
@@ -1060,7 +1074,7 @@ export const createProviderFromClient = (
           return { items: [], complete: true } as never
         }
         const list = await client.orders.inquiry.open({})
-        if (list.error && list.error.code !== 'ME0010') {
+        if (list.error && list.error.code !== 'ME0010' && !list.failedScopes?.length) {
           throw new Error(`open order snapshot failed: ${list.error.code}`)
         }
         const executions = await client.orders.inquiry
@@ -1073,10 +1087,13 @@ export const createProviderFromClient = (
           )
           return withOrderEffects(commonOrder(hydrated, currentAccount.id), hydrated)
         })
+        const complete = !list.failedScopes?.length && list.orders.length < 999 && !list.hasMore
         return {
           items,
-          // The inquiry caps at 999 rows; only a shorter result proves completeness.
-          complete: list.orders.length < 999,
+          // The inquiry caps at 999 rows; only a shorter result with no failed scopes proves completeness.
+          complete,
+          ...(list.completeVenues?.length ? { completeVenues: list.completeVenues } : {}),
+          ...(list.failedScopes?.length ? { failedScopes: list.failedScopes } : {}),
         } as never
       }
       if (name === 'investments.orders.get') {

@@ -127,3 +127,50 @@ test('missing external reservation evidence freezes accounts without inventing a
   })
   expect((await reconcilePhysicalAccount(db, 'physical')).locked).toBe(true)
 })
+
+test('partial open-order snapshot attributes observed orders while preserving unobserved reservations', async () => {
+  const { db } = await fixture()
+  // Initially an external order reserves 20 JPY.
+  syncExternalOrderReservations(db, 'physical', { items: [order('20')], complete: true })
+  expect(listDerivedUnallocatedAssets(db, 'physical')[0]).toMatchObject({
+    available: '20',
+    reserved: '20',
+  })
+
+  // Partial snapshot (e.g. domestic only while US timed out) observes a new domestic order of 10 JPY
+  // and does not include the earlier order; the earlier reservation must stay locked fail-closed.
+  const domesticExternal: InvestmentOrder = {
+    ...order('10'),
+    id: 'domestic-ext-2',
+    effects: {
+      referenceId: 'domestic-ext-2',
+      changes: [
+        {
+          asset: { kind: 'cash', currency: 'JPY' },
+          availableDelta: '-10',
+          reservedDelta: '10',
+          pendingDelta: '0',
+        },
+      ],
+    },
+  }
+  syncExternalOrderReservations(db, 'physical', {
+    items: [domesticExternal],
+    complete: false,
+    completeVenues: ['XTKS'],
+  })
+  expect(listDerivedUnallocatedAssets(db, 'physical')[0]).toMatchObject({
+    available: '10',
+    reserved: '30',
+  })
+
+  // Once a globally complete snapshot returns only the domestic order, the absent order is released.
+  syncExternalOrderReservations(db, 'physical', {
+    items: [domesticExternal],
+    complete: true,
+  })
+  expect(listDerivedUnallocatedAssets(db, 'physical')[0]).toMatchObject({
+    available: '30',
+    reserved: '10',
+  })
+})

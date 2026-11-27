@@ -1,5 +1,5 @@
 import { validateAccountPolicy } from './account-policy'
-import { and, desc, eq, gt, inArray, isNull, ne, or } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm'
 import type {
   FinancialAccountId,
   FinancialAssetChange,
@@ -12,7 +12,6 @@ import type { Db } from './db'
 import {
   apiKeyVirtualAccounts,
   apiKeys,
-  appState,
   externalOrderReservations,
   virtualOrders,
   accountAudit,
@@ -26,6 +25,7 @@ import {
 } from './db/schema'
 import { randomId } from './security/crypto'
 import { legacyAccountMethods } from './security/legacy-account-methods'
+import { hasUnscopedPhysicalSyncError, listPhysicalSyncErrors } from './sync-errors'
 
 type Decimal = { coefficient: bigint; scale: number }
 
@@ -704,14 +704,11 @@ export const reconcilePhysicalAccount = async (db: Db, physicalAccountId: string
         ),
       )
       .all().length > 0
-  const snapshotError =
-    db
-      .select()
-      .from(appState)
-      .where(eq(appState.key, `physical_snapshot_error:${physicalAccountId}`))
-      .get() !== undefined
+  const syncErrors = listPhysicalSyncErrors(db, physicalAccountId)
+  const snapshotError = syncErrors.length > 0
+  const hasDivergence = deficits.length > 0 || unresolved.length > 0 || externalUnknown
   db.transaction((tx) => {
-    if (deficits.length || unresolved.length || externalUnknown || snapshotError) {
+    if (hasDivergence) {
       for (const account of tx
         .select()
         .from(virtualAccounts)
@@ -743,6 +740,53 @@ export const reconcilePhysicalAccount = async (db: Db, physicalAccountId: string
           })
           .run()
       }
+    } else if (!hasUnscopedPhysicalSyncError(syncErrors)) {
+      // Self-heal accounts that were previously locked solely due to a transient snapshot error.
+      for (const account of tx
+        .select()
+        .from(virtualAccounts)
+        .where(
+          and(
+            eq(virtualAccounts.physicalAccountId, physicalAccountId),
+            eq(virtualAccounts.status, 'reconciliation_required'),
+          ),
+        )
+        .all()) {
+        const lock = tx
+          .select()
+          .from(accountAudit)
+          .where(
+            and(
+              eq(accountAudit.accountId, account.id),
+              eq(accountAudit.event, 'reconciliation.locked'),
+            ),
+          )
+          .orderBy(desc(accountAudit.createdAt), desc(sql`rowid`))
+          .get()
+        const detail = lock?.detail as Record<string, unknown> | undefined
+        const lockedForDivergence =
+          (Array.isArray(detail?.deficitAssetKeys) && detail.deficitAssetKeys.length > 0) ||
+          (Array.isArray(detail?.orderIds) && detail.orderIds.length > 0) ||
+          detail?.externalOrderReviewRequired === true
+        if (detail?.snapshotError !== true || lockedForDivergence) continue
+        tx.update(virtualAccounts)
+          .set({
+            status: detail.previousStatus === 'frozen' ? 'frozen' : 'active',
+            version: account.version + 1,
+            updatedAt: new Date(),
+          })
+          .where(eq(virtualAccounts.id, account.id))
+          .run()
+        tx.insert(accountAudit)
+          .values({
+            id: randomId('audit'),
+            accountId: account.id,
+            event: 'reconciliation.auto_unlocked',
+            detail: { physicalAccountId, reason: 'snapshot_recovered' },
+            createdAt: new Date(),
+          })
+          .run()
+      }
     }
   })
   const locked =
@@ -763,6 +807,7 @@ export const reconcilePhysicalAccount = async (db: Db, physicalAccountId: string
     unresolvedOrderIds: unresolved.map((order) => order.id),
     externalUnknown,
     snapshotError,
+    syncErrors,
   }
 }
 
@@ -770,7 +815,7 @@ export const approvePhysicalAccountReconciliation = async (db: Db, physicalAccou
   const reconciliation = await reconcilePhysicalAccount(db, physicalAccountId)
   if (reconciliation.deficits.length)
     throw new Error('Unallocated assets must not be negative before unlocking')
-  if (reconciliation.externalUnknown || reconciliation.snapshotError)
+  if (reconciliation.externalUnknown || hasUnscopedPhysicalSyncError(reconciliation.syncErrors))
     throw new Error('resolve incomplete broker snapshots before unlocking')
   if (reconciliation.unresolvedOrderIds.length)
     throw new Error('resolve unknown orders before unlocking')
@@ -794,7 +839,7 @@ export const approvePhysicalAccountReconciliation = async (db: Db, physicalAccou
             eq(accountAudit.event, 'reconciliation.locked'),
           ),
         )
-        .orderBy(desc(accountAudit.createdAt))
+        .orderBy(desc(accountAudit.createdAt), desc(sql`rowid`))
         .get()
       tx.update(virtualAccounts)
         .set({

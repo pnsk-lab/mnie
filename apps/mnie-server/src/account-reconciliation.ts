@@ -3,7 +3,6 @@ import type { Db } from './db'
 import {
   accountAudit,
   externalOrderReservations,
-  appState,
   financialAccounts,
   physicalAccountAssets,
   virtualAccounts,
@@ -15,6 +14,7 @@ import { publicOrder, reconcileVirtualOrder } from './order-coordinator'
 import type { PhysicalAccountGateway } from './physical-account-gateway'
 import { randomId, sha256 } from './security/crypto'
 import { withProfileLock } from './profile-lock'
+import { listPhysicalSyncErrors } from './sync-errors'
 
 export const inspectAccountReconciliation = (db: Db, physicalAccountId: string) => {
   const accounts = db
@@ -66,12 +66,10 @@ export const inspectAccountReconciliation = (db: Db, physicalAccountId: string) 
       .limit(50)
       .all(),
   )
+  const syncErrors = listPhysicalSyncErrors(db, physicalAccountId)
   return {
-    snapshotError: !!db
-      .select()
-      .from(appState)
-      .where(eq(appState.key, `physical_snapshot_error:${physicalAccountId}`))
-      .get(),
+    snapshotError: syncErrors.length > 0,
+    syncErrors,
     externalOrders: db
       .select()
       .from(externalOrderReservations)

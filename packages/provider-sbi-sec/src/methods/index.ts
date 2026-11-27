@@ -99,7 +99,13 @@ import type {
   ThemeInvestmentPreOrderOptions,
 } from './types'
 import { SbiServerError } from './error-map'
-import { domesticMarketToMts, isUsMarket, mtsMarketToDomestic } from '../markets'
+import {
+  DOMESTIC_MARKETS,
+  US_MARKET_CODES,
+  domesticMarketToMts,
+  isUsMarket,
+  mtsMarketToDomestic,
+} from '../markets'
 import { createUsStockAdapter } from './us-stock'
 
 const COMM_GATE_PATH = '/mtsmobile/commgate'
@@ -311,6 +317,24 @@ interface IzanagiIssueSearchResponse {
 
 export const registerDeviceId = async (session: SbiSession, deviceId: string) => {
   await callMts(session, 'F1131', fixedTrin([{ width: 36, value: deviceId }]))
+}
+
+const summarizeOpenOrderScopeFailure = (
+  cause: unknown,
+): { reason: 'maintenance' | 'timeout' | 'authentication' | 'unknown'; code?: string } => {
+  const message = cause instanceof Error ? cause.message : String(cause)
+  const code =
+    cause instanceof SbiServerError && cause.code
+      ? cause.code
+      : message.match(/\b(?:ECOMN\d{4}|ME\d{4}|E_\d{4})\b/)?.[0]
+  const reason = /ECOMN0004|メンテナンス|maintenance/i.test(message)
+    ? 'maintenance'
+    : /timed?\s*out|timeout|\b(?:HTTP )?504\b|abort/i.test(message)
+      ? 'timeout'
+      : /unauthori[sz]ed|authentication|login|ログイン|認証|\b(?:401|403)\b/i.test(message)
+        ? 'authentication'
+        : 'unknown'
+  return { reason, ...(code ? { code } : {}) }
 }
 
 export const createMethodsFromSession = (session: SbiSession): SbiClientMethods => {
@@ -541,18 +565,74 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods 
               ),
         open: async (options) => {
           if (options?.market && isUsMarket(options.market)) return usStock.orders(options)
-          const domestic = parseOrdersLoose(
-            await callMtsReturningHeaderError(session, 'F2511', recentOrdersTrin(session, options)),
-            options,
-          )
-          // Without a market filter the snapshot must include US open orders
-          // or the caller cannot attribute every broker-side reservation.
-          if (options?.market || !session.foreignStock) return domestic
-          const us = await usStock.orders({
-            issueCode: options?.issueCode,
-            status: options?.status ?? 'open',
-          })
-          return { ...domestic, orders: [...domestic.orders, ...us.orders] }
+          if (options?.market || !session.foreignStock) {
+            return parseOrdersLoose(
+              await callMtsReturningHeaderError(
+                session,
+                'F2511',
+                recentOrdersTrin(session, options),
+              ),
+              options,
+            )
+          }
+          const [domesticResult, usResult] = await Promise.allSettled([
+            callMtsReturningHeaderError(session, 'F2511', recentOrdersTrin(session, options)).then(
+              (response) => parseOrdersLoose(response, options),
+            ),
+            usStock.orders({
+              issueCode: options?.issueCode,
+              status: options?.status ?? 'open',
+            }),
+          ])
+          const domestic =
+            domesticResult.status === 'fulfilled' &&
+            (!domesticResult.value.error || domesticResult.value.error.code === 'ME0010')
+              ? domesticResult.value
+              : undefined
+          const domesticFailure =
+            domesticResult.status === 'rejected'
+              ? domesticResult.reason
+              : domesticResult.value.error && domesticResult.value.error.code !== 'ME0010'
+                ? new Error(`open order snapshot failed: ${domesticResult.value.error.code}`)
+                : undefined
+          const us = usResult.status === 'fulfilled' ? usResult.value : undefined
+          const usFailure = usResult.status === 'rejected' ? usResult.reason : undefined
+
+          if (!domestic && !us) {
+            throw domesticFailure ?? usFailure ?? new Error('open order snapshot failed')
+          }
+          if (domestic && us) {
+            return {
+              ...domestic,
+              orders: [...domestic.orders, ...us.orders],
+              ...(domestic.hasMore || us.hasMore ? { hasMore: true } : {}),
+            }
+          }
+          if (domestic && usFailure) {
+            return {
+              ...domestic,
+              ...(domestic.orders.length < 999 ? { completeVenues: DOMESTIC_MARKETS } : {}),
+              failedScopes: [
+                {
+                  scope: 'us' as const,
+                  venues: US_MARKET_CODES,
+                  ...summarizeOpenOrderScopeFailure(usFailure),
+                },
+              ],
+            }
+          }
+          return {
+            orders: us!.orders,
+            ...(us!.hasMore ? { hasMore: true } : {}),
+            ...(!us!.hasMore ? { completeVenues: US_MARKET_CODES } : {}),
+            failedScopes: [
+              {
+                scope: 'domestic' as const,
+                venues: DOMESTIC_MARKETS,
+                ...summarizeOpenOrderScopeFailure(domesticFailure),
+              },
+            ],
+          }
         },
         detail: async (options) => {
           if (isUsMarket(options.market)) return usStock.orderDetail(options)
@@ -1924,6 +2004,9 @@ const callMtsInternal = async (
       TRIN: trin,
     }),
   })
+  if (!response.ok) {
+    throw new Error(`MTS request ${trCode} failed with HTTP ${response.status}`)
+  }
   const body = await response.arrayBuffer()
   const buffer = Buffer.from(body)
   const text = decodeShiftJis(buffer)

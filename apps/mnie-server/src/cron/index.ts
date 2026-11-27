@@ -152,8 +152,14 @@ export const createCronSystem = (
         try {
           for (const account of (await db.select().from(financialAccounts)).filter(
             (item) => item.profileId === profile.id,
-          ))
-            await syncAccountOrders(db, gateway, account.id)
+          )) {
+            const synced = await syncAccountOrders(db, gateway, account.id)
+            if (synced.syncErrors.length) {
+              errors.push(
+                `${profile.label}: ${synced.syncErrors.map((item) => `${item.scope} (${item.reason})`).join(', ')}`,
+              )
+            }
+          }
         } finally {
           await gateway.close()
         }
