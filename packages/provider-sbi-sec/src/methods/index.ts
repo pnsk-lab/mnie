@@ -3098,9 +3098,9 @@ const parseCashOrderConfirm = (response: MtsResponse) => {
 }
 
 const parseOrderPreview = (response: MtsResponse, options: OrderPreviewInput): OrderPreview => {
-  const cashConfirm = CASH_ORDER_CONFIRM_TR_CODES.has(response.header.trCode)
-    ? parseCashOrderConfirm(response)
-    : undefined
+  const isCashConfirm = CASH_ORDER_CONFIRM_TR_CODES.has(response.header.trCode)
+  const cashConfirm = isCashConfirm ? parseCashOrderConfirm(response) : undefined
+  const messages = collectMessages(response.text)
   return {
     issue: { code: options.issueCode, market: options.market },
     side: options.side,
@@ -3113,9 +3113,10 @@ const parseOrderPreview = (response: MtsResponse, options: OrderPreviewInput): O
     tax: cashConfirm?.tax,
     heldAmount: options.side === 'buy' ? cashConfirm?.settlementAmount : undefined,
     buyingPower: cashConfirm?.buyingPower,
-    warnings: collectMessages(response.text),
+    // The cash confirmation body is the order summary screen, not a warning.
+    warnings: isCashConfirm ? [] : messages,
     confirmationId: response.header.lastExecutionTime || randomUUID(),
-    message: collectMessages(response.text).join('\n') || undefined,
+    message: isCashConfirm ? undefined : messages.join('\n') || undefined,
     error: methodErrorFromHeader(response),
   }
 }
