@@ -186,6 +186,7 @@ describe('SBI provider-neutral order adapter', () => {
     await expect(provider.invoke('investments.orders.preview', request())).resolves.toEqual({
       estimatedAmount: { currency: 'JPY', value: '250000' },
       heldAmount: { currency: 'JPY', value: '250000' },
+      quantity: '100',
       warnings: [],
       confirmationToken: 'confirmation',
       projectedAssetChanges: [

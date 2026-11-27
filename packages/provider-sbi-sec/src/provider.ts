@@ -219,6 +219,8 @@ const commonPreview = (
     tradeAmount: money(preview.tradeAmount),
     heldAmount,
     settlementCurrency: preview.settlementCurrency,
+    quantity: preview.quantity == null ? undefined : String(preview.quantity),
+    price: money(preview.price),
     warnings: [...preview.warnings, ...(preview.message ? [preview.message] : [])],
     confirmationToken: preview.confirmationId,
     projectedAssetChanges: orderReservationChanges(request, heldAmount),
