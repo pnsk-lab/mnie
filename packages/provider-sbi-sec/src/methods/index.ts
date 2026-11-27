@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import * as iconv from 'iconv-lite'
 import type {
   AccountType,
@@ -3071,16 +3071,54 @@ const filterOrders = (list: OrderList, options?: OrderInquiryOptions | IssueOpti
   }
 }
 
-const parseOrderPreview = (response: MtsResponse, options: OrderPreviewInput): OrderPreview => ({
-  issue: { code: options.issueCode, market: options.market },
-  side: options.side,
-  quantity: 'quantity' in options ? options.quantity : undefined,
-  price: 'price' in options && options.price != null ? yen(String(options.price)) : undefined,
-  warnings: collectMessages(response.text),
-  confirmationId: response.header.lastExecutionTime || undefined,
-  message: collectMessages(response.text).join('\n') || undefined,
-  error: methodErrorFromHeader(response),
-})
+const CASH_ORDER_CONFIRM_TR_CODES = new Set(['F2104', 'F2124'])
+
+const readConfirmYen = (
+  response: MtsResponse,
+  offset: number,
+  width: number,
+): CurrencyAmount | undefined => {
+  if (response.buffer.length < offset + width) return undefined
+  const text = readShiftJisField(response.buffer, offset, width)
+  return parseNumber(text) == null ? undefined : yen(text)
+}
+
+const parseCashOrderConfirm = (response: MtsResponse) => {
+  const settlementAmount = readConfirmYen(response, 296, 12)
+  if (!settlementAmount) return undefined
+  const commissionFee = readShiftJisField(response.buffer, 248, 18).split('/').at(-1) ?? ''
+  return {
+    unitPrice: readConfirmYen(response, 216, 15),
+    orderAmount: readConfirmYen(response, 236, 12),
+    commission: parseNumber(commissionFee) == null ? undefined : yen(commissionFee),
+    tax: readConfirmYen(response, 286, 10),
+    settlementAmount,
+    buyingPower: readConfirmYen(response, 308, 17),
+  }
+}
+
+const parseOrderPreview = (response: MtsResponse, options: OrderPreviewInput): OrderPreview => {
+  const cashConfirm = CASH_ORDER_CONFIRM_TR_CODES.has(response.header.trCode)
+    ? parseCashOrderConfirm(response)
+    : undefined
+  return {
+    issue: { code: options.issueCode, market: options.market },
+    side: options.side,
+    quantity: 'quantity' in options ? options.quantity : undefined,
+    price:
+      cashConfirm?.unitPrice ??
+      ('price' in options && options.price != null ? yen(String(options.price)) : undefined),
+    estimatedAmount: cashConfirm?.settlementAmount,
+    commission: cashConfirm?.commission,
+    tax: cashConfirm?.tax,
+    heldAmount: options.side === 'buy' ? cashConfirm?.settlementAmount : undefined,
+    buyingPower: cashConfirm?.buyingPower,
+    warnings: collectMessages(response.text),
+    confirmationId: response.header.lastExecutionTime || randomUUID(),
+    message: collectMessages(response.text).join('\n') || undefined,
+    error: methodErrorFromHeader(response),
+  }
+}
 
 const parseOrderCorrectionPreOrder = (
   response: MtsResponse,
