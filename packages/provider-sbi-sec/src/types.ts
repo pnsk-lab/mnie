@@ -712,10 +712,19 @@ export interface Order {
   settledAmount?: CurrencyAmount
 }
 
+export interface OrderListScopeError {
+  scope: 'domestic' | 'us'
+  venues: MarketCode[]
+  reason: 'maintenance' | 'timeout' | 'authentication' | 'unknown'
+  code?: string
+}
+
 export interface OrderList {
   orders: Order[]
   hasMore?: boolean
   error?: SbiMethodError
+  completeVenues?: MarketCode[]
+  failedScopes?: OrderListScopeError[]
 }
 
 export interface TradeRecord {

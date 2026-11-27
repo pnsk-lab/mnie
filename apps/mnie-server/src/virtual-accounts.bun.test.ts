@@ -5,6 +5,7 @@ import {
   apiKeys,
   accountAudit,
   appState,
+  externalOrderReservations,
   financialAccounts,
   physicalAccountAssets,
   virtualAccountAssets,
@@ -270,18 +271,32 @@ describe('virtual account ledger', () => {
     ])
   })
 
-  test('records snapshot error and external order review as distinct lock reasons', async () => {
+  test('does not lock on transient snapshot error alone and records distinct lock reasons on divergence', async () => {
     const db = createDb(':memory:')
     await addPhysicalAccount(db)
     await initializeVirtualAccounts(db, 'physical-1')
-    await db
-      .insert(appState)
-      .values({
-        key: 'physical_snapshot_error:physical-1',
-        value: 'BROKER_SNAPSHOT_UNAVAILABLE',
-        updatedAt: new Date(),
-      })
-    await reconcilePhysicalAccount(db, 'physical-1')
+    await db.insert(appState).values({
+      key: 'physical_snapshot_error:physical-1',
+      value: 'BROKER_SNAPSHOT_UNAVAILABLE',
+      updatedAt: new Date(),
+    })
+    const transient = await reconcilePhysicalAccount(db, 'physical-1')
+    expect(transient.locked).toBe(false)
+    expect(transient.snapshotError).toBe(true)
+    expect(transient.syncErrors).toHaveLength(1)
+    expect(
+      await db.select().from(accountAudit).where(eq(accountAudit.event, 'reconciliation.locked')),
+    ).toHaveLength(0)
+
+    await db.insert(externalOrderReservations).values({
+      physicalAccountId: 'physical-1',
+      providerOrderId: 'ext-unknown-1',
+      changes: [],
+      state: 'needs_review',
+      updatedAt: new Date(),
+    })
+    const diverged = await reconcilePhysicalAccount(db, 'physical-1')
+    expect(diverged.locked).toBe(true)
     const locks = await db
       .select()
       .from(accountAudit)
@@ -289,8 +304,87 @@ describe('virtual account ledger', () => {
     expect(locks).toHaveLength(1)
     expect(locks[0]?.detail).toMatchObject({
       snapshotError: true,
-      externalOrderReviewRequired: false,
+      externalOrderReviewRequired: true,
     })
+  })
+
+  test('self-heals legacy snapshot-error-only locks while keeping divergence locks manual', async () => {
+    const db = createDb(':memory:')
+    await addPhysicalAccount(db)
+    const { unallocated } = await initializeVirtualAccounts(db, 'physical-1')
+    const trading = await createVirtualAccount(db, {
+      physicalAccountId: 'physical-1',
+      label: 'Trading',
+      kind: 'agent',
+    })
+    const paused = await createVirtualAccount(db, {
+      physicalAccountId: 'physical-1',
+      label: 'Paused',
+      kind: 'personal',
+    })
+    await setPhysicalAsset(db, '1000')
+    const now = new Date()
+    // Simulate legacy snapshot-error-only lock on all accounts (one of which was previously frozen).
+    for (const [account, previousStatus] of [
+      [unallocated, 'active'],
+      [trading, 'active'],
+      [paused, 'frozen'],
+    ] as const) {
+      db.update(virtualAccounts)
+        .set({ status: 'reconciliation_required', version: account.version + 1, updatedAt: now })
+        .where(eq(virtualAccounts.id, account.id))
+        .run()
+      db.insert(accountAudit)
+        .values({
+          id: `audit-lock-${account.id}`,
+          accountId: account.id,
+          event: 'reconciliation.locked',
+          detail: {
+            previousStatus,
+            deficitAssetKeys: [],
+            orderIds: [],
+            externalOrderReviewRequired: false,
+            snapshotError: true,
+          },
+          createdAt: now,
+        })
+        .run()
+    }
+    db.insert(appState)
+      .values({
+        key: 'physical_snapshot_error:physical-1',
+        value: 'BROKER_SNAPSHOT_UNAVAILABLE',
+        updatedAt: now,
+      })
+      .run()
+
+    // While the legacy unscoped snapshot error is still present, keep accounts locked.
+    expect((await reconcilePhysicalAccount(db, 'physical-1')).locked).toBe(true)
+
+    // Once the snapshot error clears and ledger is consistent, accounts auto-unlock to previous status.
+    db.delete(appState).where(eq(appState.key, 'physical_snapshot_error:physical-1')).run()
+    const recovered = await reconcilePhysicalAccount(db, 'physical-1')
+    expect(recovered.locked).toBe(false)
+    expect(
+      Object.fromEntries(
+        db
+          .select()
+          .from(virtualAccounts)
+          .all()
+          .map((account) => [account.id, account.status]),
+      ),
+    ).toEqual({
+      [unallocated.id]: 'active',
+      [trading.id]: 'active',
+      [paused.id]: 'frozen',
+    })
+    expect(
+      db
+        .select()
+        .from(accountAudit)
+        .where(eq(accountAudit.event, 'reconciliation.auto_unlocked'))
+        .all(),
+    ).toHaveLength(3)
   })
 
   test('reserves provider changes within the virtual balance and releases them on cancellation', async () => {

@@ -594,6 +594,26 @@ export interface InvestmentOrder extends FinancialOperationEffectResult {
   accountInformation?: string
 }
 
+export interface OpenOrderSnapshotScopeError {
+  /** Logical market/venue scope that failed to load (e.g. 'domestic', 'us'). */
+  scope: string
+  /** Venues/markets covered by this scope (e.g. ['XNAS', 'XNYS', 'ARCX']). */
+  venues?: string[]
+  /** Sanitized diagnostic reason (never raw upstream bodies or credentials). */
+  reason?: string
+  /** Optional sanitized provider error code. */
+  code?: string
+}
+
+export interface OpenOrderSnapshot {
+  items: InvestmentOrder[]
+  complete?: boolean
+  /** Venues whose open orders were completely observed in `items` when `complete` is false. */
+  completeVenues?: string[]
+  /** Scopes whose open-order inquiry failed transiently; `items` does not cover them. */
+  failedScopes?: OpenOrderSnapshotScopeError[]
+}
+
 export type InvestmentMethods = {
   'investments.positions.list': MethodDefinition<
     PageRequest & { account?: string; positionType?: 'cash' | 'margin' },
@@ -629,11 +649,8 @@ export type InvestmentMethods = {
     PageRequest & { account?: string; status?: InvestmentOrder['status'] },
     Page<InvestmentOrder>
   >
-  /** Complete snapshot of open broker orders. `complete` must be true for isolation. */
-  'investments.orders.open': MethodDefinition<
-    { account?: string },
-    { items: InvestmentOrder[]; complete?: boolean }
-  >
+  /** Complete snapshot of open broker orders. `complete` must be true for full isolation; partial results report `completeVenues` and `failedScopes`. */
+  'investments.orders.open': MethodDefinition<{ account?: string }, OpenOrderSnapshot>
   'investments.orders.get': MethodDefinition<
     {
       account?: string

@@ -33,6 +33,7 @@ import {
 } from './db/schema'
 import { ProviderMethodUnavailableError } from './providers/operations'
 import { isTransactionOperation } from './security/trade-limits'
+import { clearLegacyPhysicalSyncError, clearPhysicalSyncError } from './sync-errors'
 
 const localOps = new Set([
   'accounts.list',
@@ -109,6 +110,8 @@ export class FinancialAccountService {
       const results: Array<{ physicalAccountId: string; locked: boolean }> = []
       for (const physical of physicals) {
         await this.gateway.snapshot(this.db, physical)
+        clearPhysicalSyncError(this.db, physical.id, 'physical_assets')
+        clearLegacyPhysicalSyncError(this.db, physical.id)
         const reconciliation = await reconcilePhysicalAccount(this.db, physical.id)
         results.push({ physicalAccountId: physical.id, locked: reconciliation.locked })
       }
@@ -275,7 +278,15 @@ export class FinancialAccountService {
         if (!operations.includes(requestedOp)) throw new Error('method is unavailable')
         if (writes.has(requestedOp)) {
           await this.gateway.assertVirtualTrading(target.profileId)
-          assertAccountTrade(this.db, accountId, access, input, requestedOp)
+          const hasMethodParams = Object.keys(methodParams).length > 0
+          assertAccountTrade(
+            this.db,
+            accountId,
+            access,
+            hasMethodParams ? methodParams : input,
+            requestedOp,
+            { allowVenueScopedWhenVenueOmitted: !hasMethodParams },
+          )
         }
         const status = localOps.has(requestedOp)
           ? { available: true }
@@ -409,7 +420,7 @@ export class FinancialAccountService {
                 )
                 .get()
             : undefined
-          assertAccountTrade(this.db, accountId, access, { ...parent?.request, ...input })
+          assertAccountTrade(this.db, accountId, access, { ...parent?.request, ...input }, op)
           const availability = await this.gateway.methodAvailability(target.profileId, {
             method: op,
             params: physicalInput,

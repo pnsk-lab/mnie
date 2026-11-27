@@ -21,9 +21,11 @@ import { randomId } from './security/crypto'
 export const syncExternalOrderReservations = (
   db: Db,
   physicalAccountId: string,
-  snapshot: { items: InvestmentOrder[]; complete?: boolean },
+  snapshot: { items: InvestmentOrder[]; complete?: boolean; completeVenues?: string[] },
 ) => {
-  if (snapshot.complete !== true || !Array.isArray(snapshot.items))
+  const globallyComplete = snapshot.complete === true
+  const partiallyComplete = !globallyComplete && (snapshot.completeVenues?.length ?? 0) > 0
+  if ((!globallyComplete && !partiallyComplete) || !Array.isArray(snapshot.items))
     throw new Error('complete broker open-order snapshot is required')
   const system = db
     .select()
@@ -44,6 +46,16 @@ export const syncExternalOrderReservations = (
       .all()
       .filter((order) => !order.request.parentId)
       .map((order) => order.providerOrderId),
+  )
+  const observedTerminal = new Set(
+    snapshot.items
+      .filter(
+        (order) =>
+          order.id &&
+          ['executed', 'cancelled', 'expired', 'rejected'].includes(order.status) &&
+          !known.has(order.id),
+      )
+      .map((order) => order.id),
   )
   const open = snapshot.items.filter(
     (order) =>
@@ -93,7 +105,10 @@ export const syncExternalOrderReservations = (
     const ids = new Set([...previous.map((row) => row.providerOrderId), ...incoming.keys()])
     for (const id of ids) {
       const old = previous.find((row) => row.providerOrderId === id)
-      const next = incoming.get(id) ?? { state: 'closed' as const, changes: [] }
+      const incomingOrder = incoming.get(id)
+      // On a partial snapshot, unobserved prior reservations stay locked until a globally complete snapshot proves closure.
+      if (!incomingOrder && !globallyComplete && !observedTerminal.has(id)) continue
+      const next = incomingOrder ?? { state: 'closed' as const, changes: [] }
       // Unknown reservations remain locked until a complete snapshot proves the order is no longer open.
       const changes: FinancialAssetChange[] = [
         ...(next.state === 'needs_review' ? (old?.changes ?? []) : next.changes),

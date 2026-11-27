@@ -52,7 +52,20 @@ const statusLabel = (status: string) =>
   <section class="grid gap-4 rounded-xl border border-border p-5">
     <h3 class="font-bold">照合</h3>
     <p v-if="error" role="alert" class="text-danger">{{ error }}</p>
-    <p v-if="evidence?.snapshotError" role="alert">
+    <div v-if="evidence?.syncErrors?.length" role="alert" class="grid gap-2 text-sm">
+      <div
+        v-for="syncError in evidence.syncErrors"
+        :key="syncError.scope"
+        class="rounded-lg border border-border p-3"
+      >
+        同期エラー: {{ syncError.scope }} ({{ syncError.reason
+        }}{{ syncError.code ? `: ${syncError.code}` : '' }})
+        <span v-if="syncError.venues?.length" class="text-fg-muted">
+          · 対象市場: {{ syncError.venues.join(', ') }}
+        </span>
+      </div>
+    </div>
+    <p v-else-if="evidence?.snapshotError" role="alert">
       金融機関の残高・注文情報を確認できないため、取引を停止しています。
     </p>
     <div

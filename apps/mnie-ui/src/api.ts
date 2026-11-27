@@ -761,6 +761,14 @@ export const transferVirtualAssets = (
 
 export interface AccountReconciliation {
   snapshotError: boolean
+  syncErrors?: Array<{
+    stage: string
+    scope: string
+    reason: string
+    code?: string
+    venues?: string[]
+    updatedAt: string
+  }>
   externalOrders: Array<{ id: string; state: 'open' | 'needs_review' }>
 
   assets: Array<{ assetKey: string; allocated: string; actual: string; unallocated: string }>

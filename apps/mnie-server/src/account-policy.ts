@@ -10,6 +10,11 @@ import {
   physicalPositionPrices,
 } from './db/schema'
 import { compareDecimal, addDecimal, multiplyDecimal, financialAssetKey } from './virtual-accounts'
+import {
+  blockingSyncErrorsForTrade,
+  formatBlockingSyncError,
+  listPhysicalSyncErrors,
+} from './sync-errors'
 
 export type AccountAccess = { owner: boolean; apiKeyId?: string }
 export const principalId = (access: AccountAccess) =>
@@ -21,6 +26,7 @@ export const assertAccountTrade = (
   access: AccountAccess,
   input: Record<string, unknown>,
   operation = 'investments.orders.create',
+  options?: { allowVenueScopedWhenVenueOmitted?: boolean },
 ) => {
   const account = db.select().from(virtualAccounts).where(eq(virtualAccounts.id, accountId)).get()
   if (!account || account.kind === 'system' || account.status !== 'active')
@@ -67,6 +73,15 @@ export const assertAccountTrade = (
     venue: input.instrumentVenue ?? input.venue ?? execution?.venue,
     orderType: input.orderType ?? execution?.priceType,
   }
+  const syncErrors = listPhysicalSyncErrors(db, account.physicalAccountId)
+  const blockingErrors = blockingSyncErrorsForTrade(syncErrors, {
+    operation,
+    venue: typeof scopedInput.venue === 'string' ? scopedInput.venue : undefined,
+    orderId: typeof input.orderId === 'string' ? input.orderId : undefined,
+    accountId,
+    allowVenueScopedWhenVenueOmitted: options?.allowVenueScopedWhenVenueOmitted,
+  })
+  if (blockingErrors.length) throw new Error(formatBlockingSyncError(blockingErrors))
   const now = Date.now()
   const physicalAssets = db
     .select()

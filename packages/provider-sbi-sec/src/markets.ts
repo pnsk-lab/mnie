@@ -1,4 +1,4 @@
-import type { MarketCode } from './types'
+import type { DomesticMarketCode, MarketCode, UsStockMarketCode } from './types'
 
 export type MarketRegion = 'domestic' | 'us'
 
@@ -9,11 +9,14 @@ const DOMESTIC_TO_MTS = {
   XSAP: 'SPR',
 } as const satisfies Record<string, string>
 
+export const DOMESTIC_MARKETS = Object.keys(DOMESTIC_TO_MTS) as DomesticMarketCode[]
+
 const MTS_TO_DOMESTIC = Object.fromEntries(
   Object.entries(DOMESTIC_TO_MTS).map(([mic, mts]) => [mts, mic]),
 ) as Record<string, MarketCode>
 
-const US_MARKETS = new Set<MarketCode>(['XNAS', 'XNYS', 'ARCX'])
+export const US_MARKET_CODES: UsStockMarketCode[] = ['XNAS', 'XNYS', 'ARCX']
+const US_MARKETS = new Set<MarketCode>(US_MARKET_CODES)
 
 export const marketRegion = (market: MarketCode | undefined, methodName: string): MarketRegion => {
   if (!market) throw new Error(`${methodName} requires market`)
