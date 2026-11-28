@@ -186,7 +186,7 @@ const toggleScope = (scope: string) => {
           >
             <option value="">アクセス不可</option>
             <option value="read">参照</option>
-            <option v-if="account.kind !== 'system'" value="trade">参照・取引</option>
+            <option v-if="account.systemRole !== 'unallocated'" value="trade">参照・取引</option>
           </select>
         </label>
         <template v-if="binding(account.id)">

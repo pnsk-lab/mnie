@@ -293,7 +293,7 @@ describe('WebSocket RPC boundaries', () => {
       expect(await workspace.accounts()).toEqual([
         expect.objectContaining({
           id: unallocated.id,
-          kind: 'system',
+          systemRole: 'unallocated',
           permissions: { read: true, trade: false, manage: false },
         }),
       ])

@@ -136,7 +136,8 @@ const destinationAccounts = computed(() =>
     (account) =>
       account.physicalAccountId === selectedAccount.value?.physicalAccountId &&
       account.id !== selectedAccount.value?.id &&
-      (selectedAccount.value?.status !== 'reconciliation_required' || account.kind === 'system'),
+      (selectedAccount.value?.status !== 'reconciliation_required' ||
+        account.systemRole === 'unallocated'),
   ),
 )
 const destinationAssets = computed(() => assets.value[destinationAccountId.value] ?? [])
@@ -222,7 +223,7 @@ const renameLabel = ref('')
 const renameInput = useTemplateRef<HTMLInputElement>('renameInput')
 
 const startRename = async () => {
-  if (!selectedAccount.value || selectedAccount.value.kind === 'system') return
+  if (!selectedAccount.value || selectedAccount.value.systemRole === 'unallocated') return
   renameLabel.value = selectedAccount.value.label
   renaming.value = true
   await nextTick()
@@ -722,8 +723,8 @@ onMounted(load)
         </header>
         <section
           v-if="
-            !selectedPhysical.accounts.some((account) => account.kind !== 'system') &&
-            selectedPhysical.accounts.some((account) => account.kind === 'system')
+            !selectedPhysical.accounts.some((account) => account.systemRole !== 'unallocated') &&
+            selectedPhysical.accounts.some((account) => account.systemRole === 'unallocated')
           "
           class="grid gap-3 rounded-xl border border-border p-5"
         >
@@ -787,7 +788,7 @@ onMounted(load)
               @blur="renaming && submitRename()"
             />
             <button
-              v-if="!renaming && selectedAccount.kind !== 'system'"
+              v-if="!renaming && selectedAccount.systemRole !== 'unallocated'"
               class="grid h-8 w-8 flex-none place-items-center rounded-full text-fg-muted transition hover:bg-hover hover:text-fg"
               type="button"
               title="名前を変更"

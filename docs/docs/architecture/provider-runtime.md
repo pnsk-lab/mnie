@@ -47,8 +47,9 @@ own: its displayed amount is the cached physical amount minus the available, res
 amounts allocated to all other virtual accounts. An external increase therefore increases
 `Unallocated`; an external decrease reduces it.
 
-Standard virtual accounts share one account kind. On startup, SQLite converts legacy `personal` and
-`agent` values to `standard` while preserving account IDs, labels, allocations, and key grants.
+Virtual accounts use `systemRole` to identify the system-owned `Unallocated` account. On startup,
+SQLite removes the legacy account-kind column while preserving account IDs, labels, allocations,
+and key grants.
 API key grants can include `Unallocated` with a read role and an explicit set of methods. Scoped
 administrative operations on `Unallocated` require an explicit grant on that account, including
 for existing keys that previously accessed it indirectly.

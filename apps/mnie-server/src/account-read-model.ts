@@ -215,7 +215,7 @@ export const accountHistory = async (
     }
   })
   for (const account of accounts.filter(
-    (item) => item.category !== 'brokerage' && item.kind !== 'system',
+    (item) => item.category !== 'brokerage' && item.systemRole !== 'unallocated',
   )) {
     const physical = db
       .select({ physical: financialAccounts })

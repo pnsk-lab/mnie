@@ -45,7 +45,7 @@ export const migratePhysicalAccount = async (
         .from(virtualAccounts)
         .where(and(eq(virtualAccounts.physicalAccountId, physicalAccountId)))
         .all()
-      if (existing.some((account) => account.kind !== 'system'))
+      if (existing.some((account) => account.systemRole !== 'unallocated'))
         throw new Error('manual allocations already exist; automatic migration is unavailable')
       if (!existing.some((account) => account.systemRole === 'unallocated'))
         throw new Error('initialize Unallocated before migration')
@@ -55,7 +55,6 @@ export const migratePhysicalAccount = async (
           id,
           physicalAccountId,
           label: 'Main',
-          kind: 'standard',
           status: 'active',
           policy: { tradingEnabled: physical.kind === 'brokerage' },
           createdAt: now,

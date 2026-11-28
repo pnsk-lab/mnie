@@ -483,7 +483,6 @@ export const createDb = (path: string) => {
         id TEXT PRIMARY KEY,
         physical_account_id TEXT NOT NULL,
         label TEXT NOT NULL,
-        kind TEXT NOT NULL CHECK (kind IN ('standard', 'system')),
         system_role TEXT CHECK (system_role IS NULL OR system_role = 'unallocated'),
         status TEXT NOT NULL CHECK (status IN ('active', 'frozen', 'reconciliation_required', 'closed')),
         color TEXT,
@@ -492,8 +491,7 @@ export const createDb = (path: string) => {
         version INTEGER NOT NULL DEFAULT 1,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
-        closed_at INTEGER,
-        CHECK ((kind = 'system') = (system_role IS NOT NULL))
+        closed_at INTEGER
       )
     `)
   // Rebuild the parent table without renaming it first, so child foreign keys
@@ -502,22 +500,19 @@ export const createDb = (path: string) => {
   try {
     sqlite
       .transaction(() => {
-        const table = sqlite
-          .query<{ sql: string }, []>(
-            "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'virtual_accounts'",
-          )
-          .get()
-        if (!table) createVirtualAccountsTable('virtual_accounts')
-        if (table?.sql.includes("'personal'")) {
+        const columns = sqlite
+          .query<{ name: string }, []>('PRAGMA table_info(virtual_accounts)')
+          .all()
+        if (!columns.length) createVirtualAccountsTable('virtual_accounts')
+        if (columns.some(({ name }) => name === 'kind')) {
           createVirtualAccountsTable('virtual_accounts_new')
           sqlite.run(`
           INSERT INTO virtual_accounts_new (
-            id, physical_account_id, label, kind, system_role, status, color, icon,
+            id, physical_account_id, label, system_role, status, color, icon,
             policy_json, version, created_at, updated_at, closed_at
           )
-          SELECT id, physical_account_id, label,
-            CASE WHEN kind IN ('personal', 'agent') THEN 'standard' ELSE kind END,
-            system_role, status, color, icon, policy_json, version, created_at, updated_at, closed_at
+          SELECT id, physical_account_id, label, system_role, status, color, icon,
+            policy_json, version, created_at, updated_at, closed_at
           FROM virtual_accounts
         `)
           sqlite.run('DROP TABLE virtual_accounts')

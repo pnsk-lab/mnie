@@ -96,7 +96,7 @@ export const validateAccountBindings = (
       .where(eq(virtualAccounts.id, binding.accountId))
       .get()
     if (!account || account.status === 'closed') throw new Error('account not found')
-    if (account.kind === 'system' && binding.role === 'trade')
+    if (account.systemRole === 'unallocated' && binding.role === 'trade')
       throw new Error('unallocated accounts only support read bindings')
   }
   return bindings

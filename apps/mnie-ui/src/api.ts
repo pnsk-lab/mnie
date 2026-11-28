@@ -214,7 +214,7 @@ export interface PublicFinancialAccount {
   category: 'brokerage' | 'bank' | 'transit' | 'pension' | 'other'
   provider?: string
   label: string
-  kind: 'standard' | 'system'
+  systemRole?: 'unallocated'
   status: 'active' | 'frozen' | 'reconciliation_required' | 'closed'
   capabilities: string[]
   permissions: { read: boolean; trade: boolean; manage: boolean }

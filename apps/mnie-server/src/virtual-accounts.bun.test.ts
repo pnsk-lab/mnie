@@ -78,7 +78,10 @@ describe('virtual account ledger', () => {
     const db = createDb(':memory:')
     await addPhysicalAccount(db)
     const initialized = await initializeVirtualAccounts(db, 'physical-1')
-    expect(initialized.unallocated).toMatchObject({ label: 'Unallocated', kind: 'system' })
+    expect(initialized.unallocated).toMatchObject({
+      label: 'Unallocated',
+      systemRole: 'unallocated',
+    })
     await expect(initializeVirtualAccounts(db, 'physical-1')).rejects.toThrow('already initialized')
   })
 
@@ -138,7 +141,7 @@ describe('virtual account ledger', () => {
     ).rejects.toThrow('asset version conflict')
   })
 
-  test('does not reveal system or unbound accounts to API keys', async () => {
+  test('does not reveal accounts without a binding to API keys', async () => {
     const db = createDb(':memory:')
     await addPhysicalAccount(db)
     const personal = await createVirtualAccount(db, {
@@ -152,7 +155,7 @@ describe('virtual account ledger', () => {
     await createVirtualAccount(db, {
       physicalAccountId: 'physical-1',
       label: 'Unallocated',
-      kind: 'system',
+      systemRole: 'unallocated',
     })
     await db.insert(apiKeys).values({
       id: 'key-1',
@@ -182,13 +185,13 @@ describe('virtual account ledger', () => {
     await createVirtualAccount(db, {
       physicalAccountId: 'physical-1',
       label: 'Unallocated',
-      kind: 'system',
+      systemRole: 'unallocated',
     })
     await expect(
       createVirtualAccount(db, {
         physicalAccountId: 'physical-1',
         label: 'Another system account',
-        kind: 'system',
+        systemRole: 'unallocated',
       }),
     ).rejects.toThrow()
   })
