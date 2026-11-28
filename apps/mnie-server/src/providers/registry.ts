@@ -798,6 +798,9 @@ export class ProviderRegistry {
           }
         }
         try {
+          if (availability.connection.reason !== '2FA_REQUIRED') {
+            throw new Error(message(availability.connection.message))
+          }
           await open.persist()
         } finally {
           await open.release()
@@ -876,10 +879,17 @@ export class ProviderRegistry {
     this.#pendingSmbc.delete(interactionId)
     const imported = await pending.challenge.finished2fa()
     const secret = await readSecret<StoredSmbcDirectSecret>(pending.profile.keyringAccount)
-    await saveSecret(pending.profile.keyringAccount, {
-      ...secret,
-      session: exportSmbcDirectSession(imported),
-    } satisfies StoredSmbcDirectSecret)
+    const open: OpenProvider = {
+      profile: pending.profile,
+      provider: asProvider(createSmbcDirectProvider(imported)),
+      persist: async () =>
+        saveSecret(pending.profile.keyringAccount, {
+          ...secret,
+          session: exportSmbcDirectSession(imported),
+        } satisfies StoredSmbcDirectSecret),
+      release: async () => {},
+    }
+    await open.persist()
     // smbc-direct defers account provisioning to the first completed login;
     // later re-authentications only restart the session.
     if (
@@ -889,7 +899,12 @@ export class ProviderRegistry {
         .where(eq(financialAccounts.profileId, pending.profile.id))
         .all().length === 0
     ) {
-      await provisionProfileAccounts(this.db, this, pending.profile.id)
+      // The connection RPC already holds the profile lock.
+      try {
+        await provisionProfileAccounts(this.db, this, pending.profile.id, open)
+      } finally {
+        await open.persist()
+      }
     }
     return {
       connection: {
@@ -897,16 +912,7 @@ export class ProviderRegistry {
         profileId: pending.profile.id,
         providerId: pending.profile.provider,
       },
-      open: {
-        profile: pending.profile,
-        provider: asProvider(createSmbcDirectProvider(imported)),
-        persist: async () =>
-          saveSecret(pending.profile.keyringAccount, {
-            ...secret,
-            session: exportSmbcDirectSession(imported),
-          } satisfies StoredSmbcDirectSecret),
-        release: async () => {},
-      },
+      open,
     }
   }
 

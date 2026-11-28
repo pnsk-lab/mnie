@@ -301,18 +301,52 @@ class CookieJar {
 const splitSetCookie = (header: string | null) =>
   header ? header.split(/,(?=\s*[^;,=\s]+=[^;,]*)/g).map((value) => value.trim()) : []
 
+const smbcRequestTimeoutMs = 10_000
+
 const fetchWithCookies = async (url: URL, init: RequestInit, jar: CookieJar) => {
   const headers = new Headers(init.headers)
   const cookie = jar.header()
   if (cookie) headers.set('cookie', cookie)
-  const response = await fetch(url, { ...init, headers, redirect: 'manual' })
-  jar.apply(response)
-  return response
+  const signal = AbortSignal.timeout(smbcRequestTimeoutMs)
+  const started = performance.now()
+  const method = init.method ?? 'GET'
+  const log = (stage: string, status?: number) =>
+    console.info(
+      JSON.stringify({
+        event: 'smbc_direct_http',
+        method,
+        path: url.pathname,
+        stage,
+        status,
+        elapsedMs: Math.round(performance.now() - started),
+      }),
+    )
+  log('started')
+  try {
+    const response = await fetch(url, { ...init, headers, redirect: 'manual', signal })
+    jar.apply(response)
+    log('headers_received', response.status)
+    return response
+  } catch (cause) {
+    log(signal.aborted ? 'timeout' : 'failed')
+    if (signal.aborted) {
+      throw new Error(`SMBC Direct ${init.method ?? 'GET'} ${url.pathname} timed out`, { cause })
+    }
+    throw cause
+  }
 }
 
 const responseText = async (response: Response, name: string) => {
   if (!response.ok) throw new Error(`${name} failed: HTTP ${response.status}`)
-  return iconv.decode(Buffer.from(await response.arrayBuffer()), 'Shift_JIS')
+  try {
+    return iconv.decode(Buffer.from(await response.arrayBuffer()), 'Shift_JIS')
+  } catch (cause) {
+    if (cause instanceof DOMException && ['AbortError', 'TimeoutError'].includes(cause.name)) {
+      console.info(JSON.stringify({ event: 'smbc_direct_http', stage: 'body_timeout', step: name }))
+      throw new Error(`SMBC Direct ${name} timed out while reading the response`, { cause })
+    }
+    throw cause
+  }
 }
 
 const formFields = (html: string, formName: string) => {

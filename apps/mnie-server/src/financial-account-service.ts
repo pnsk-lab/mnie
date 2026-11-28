@@ -75,9 +75,40 @@ export class FinancialAccountService {
     this.#invalidateQuotes()
     return this.gateway.close()
   }
+  async #runProfileConnection<T extends { status: string; providerId: string }>(
+    operation: 'connect' | 'complete',
+    profileId: string,
+    run: () => Promise<T>,
+  ) {
+    const requestId = crypto.randomUUID()
+    const started = performance.now()
+    const log = (stage: string, details: Record<string, unknown> = {}) =>
+      console.info(
+        JSON.stringify({
+          event: 'profile_connection',
+          operation,
+          requestId,
+          stage,
+          elapsedMs: Math.round(performance.now() - started),
+          ...details,
+        }),
+      )
+    log('waiting_for_lock')
+    try {
+      const connection = await withProfileLock(profileId, () => {
+        log('lock_acquired')
+        return run()
+      })
+      log('finished', { status: connection.status, provider: connection.providerId })
+      return connection
+    } catch (cause) {
+      log('failed')
+      throw cause
+    }
+  }
   async connectProfile(profileId: string) {
     if (!profileId) throw new Error('profileId is required')
-    const connection = await withProfileLock(profileId, () =>
+    const connection = await this.#runProfileConnection('connect', profileId, () =>
       this.gateway.connect(profileId, false),
     )
     return {
@@ -89,7 +120,7 @@ export class FinancialAccountService {
   }
   async completeProfileConnection(profileId: string, interactionId: string) {
     if (!profileId) throw new Error('profileId is required')
-    const connection = await withProfileLock(profileId, () =>
+    const connection = await this.#runProfileConnection('complete', profileId, () =>
       this.gateway.complete(profileId, interactionId),
     )
     return {
