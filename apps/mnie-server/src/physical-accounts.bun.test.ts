@@ -7,7 +7,11 @@ import {
   physicalAccountAssets,
   virtualAccountAssets,
 } from './db/schema'
-import { discoverPhysicalAccounts, syncInitialUnallocatedAssets } from './physical-accounts'
+import {
+  discoverPhysicalAccounts,
+  provisionProfileAccounts,
+  syncInitialUnallocatedAssets,
+} from './physical-accounts'
 import type { ProviderRegistry } from './providers/registry'
 import {
   ensureDefaultVirtualAccounts,
@@ -16,7 +20,7 @@ import {
 } from './virtual-accounts'
 
 describe('physical account discovery', () => {
-  test('persists non-brokerage accounts returned by the authenticated provider', async () => {
+  test.each([false, true])('provisions a bank account (already open: %s)', async (alreadyOpen) => {
     const db = createDb(':memory:')
     const profile = {
       id: 'profile-1',
@@ -60,13 +64,22 @@ describe('physical account discovery', () => {
         category: 'bank',
         defaultColor: '#000000',
       }),
-      use: async (_profile: unknown, action: (open: { provider: typeof provider }) => unknown) =>
-        action({ provider }),
+      use: async (_profile: unknown, action: (open: { provider: typeof provider }) => unknown) => {
+        if (alreadyOpen) throw new Error('must not try to acquire the profile lock again')
+        return action({ provider })
+      },
     } as unknown as ProviderRegistry
 
-    await expect(discoverPhysicalAccounts(db, providers)).resolves.toEqual({
+    const opened = alreadyOpen
+      ? { profile, provider, persist: async () => {}, release: async () => {} }
+      : undefined
+    await expect(
+      provisionProfileAccounts(db, providers, profile.id, opened),
+    ).resolves.toMatchObject({
       discovered: 1,
       physicalAccountIds: [expect.any(String)],
+      synced: 1,
+      errors: [],
     })
     expect(await db.select().from(financialAccounts)).toEqual([
       expect.objectContaining({
@@ -75,11 +88,6 @@ describe('physical account discovery', () => {
         kind: 'bank',
       }),
     ])
-    await ensureDefaultVirtualAccounts(db)
-    await expect(syncInitialUnallocatedAssets(db, providers)).resolves.toEqual({
-      synced: 1,
-      errors: [],
-    })
     expect(await db.select().from(physicalAccountAssets)).toEqual([
       expect.objectContaining({ assetKey: 'cash:JPY', amount: '1234.5' }),
     ])

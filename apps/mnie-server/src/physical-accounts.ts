@@ -19,7 +19,7 @@ import {
   virtualAccountAssets,
   virtualAccounts,
 } from './db/schema'
-import type { ProviderRegistry } from './providers/registry'
+import type { OpenProvider, ProviderRegistry } from './providers/registry'
 import { sha256, randomId } from './security/crypto'
 import {
   canonicalDecimal,
@@ -33,6 +33,7 @@ export const discoverPhysicalAccounts = async (
   db: Db,
   providers: ProviderRegistry,
   profileIds?: readonly string[],
+  opened?: OpenProvider,
 ) => {
   const profiles = (await providers.profiles()).filter(
     (profile) => !profileIds || profileIds.includes(profile.id),
@@ -40,7 +41,7 @@ export const discoverPhysicalAccounts = async (
   const physicalAccountIds: string[] = []
   const discovered = await Promise.all(
     profiles.map(async (profile) => {
-      return providers.use(profile, async ({ provider }) => {
+      const discover = async ({ provider }: OpenProvider) => {
         const descriptor = providers.descriptor(profile)
         if (!provider.methods().includes('accounts.list')) {
           throw new Error(`${descriptor.provider.name} does not provide account discovery`)
@@ -68,7 +69,8 @@ export const discoverPhysicalAccounts = async (
             })
         }
         return page.items
-      })
+      }
+      return opened?.profile.id === profile.id ? discover(opened) : providers.use(profile, discover)
     }),
   )
   return { discovered: discovered.flat().length, physicalAccountIds }
@@ -417,6 +419,7 @@ export const syncInitialUnallocatedAssets = async (
   db: Db,
   providers: ProviderRegistry,
   physicalAccountIds?: readonly string[],
+  opened?: OpenProvider,
 ) => {
   const allPhysicalAccounts = await db.select().from(financialAccounts)
   const physicalAccounts = allPhysicalAccounts.filter(
@@ -438,10 +441,12 @@ export const syncInitialUnallocatedAssets = async (
     if (!unallocated) throw new Error(`Unallocated account is missing for ${physical.id}`)
 
     try {
-      await providers.use(physical.profileId, async ({ provider }) => {
+      const sync = async ({ provider }: OpenProvider) => {
         const snapshotAssets = await refreshPhysicalAccountAssets(db, provider, physical)
         synced += snapshotAssets.length
-      })
+      }
+      if (opened?.profile.id === physical.profileId) await sync(opened)
+      else await providers.use(physical.profileId, sync)
     } catch (cause) {
       errors.push({
         profileId: physical.profileId,
@@ -456,10 +461,16 @@ export const provisionProfileAccounts = async (
   db: Db,
   providers: ProviderRegistry,
   profileId: string,
+  opened?: OpenProvider,
 ) => {
-  const discovery = await discoverPhysicalAccounts(db, providers, [profileId])
+  const discovery = await discoverPhysicalAccounts(db, providers, [profileId], opened)
   const defaults = await ensureDefaultVirtualAccounts(db, discovery.physicalAccountIds)
-  const assets = await syncInitialUnallocatedAssets(db, providers, discovery.physicalAccountIds)
+  const assets = await syncInitialUnallocatedAssets(
+    db,
+    providers,
+    discovery.physicalAccountIds,
+    opened,
+  )
   if (assets.errors.length) {
     throw new Error(assets.errors.map((error) => error.message).join('; '))
   }

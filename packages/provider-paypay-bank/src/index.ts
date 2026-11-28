@@ -1,5 +1,6 @@
 import iconv from 'iconv-lite'
 import { parse } from 'node-html-parser'
+import { createProviderSessionManager } from '@mnie/types'
 import type {
   Account,
   Balance,
@@ -608,6 +609,9 @@ export const login = async (options: PayPayBankLoginOptions = {}): Promise<PayPa
     throw new Error('welcome page did not include an authenticated session')
   return profileFrom(baseURL, values, jar, welcomeFields)
 }
+
+export const sessionManager: ReturnType<typeof createProviderSessionManager> =
+  createProviderSessionManager('paypay-bank')
 
 export const createProvider = (profile: PayPayBankProfile): FinancialProvider<CommonMethods> => {
   const account: Account = {
