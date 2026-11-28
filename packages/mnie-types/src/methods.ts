@@ -274,7 +274,6 @@ export type AdminMethods = {
     {
       physicalAccountId: string
       label: string
-      kind: 'personal' | 'agent' | 'system'
       allocations?: Array<{
         fromAccountId: string
         assetKey: string

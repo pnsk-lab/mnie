@@ -499,7 +499,7 @@ const publicAccount = (
   const trade =
     category === 'brokerage' &&
     role !== 'read' &&
-    row.kind !== 'system' &&
+    row.systemRole !== 'unallocated' &&
     row.status === 'active' &&
     row.policy.tradingEnabled !== false
   return {
@@ -508,7 +508,7 @@ const publicAccount = (
     category,
     ...(provider ? { provider } : {}),
     label: row.label,
-    kind: row.kind,
+    ...(row.systemRole ? { systemRole: row.systemRole } : {}),
     status: row.status,
     capabilities: [
       'balances:read',
@@ -562,7 +562,6 @@ export const listVirtualAccounts = async (
         eq(apiKeyVirtualAccounts.apiKeyId, access.apiKeyId),
         isNull(apiKeys.revokedAt),
         or(isNull(apiKeys.expiresAt), gt(apiKeys.expiresAt, new Date())),
-        ne(virtualAccounts.kind, 'system'),
         ne(virtualAccounts.status, 'closed'),
       ),
     )
@@ -636,7 +635,7 @@ export const listDerivedUnallocatedAssets = (db: Db, physicalAccountId: string) 
     .where(
       and(
         eq(virtualAccounts.physicalAccountId, physicalAccountId),
-        ne(virtualAccounts.kind, 'system'),
+        isNull(virtualAccounts.systemRole),
         ne(virtualAccounts.status, 'closed'),
       ),
     )
@@ -899,7 +898,7 @@ const createVirtualAccountSync = (
   input: {
     physicalAccountId: string
     label: string
-    kind: 'personal' | 'agent' | 'system'
+    systemRole?: 'unallocated'
     color?: string
     icon?: string
     policy?: Record<string, unknown>
@@ -927,14 +926,14 @@ const createVirtualAccountSync = (
   if (!physicalAccount) throw new Error('physical account not found')
   if (physicalAccount.kind !== 'brokerage') {
     if (
-      input.kind !== 'personal' ||
+      input.systemRole === 'unallocated' ||
       db
         .select()
         .from(virtualAccounts)
         .where(
           and(
             eq(virtualAccounts.physicalAccountId, physicalAccount.id),
-            ne(virtualAccounts.kind, 'system'),
+            isNull(virtualAccounts.systemRole),
           ),
         )
         .get()
@@ -946,14 +945,13 @@ const createVirtualAccountSync = (
     id: randomId('acct'),
     physicalAccountId: input.physicalAccountId.trim(),
     label: input.label.trim(),
-    kind: input.kind,
-    systemRole: input.kind === 'system' ? 'unallocated' : null,
+    systemRole: input.systemRole,
     status: 'active',
     color: input.color,
     icon: input.icon,
     policy: input.policy
       ? validateAccountPolicy(input.policy)
-      : { tradingEnabled: input.kind !== 'system' },
+      : { tradingEnabled: input.systemRole !== 'unallocated' },
     createdAt: now,
     updatedAt: now,
   }
@@ -986,7 +984,7 @@ export const createVirtualAccount = async (
         id: randomId('audit'),
         accountId: account.id,
         event: 'account.created',
-        detail: { kind: account.kind },
+        detail: { systemRole: account.systemRole },
         createdAt: new Date(),
       })
       .run()
@@ -1014,7 +1012,6 @@ export const initializeVirtualAccounts = async (db: Db, physicalAccountId: strin
     id: unallocatedId,
     physicalAccountId,
     label: 'Unallocated',
-    kind: 'system',
     systemRole: 'unallocated',
     status: 'active',
     policy: { tradingEnabled: false },
@@ -1086,7 +1083,8 @@ export const bindApiKeyToVirtualAccount = async (
   role: 'read' | 'trade',
 ) => {
   const account = await getVirtualAccount(db, virtualAccountId, { owner: true })
-  if (account.kind === 'system') throw new Error('system accounts cannot be bound to API keys')
+  if (account.systemRole === 'unallocated' && role === 'trade')
+    throw new Error('unallocated accounts only support read bindings')
   const key = db
     .select()
     .from(apiKeys)
@@ -1335,7 +1333,7 @@ export const updateVirtualAccount = async (
   const { virtualOrders, accountAudit, virtualOrderQuotes } = await import('./db/schema')
   db.transaction((tx) => {
     const account = tx.select().from(virtualAccounts).where(eq(virtualAccounts.id, accountId)).get()
-    if (!account || account.status === 'closed' || account.kind === 'system')
+    if (!account || account.status === 'closed' || account.systemRole === 'unallocated')
       throw new Error('account cannot be modified')
     if (account.version !== input.expectedVersion) throw new Error('account version conflict')
     if (account.status === 'reconciliation_required' && input.status === 'active')
@@ -1442,7 +1440,7 @@ export const transferVirtualAssets = (
           .from(virtualAccounts)
           .where(eq(virtualAccounts.id, accountId))
           .get()
-        if (account?.kind === 'system' && !systemVersions.has(accountId))
+        if (account?.systemRole === 'unallocated' && !systemVersions.has(accountId))
           systemVersions.set(accountId, account.version)
       }
     }

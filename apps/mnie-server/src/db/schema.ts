@@ -291,7 +291,6 @@ export const virtualAccounts = sqliteTable(
     id: text('id').primaryKey(),
     physicalAccountId: text('physical_account_id').notNull(),
     label: text('label').notNull(),
-    kind: text('kind', { enum: ['personal', 'agent', 'system'] }).notNull(),
     systemRole: text('system_role', { enum: ['unallocated'] }),
     status: text('status', {
       enum: ['active', 'frozen', 'reconciliation_required', 'closed'],

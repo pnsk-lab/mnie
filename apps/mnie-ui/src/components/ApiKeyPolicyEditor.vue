@@ -109,7 +109,7 @@ onMounted(async () => {
       listVirtualAccounts(),
       rpcRequest<string[]>('rpc.methods'),
     ])
-    accounts.value = result.accounts.filter((account) => account.kind !== 'system')
+    accounts.value = result.accounts
     rpcMethods.value = methods
     await Promise.all(accounts.value.map((account) => loadAccountMethods(account.id)))
     // Profile methods are provider-specific and are not in the static RPC list.
@@ -186,7 +186,7 @@ const toggleScope = (scope: string) => {
           >
             <option value="">アクセス不可</option>
             <option value="read">参照</option>
-            <option value="trade">参照・取引</option>
+            <option v-if="account.systemRole !== 'unallocated'" value="trade">参照・取引</option>
           </select>
         </label>
         <template v-if="binding(account.id)">

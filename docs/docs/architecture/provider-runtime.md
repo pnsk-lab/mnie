@@ -47,6 +47,13 @@ own: its displayed amount is the cached physical amount minus the available, res
 amounts allocated to all other virtual accounts. An external increase therefore increases
 `Unallocated`; an external decrease reduces it.
 
+Virtual accounts use `systemRole` to identify the system-owned `Unallocated` account. On startup,
+SQLite removes the legacy account-kind column while preserving account IDs, labels, allocations,
+and key grants.
+API key grants can include `Unallocated` with a read role and an explicit set of methods. Scoped
+administrative operations on `Unallocated` require an explicit grant on that account, including
+for existing keys that previously accessed it indirectly.
+
 If any derived `Unallocated` amount becomes negative, every virtual account below that physical
 account enters `reconciliation_required` and mutating provider operations are blocked. The lock is
 not removed automatically. An owner must return enough allocation to `Unallocated`, then approve

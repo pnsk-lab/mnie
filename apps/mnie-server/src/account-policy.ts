@@ -29,7 +29,7 @@ export const assertAccountTrade = (
   options?: { allowVenueScopedWhenVenueOmitted?: boolean },
 ) => {
   const account = db.select().from(virtualAccounts).where(eq(virtualAccounts.id, accountId)).get()
-  if (!account || account.kind === 'system' || account.status !== 'active')
+  if (!account || account.systemRole === 'unallocated' || account.status !== 'active')
     throw new Error('account does not allow trading')
   if (!access.owner) {
     const binding = db

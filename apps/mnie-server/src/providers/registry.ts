@@ -494,7 +494,7 @@ export class ProviderRegistry {
         : []
       const virtualIds = accounts.map((account) => account.id)
       if (
-        accounts.some((account) => account.kind !== 'system') ||
+        accounts.some((account) => account.systemRole !== 'unallocated') ||
         (virtualIds.length &&
           tx
             .select()

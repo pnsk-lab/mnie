@@ -64,7 +64,7 @@ const fixture = async (openOrders: unknown[] = []) => {
 }
 
 describe('existing account migration', () => {
-  test('assigns the complete snapshot to Personal once and leaves Unallocated at zero', async () => {
+  test('assigns the complete snapshot to the main account once and leaves Unallocated at zero', async () => {
     const { db, gateway } = await fixture()
     try {
       const result = await migratePhysicalAccount(db, gateway, 'physical')

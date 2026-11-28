@@ -26,8 +26,8 @@ const account = db
   .from(schema.virtualAccounts)
   .where(eq(schema.virtualAccounts.id, accountId))
   .get()
-if (!account || account.kind === 'system')
-  throw new Error('select an existing Personal or Agent account')
+if (!account || account.systemRole === 'unallocated')
+  throw new Error('select an existing standard virtual account')
 const physical = db
   .select()
   .from(schema.financialAccounts)

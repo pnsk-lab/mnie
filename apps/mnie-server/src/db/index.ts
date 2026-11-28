@@ -477,26 +477,56 @@ export const createDb = (path: string) => {
       created_at INTEGER NOT NULL
     )
   `)
-  sqlite.run(`
-    CREATE TABLE IF NOT EXISTS virtual_accounts (
-      id TEXT PRIMARY KEY,
-      physical_account_id TEXT NOT NULL,
-      label TEXT NOT NULL,
-      kind TEXT NOT NULL CHECK (kind IN ('personal', 'agent', 'system')),
-      system_role TEXT CHECK (system_role IS NULL OR system_role = 'unallocated'),
-      status TEXT NOT NULL CHECK (status IN ('active', 'frozen', 'reconciliation_required', 'closed')),
-      color TEXT,
-      icon TEXT,
-      policy_json TEXT NOT NULL,
-      version INTEGER NOT NULL DEFAULT 1,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      closed_at INTEGER,
-      CHECK ((kind = 'system') = (system_role IS NOT NULL))
-    )
-  `)
-  sqlite.run(`CREATE UNIQUE INDEX IF NOT EXISTS virtual_accounts_physical_system_role_unique
-    ON virtual_accounts (physical_account_id, system_role) WHERE system_role IS NOT NULL`)
+  const createVirtualAccountsTable = (table: 'virtual_accounts' | 'virtual_accounts_new') =>
+    sqlite.run(`
+      CREATE TABLE IF NOT EXISTS ${table} (
+        id TEXT PRIMARY KEY,
+        physical_account_id TEXT NOT NULL,
+        label TEXT NOT NULL,
+        system_role TEXT CHECK (system_role IS NULL OR system_role = 'unallocated'),
+        status TEXT NOT NULL CHECK (status IN ('active', 'frozen', 'reconciliation_required', 'closed')),
+        color TEXT,
+        icon TEXT,
+        policy_json TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        closed_at INTEGER
+      )
+    `)
+  // Rebuild the parent table without renaming it first, so child foreign keys
+  // keep pointing to virtual_accounts throughout the schema migration.
+  sqlite.run('PRAGMA foreign_keys = OFF')
+  try {
+    sqlite
+      .transaction(() => {
+        const columns = sqlite
+          .query<{ name: string }, []>('PRAGMA table_info(virtual_accounts)')
+          .all()
+        if (!columns.length) createVirtualAccountsTable('virtual_accounts')
+        if (columns.some(({ name }) => name === 'kind')) {
+          createVirtualAccountsTable('virtual_accounts_new')
+          sqlite.run(`
+          INSERT INTO virtual_accounts_new (
+            id, physical_account_id, label, system_role, status, color, icon,
+            policy_json, version, created_at, updated_at, closed_at
+          )
+          SELECT id, physical_account_id, label, system_role, status, color, icon,
+            policy_json, version, created_at, updated_at, closed_at
+          FROM virtual_accounts
+        `)
+          sqlite.run('DROP TABLE virtual_accounts')
+          sqlite.run('ALTER TABLE virtual_accounts_new RENAME TO virtual_accounts')
+          if (sqlite.query('PRAGMA foreign_key_check').get())
+            throw new Error('virtual account migration would violate foreign keys')
+        }
+        sqlite.run(`CREATE UNIQUE INDEX IF NOT EXISTS virtual_accounts_physical_system_role_unique
+        ON virtual_accounts (physical_account_id, system_role) WHERE system_role IS NOT NULL`)
+      })
+      .immediate()
+  } finally {
+    sqlite.run('PRAGMA foreign_keys = ON')
+  }
   sqlite.run(`
     CREATE TABLE IF NOT EXISTS virtual_account_assets (
       virtual_account_id TEXT NOT NULL,

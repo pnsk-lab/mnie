@@ -221,7 +221,6 @@ describe('Streamable HTTP MCP', () => {
     })
     const account = await createVirtualAccount(db, {
       physicalAccountId: 'mcp-physical',
-      kind: 'agent',
       label: 'MCP Agent',
     })
     await db.insert(virtualAccountAssets).values({

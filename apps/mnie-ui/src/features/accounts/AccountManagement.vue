@@ -138,7 +138,7 @@ const save = () =>
   <section class="grid gap-5">
     <p v-if="error" role="alert" class="text-red-600">{{ error }}</p>
     <form
-      v-if="account.kind !== 'system'"
+      v-if="account.systemRole !== 'unallocated'"
       class="grid gap-4 rounded-xl border border-border p-5"
       @submit.prevent="save"
     >
@@ -215,10 +215,7 @@ const save = () =>
         </button>
       </div>
     </form>
-    <section
-      v-if="account.kind !== 'system'"
-      class="grid gap-3 rounded-xl border border-border p-5"
-    >
+    <section class="grid gap-3 rounded-xl border border-border p-5">
       <h3 class="font-bold">アクセス</h3>
       <div
         v-for="binding in access"
