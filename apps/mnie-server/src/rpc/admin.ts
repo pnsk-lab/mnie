@@ -168,15 +168,10 @@ export class AdminRpcService {
       }
     }
     if (operation === 'accounts.create') {
-      const kind = requiredString(input, 'kind')
-      if (kind !== 'personal' && kind !== 'agent' && kind !== 'system') {
-        throw new Error('kind must be personal, agent, or system')
-      }
       return {
         account: await createVirtualAccount(this.db, {
           physicalAccountId: requiredString(input, 'physicalAccountId'),
           label: requiredString(input, 'label'),
-          kind,
           allocations: Array.isArray(input.allocations)
             ? (input.allocations as Array<{
                 fromAccountId: string

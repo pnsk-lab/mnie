@@ -26,7 +26,7 @@ const client = createLocalClient([
       implementation: 'virtual-brokerage',
       category: 'brokerage',
       label: 'SBI Securities',
-      kind: 'personal',
+      kind: 'standard',
       status: 'active',
       capabilities: [],
       permissions: { read: true, trade: true, manage: true },

@@ -85,12 +85,10 @@ const setup = async () => {
   const a = await createVirtualAccount(db, {
     physicalAccountId: 'physical',
     label: 'A',
-    kind: 'personal',
   })
   const b = await createVirtualAccount(db, {
     physicalAccountId: 'physical',
     label: 'B',
-    kind: 'agent',
   })
   for (const account of [a, b])
     await db.insert(virtualAccountAssets).values({
@@ -419,7 +417,6 @@ describe('public account isolation and durable orders', () => {
       createVirtualAccount(db, {
         physicalAccountId: 'physical',
         label: 'Unfunded',
-        kind: 'agent',
         allocations: [
           {
             fromAccountId: a.id,

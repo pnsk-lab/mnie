@@ -48,7 +48,7 @@ export interface PublicFinancialAccount {
   category: ProviderCategory
   provider?: string
   label: string
-  kind: 'personal' | 'agent' | 'system'
+  kind: 'standard' | 'system'
   status: 'active' | 'frozen' | 'reconciliation_required' | 'closed'
   capabilities: readonly string[]
   permissions: { read: boolean; trade: boolean; manage: boolean }

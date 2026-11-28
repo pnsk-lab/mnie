@@ -3,10 +3,11 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { FinancialProvider, MethodMap } from '@mnie/types'
+import { connectMnie } from '../../../../packages/provider-mnie-server/src/index'
 import { createServerApp } from '../app'
 import type { ServerConfig } from '../config'
 import { createDb } from '../db'
-import { accountProfiles, financialAccounts } from '../db/schema'
+import { accountProfiles, financialAccounts, physicalAccountAssets } from '../db/schema'
 import type { ProviderRegistry } from '../providers/registry'
 import { createApiKey } from '../security/api-keys'
 import {
@@ -222,7 +223,6 @@ describe('WebSocket RPC boundaries', () => {
       const { id: accountId } = await createVirtualAccount(db, {
         physicalAccountId,
         label: 'Concurrency account',
-        kind: 'agent',
       })
       await bindApiKeyToVirtualAccount(db, apiKeyId, accountId, 'read')
       const { socket } = await connect()
@@ -239,6 +239,75 @@ describe('WebSocket RPC boundaries', () => {
       }
     } finally {
       providers.open = originalOpen
+    }
+  })
+  test('the SDK can read an explicitly granted unallocated account', async () => {
+    const now = new Date()
+    const physicalAccountId = 'unallocated-physical'
+    const profileId = 'unallocated-profile'
+    await db.insert(accountProfiles).values({
+      id: profileId,
+      provider: 'test',
+      label: 'SDK account profile',
+      keyringAccount: 'unused',
+      createdAt: now,
+      updatedAt: now,
+    })
+    await db.insert(financialAccounts).values({
+      id: physicalAccountId,
+      profileId,
+      connectorTypeId: 'test',
+      institutionId: 'test',
+      providerAccountId: 'private',
+      kind: 'brokerage',
+      createdAt: now,
+      updatedAt: now,
+    })
+    const { unallocated } = await initializeVirtualAccounts(db, physicalAccountId)
+    const standard = await createVirtualAccount(db, { physicalAccountId, label: 'Standard' })
+    await db.insert(physicalAccountAssets).values({
+      physicalAccountId,
+      assetKey: 'cash:JPY',
+      assetKind: 'cash',
+      amount: '1250',
+      updatedAt: now,
+    })
+    await expect(
+      createApiKey(db, 'unallocated trade', {
+        accountBindings: [{ accountId: unallocated.id, role: 'trade' }],
+      }),
+    ).rejects.toThrow('only support read bindings')
+
+    const key = await createApiKey(db, 'unallocated SDK read', {
+      scopes: ['read'],
+      accountBindings: [
+        {
+          accountId: unallocated.id,
+          role: 'read',
+          allowedMethods: ['portfolio.accounts.balances'],
+        },
+      ],
+    })
+    const workspace = await connectMnie({ baseURL: server.url.href, token: key.token, WebSocket })
+    try {
+      expect(await workspace.accounts()).toEqual([
+        expect.objectContaining({
+          id: unallocated.id,
+          kind: 'system',
+          permissions: { read: true, trade: false, manage: false },
+        }),
+      ])
+      expect(
+        await workspace.call('portfolio.accounts.balances', { account: unallocated.id }),
+      ).toMatchObject({ assets: [{ assetKey: 'cash:JPY', available: '1250' }] })
+      await expect(
+        workspace.call('portfolio.accounts.balances', { account: standard.id }),
+      ).rejects.toThrow()
+      await expect(
+        workspace.call('portfolio.accounts.positions', { account: unallocated.id }),
+      ).rejects.toThrow('not allowed')
+    } finally {
+      workspace.close()
     }
   })
 })

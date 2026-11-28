@@ -96,7 +96,6 @@ const createFixture = async (options?: {
   const trading = await createVirtualAccount(db, {
     physicalAccountId: 'financial-account_sbi',
     label: 'Agent',
-    kind: 'agent',
   })
   await db.insert(virtualAccountAssets).values({
     virtualAccountId: trading.id,

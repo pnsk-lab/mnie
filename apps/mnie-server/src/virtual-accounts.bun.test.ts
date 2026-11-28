@@ -97,12 +97,10 @@ describe('virtual account ledger', () => {
     const from = await createVirtualAccount(db, {
       physicalAccountId: 'physical-1',
       label: 'Personal',
-      kind: 'personal',
     })
     const to = await createVirtualAccount(db, {
       physicalAccountId: 'physical-1',
       label: 'Agent',
-      kind: 'agent',
     })
     await addAsset(db, from.id, '1000.25')
 
@@ -146,12 +144,10 @@ describe('virtual account ledger', () => {
     const personal = await createVirtualAccount(db, {
       physicalAccountId: 'physical-1',
       label: 'Personal',
-      kind: 'personal',
     })
     const agent = await createVirtualAccount(db, {
       physicalAccountId: 'physical-1',
       label: 'Agent',
-      kind: 'agent',
     })
     await createVirtualAccount(db, {
       physicalAccountId: 'physical-1',
@@ -204,7 +200,6 @@ describe('virtual account ledger', () => {
     const personal = await createVirtualAccount(db, {
       physicalAccountId: 'physical-1',
       label: 'Personal',
-      kind: 'personal',
     })
     await setPhysicalAsset(db, '1000')
     await addAsset(db, personal.id, '300')
@@ -227,7 +222,6 @@ describe('virtual account ledger', () => {
     const personal = await createVirtualAccount(db, {
       physicalAccountId: 'physical-1',
       label: 'Personal',
-      kind: 'personal',
     })
     await addAsset(db, personal.id, '800')
     await setPhysicalAsset(db, '1000')
@@ -315,12 +309,10 @@ describe('virtual account ledger', () => {
     const trading = await createVirtualAccount(db, {
       physicalAccountId: 'physical-1',
       label: 'Trading',
-      kind: 'agent',
     })
     const paused = await createVirtualAccount(db, {
       physicalAccountId: 'physical-1',
       label: 'Paused',
-      kind: 'personal',
     })
     await setPhysicalAsset(db, '1000')
     const now = new Date()
@@ -393,7 +385,6 @@ describe('virtual account ledger', () => {
     const account = await createVirtualAccount(db, {
       physicalAccountId: 'physical-1',
       label: 'Trading',
-      kind: 'agent',
     })
     await addAsset(db, account.id, '1000')
     const changes = [
@@ -431,7 +422,6 @@ describe('virtual account ledger', () => {
     const account = await createVirtualAccount(db, {
       physicalAccountId: 'physical-1',
       label: 'Trading',
-      kind: 'agent',
     })
     await addAsset(db, account.id, '1000')
     await expect(
@@ -456,7 +446,6 @@ describe('virtual account ledger', () => {
     const account = await createVirtualAccount(db, {
       physicalAccountId: 'physical-1',
       label: 'Trading',
-      kind: 'agent',
     })
     await addAsset(db, account.id, '1000')
     const original = [

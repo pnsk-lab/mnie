@@ -54,8 +54,8 @@ export const migratePhysicalAccount = async (
         .values({
           id,
           physicalAccountId,
-          label: 'Personal',
-          kind: 'personal',
+          label: 'Main',
+          kind: 'standard',
           status: 'active',
           policy: { tradingEnabled: physical.kind === 'brokerage' },
           createdAt: now,

@@ -562,7 +562,6 @@ export const listVirtualAccounts = async (
         eq(apiKeyVirtualAccounts.apiKeyId, access.apiKeyId),
         isNull(apiKeys.revokedAt),
         or(isNull(apiKeys.expiresAt), gt(apiKeys.expiresAt, new Date())),
-        ne(virtualAccounts.kind, 'system'),
         ne(virtualAccounts.status, 'closed'),
       ),
     )
@@ -899,7 +898,7 @@ const createVirtualAccountSync = (
   input: {
     physicalAccountId: string
     label: string
-    kind: 'personal' | 'agent' | 'system'
+    kind?: 'system'
     color?: string
     icon?: string
     policy?: Record<string, unknown>
@@ -927,7 +926,7 @@ const createVirtualAccountSync = (
   if (!physicalAccount) throw new Error('physical account not found')
   if (physicalAccount.kind !== 'brokerage') {
     if (
-      input.kind !== 'personal' ||
+      input.kind === 'system' ||
       db
         .select()
         .from(virtualAccounts)
@@ -946,7 +945,7 @@ const createVirtualAccountSync = (
     id: randomId('acct'),
     physicalAccountId: input.physicalAccountId.trim(),
     label: input.label.trim(),
-    kind: input.kind,
+    kind: input.kind ?? 'standard',
     systemRole: input.kind === 'system' ? 'unallocated' : null,
     status: 'active',
     color: input.color,
@@ -1086,7 +1085,8 @@ export const bindApiKeyToVirtualAccount = async (
   role: 'read' | 'trade',
 ) => {
   const account = await getVirtualAccount(db, virtualAccountId, { owner: true })
-  if (account.kind === 'system') throw new Error('system accounts cannot be bound to API keys')
+  if (account.kind === 'system' && role === 'trade')
+    throw new Error('unallocated accounts only support read bindings')
   const key = db
     .select()
     .from(apiKeys)

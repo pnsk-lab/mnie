@@ -69,7 +69,6 @@ const setup = async () => {
   const account = await createVirtualAccount(db, {
     physicalAccountId: 'physical',
     label: 'Agent',
-    kind: 'agent',
   })
   await db.insert(oauthClients).values({ id: client.client_id, client, createdAt: now })
   const provider = createOAuthServerProvider(db, config)
@@ -82,7 +81,6 @@ describe('account grants', () => {
     const other = await createVirtualAccount(db, {
       physicalAccountId: 'physical',
       label: 'Other',
-      kind: 'agent',
     })
     const key = await createApiKey(db, 'scoped', {
       scopes: ['read', 'trade'],
@@ -137,7 +135,6 @@ describe('account grants', () => {
     const other = await createVirtualAccount(db, {
       physicalAccountId: 'physical',
       label: 'Other',
-      kind: 'agent',
     })
     const key = await createApiKey(db, 'portfolio', {
       scopes: ['read'],
@@ -280,7 +277,6 @@ describe('account grants', () => {
     const other = await createVirtualAccount(db, {
       physicalAccountId: 'physical',
       label: 'Other',
-      kind: 'agent',
     })
     const key = await createApiKey(db, 'admin', {
       scopes: ['read'],
@@ -315,6 +311,21 @@ describe('account grants', () => {
         toAccountId: account.id,
       }),
     ).toThrow('lacks this admin permission')
+    const transfer = 'admin.accounts.assets.transfer'
+    const transferKey = await createApiKey(db, 'unallocated transfers', {
+      scopes: ['read'],
+      allowedMethods: [transfer],
+      accountBindings: [
+        { accountId: unallocated.id, role: 'read', allowedMethods: [transfer] },
+        { accountId: account.id, role: 'read', allowedMethods: [transfer] },
+      ],
+    })
+    expect(() =>
+      assertAdminAccountScope(db, transferKey.id, transfer, {
+        fromAccountId: unallocated.id,
+        toAccountId: account.id,
+      }),
+    ).not.toThrow()
     expect(() => assertAdminAccountScope(db, key.id, 'admin.accounts.freeze', {})).toThrow(
       'could not be verified',
     )

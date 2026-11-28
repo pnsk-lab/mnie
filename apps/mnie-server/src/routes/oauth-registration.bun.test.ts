@@ -65,7 +65,6 @@ describe('OAuth client registration scopes', () => {
     await initializeVirtualAccounts(db, 'oauth-physical')
     account = await createVirtualAccount(db, {
       physicalAccountId: 'oauth-physical',
-      kind: 'agent',
       label: 'OAuth Agent',
     })
   })

@@ -6,7 +6,7 @@ import { STATIC_METHODS } from '../rpc/methods'
 // These administrative methods operate on existing virtual or physical accounts.
 // An explicit global method grant is necessary but does not by itself grant access
 // to every account. Methods operating on a whole physical account require every
-// affected non-system virtual account to grant the method.
+// affected virtual account to grant the method.
 const accountMethods = new Set([
   'admin.apiKeys.bind',
   'admin.accountAccess.list',
@@ -53,11 +53,7 @@ export function assertAdminAccountScope(
       .select()
       .from(virtualAccounts)
       .where(
-        and(
-          eq(virtualAccounts.physicalAccountId, physical),
-          ne(virtualAccounts.kind, 'system'),
-          ne(virtualAccounts.status, 'closed'),
-        ),
+        and(eq(virtualAccounts.physicalAccountId, physical), ne(virtualAccounts.status, 'closed')),
       )
       .all())
       ids.add(account.id)
@@ -80,25 +76,6 @@ export function assertAdminAccountScope(
     add(input.fromAccountId)
     add(input.toAccountId)
   } else add(input.accountId)
-  // System/unallocated accounts cannot be bound directly. Authorizing an
-  // operation on one requires this permission on every affected user account.
-  for (const id of Array.from(ids)) {
-    const account = db.select().from(virtualAccounts).where(eq(virtualAccounts.id, id)).get()
-    if (account?.kind !== 'system') continue
-    ids.delete(id)
-    for (const related of db
-      .select()
-      .from(virtualAccounts)
-      .where(
-        and(
-          eq(virtualAccounts.physicalAccountId, account.physicalAccountId),
-          ne(virtualAccounts.kind, 'system'),
-          ne(virtualAccounts.status, 'closed'),
-        ),
-      )
-      .all())
-      ids.add(related.id)
-  }
   if (!ids.size) throw new Error('account scope could not be verified')
   for (const id of ids) {
     const binding = db

@@ -214,7 +214,7 @@ export interface PublicFinancialAccount {
   category: 'brokerage' | 'bank' | 'transit' | 'pension' | 'other'
   provider?: string
   label: string
-  kind: 'personal' | 'agent' | 'system'
+  kind: 'standard' | 'system'
   status: 'active' | 'frozen' | 'reconciliation_required' | 'closed'
   capabilities: string[]
   permissions: { read: boolean; trade: boolean; manage: boolean }
@@ -559,7 +559,6 @@ export const createVirtualAccount = (input: {
     expectedFromVersion: number
     reason: string
   }>
-  kind: 'personal' | 'agent'
 }) => rpcRequest<{ account: PublicFinancialAccount }>('admin.accounts.create', input)
 
 export const ensureDefaultVirtualAccounts = () =>

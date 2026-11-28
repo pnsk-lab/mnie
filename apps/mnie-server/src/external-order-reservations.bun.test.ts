@@ -45,7 +45,6 @@ const fixture = async () => {
   const personal = await createVirtualAccount(db, {
     physicalAccountId: 'physical',
     label: 'Personal',
-    kind: 'personal',
   })
   db.insert(virtualAccountAssets)
     .values({

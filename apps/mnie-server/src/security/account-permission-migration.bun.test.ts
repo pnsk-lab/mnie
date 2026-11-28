@@ -23,7 +23,7 @@ test('legacy global account restrictions migrate without widening access', () =>
       ],
     )
     sqlite.run(
-      "INSERT INTO virtual_accounts (id,physical_account_id,label,kind,status,policy_json,created_at,updated_at) VALUES ('a','p','a','agent','active','{}',0,0)",
+      "INSERT INTO virtual_accounts (id,physical_account_id,label,kind,status,policy_json,created_at,updated_at) VALUES ('a','p','a','standard','active','{}',0,0)",
     )
     sqlite.run(
       "INSERT INTO api_key_virtual_accounts (api_key_id,virtual_account_id,role,created_at) VALUES ('k','a','trade',0)",

@@ -45,7 +45,6 @@ const busy = ref(false)
 const error = ref('')
 const notice = ref('')
 const name = ref('')
-const kind = ref<'personal' | 'agent'>('personal')
 const physicalAccountId = ref('')
 const allocationSourceId = ref('')
 const allocationAmounts = ref<Record<string, string>>({})
@@ -79,7 +78,7 @@ const afterAllocation = (asset: VirtualAccountAsset) => {
   }
 }
 watch(
-  [name, kind, physicalAccountId, allocationSourceId, allocationAmounts],
+  [name, physicalAccountId, allocationSourceId, allocationAmounts],
   () => {
     createReviewed.value = false
   },
@@ -313,7 +312,6 @@ const createAccount = async () => {
     const result = await createVirtualAccount({
       physicalAccountId: physicalAccountId.value,
       label: name.value.trim(),
-      kind: kind.value,
       allocations: initialAllocations.value,
     })
     notice.value = '仮想口座を作成しました'
@@ -561,13 +559,6 @@ onMounted(load)
             </option>
           </select>
         </label>
-        <label class="grid gap-2 font-bold"
-          >種類
-          <select v-model="kind" :class="ui.input">
-            <option value="personal">Personal</option>
-            <option value="agent">Agent</option>
-          </select>
-        </label>
         <label class="grid gap-2 text-sm font-bold text-fg">
           名前
           <input
@@ -610,7 +601,7 @@ onMounted(load)
           仮想口座はMnie内の管理単位です。証券会社上の口座は分割されません。
         </p>
         <p v-if="createReviewed" role="status" class="font-bold">
-          {{ name }}（{{ kind }}）と資産の割当を確定します。
+          {{ name }}と資産の割当を確定します。
         </p>
         <button
           class="h-11 rounded-xl bg-primary font-black text-on-primary disabled:opacity-50"
@@ -736,9 +727,9 @@ onMounted(load)
           "
           class="grid gap-3 rounded-xl border border-border p-5"
         >
-          <h3 class="font-bold">Personal口座へ移行</h3>
+          <h3 class="font-bold">仮想口座へ移行</h3>
           <p>
-            未約定注文と資産を確認し、現在の全資産をPersonal口座へ割り当てます。API
+            未約定注文と資産を確認し、現在の全資産を新しい仮想口座へ割り当てます。API
             keyの口座権限は移行後に設定してください。
           </p>
           <button :class="ui.primaryButton" type="button" :disabled="busy" @click="migrate">

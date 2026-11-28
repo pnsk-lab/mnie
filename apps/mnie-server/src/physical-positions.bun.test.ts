@@ -105,7 +105,6 @@ describe('physical position prices with cost basis', () => {
     const account = await createVirtualAccount(db, {
       physicalAccountId: 'physical',
       label: 'main',
-      kind: 'personal',
     })
     await db.insert(virtualAccountAssets).values({
       virtualAccountId: account.id,

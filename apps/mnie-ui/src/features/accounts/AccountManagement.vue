@@ -215,10 +215,7 @@ const save = () =>
         </button>
       </div>
     </form>
-    <section
-      v-if="account.kind !== 'system'"
-      class="grid gap-3 rounded-xl border border-border p-5"
-    >
+    <section class="grid gap-3 rounded-xl border border-border p-5">
       <h3 class="font-bold">アクセス</h3>
       <div
         v-for="binding in access"
