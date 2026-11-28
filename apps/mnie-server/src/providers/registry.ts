@@ -11,6 +11,7 @@ import {
   exportSession as exportPayPayBankSession,
   importSession as importPayPayBankSession,
   login as loginPayPayBank,
+  sessionManager as payPayBankSessions,
   type PayPayBankSession,
 } from '@mnie/provider-paypay-bank'
 import {
@@ -18,6 +19,7 @@ import {
   exportSession as exportSmbcDirectSession,
   importSession as importSmbcDirectSession,
   loginWithPasskey as loginSmbcDirect,
+  sessionManager as smbcDirectSessions,
   type SmbcDirectLoginChallenge,
   type SmbcDirectSession,
 } from '@mnie/provider-smbc-direct'
@@ -94,8 +96,15 @@ export interface OpenProvider {
 
 const PARALLEL_INVOKE_PROVIDERS = new Set(['sbisec', 'paypay-sec'])
 
+export const isProviderManagedBank = (provider: string) =>
+  provider === 'smbc-direct' || provider === 'paypay-bank'
+
 const serializeProviderSession = (open: OpenProvider): OpenProvider => {
-  if (PARALLEL_INVOKE_PROVIDERS.has(open.profile.provider)) return open
+  if (
+    isProviderManagedBank(open.profile.provider) ||
+    PARALLEL_INVOKE_PROVIDERS.has(open.profile.provider)
+  )
+    return open
   const lock = `provider-session:${open.profile.id}`
   const run = <T>(task: () => Promise<T> | T) => withProfileLock(lock, async () => task())
   const provider = open.provider
@@ -563,20 +572,14 @@ export class ProviderRegistry {
     }
 
     if (profile.provider === 'smbc-direct') {
-      const secret = await readSecret<StoredSmbcDirectSecret>(profile.keyringAccount)
-      if (!secret.session) {
-        throw new Error('SMBC Direct authentication is required')
-      }
-      const imported = await importSmbcDirectSession(secret.session as SmbcDirectSession)
-      const provider = asProvider(createSmbcDirectProvider(imported))
+      const load = this.#loadSmbcSession(profile)
+      const initial = await load()
       return {
         profile,
-        provider,
-        persist: async () =>
-          saveSecret(profile.keyringAccount, {
-            ...secret,
-            session: exportSmbcDirectSession(imported),
-          } satisfies StoredSmbcDirectSecret),
+        provider: asProvider(
+          smbcDirectSessions.bind(profile.keyringAccount, initial.provider, load),
+        ),
+        persist: async () => {},
         release: async () => {},
       }
     }
@@ -661,25 +664,37 @@ export class ProviderRegistry {
       })
     }
     if (profile.provider === 'paypay-bank') {
-      const secret = await readSecret<StoredPayPayBankSecret>(profile.keyringAccount)
-      const imported =
-        !options.forceLogin && secret.session
-          ? await importPayPayBankSession(secret.session as PayPayBankSession)
-          : await loginPayPayBank({
-              branchNo: secret.branchNo,
-              accountNo: secret.accountNo,
-              password: secret.password,
-              baseURL: this.config.payPayBankBaseUrl,
-            })
-      const provider = asProvider(createPayPayBankProvider(imported))
-      return {
-        profile,
-        provider,
-        persist: async () =>
+      const load = async (forceLogin = false) => {
+        const secret = await readSecret<StoredPayPayBankSecret>(profile.keyringAccount)
+        const persist = async (session: PayPayBankSession) =>
           saveSecret(profile.keyringAccount, {
             ...secret,
-            session: exportPayPayBankSession(imported),
-          } satisfies StoredPayPayBankSecret),
+            session,
+          } satisfies StoredPayPayBankSecret)
+        const session =
+          !forceLogin && secret.session
+            ? await importPayPayBankSession(secret.session as PayPayBankSession)
+            : await loginPayPayBank({
+                branchNo: secret.branchNo,
+                accountNo: secret.accountNo,
+                password: secret.password,
+                baseURL: this.config.payPayBankBaseUrl,
+              })
+        if (forceLogin || !secret.session) await persist(exportPayPayBankSession(session))
+        return {
+          provider: createPayPayBankProvider(session),
+          persist: () => persist(exportPayPayBankSession(session)),
+        }
+      }
+      const initial = await payPayBankSessions.run(profile.keyringAccount, () =>
+        load(options.forceLogin),
+      )
+      return {
+        profile,
+        provider: asProvider(
+          payPayBankSessions.bind(profile.keyringAccount, initial.provider, load),
+        ),
+        persist: async () => {},
         release: async () => {},
       }
     }
@@ -756,13 +771,29 @@ export class ProviderRegistry {
     throw new Error(`provider is not registered: ${profile.provider}`)
   }
 
+  #loadSmbcSession(profile: AccountProfile) {
+    return async () => {
+      const secret = await readSecret<StoredSmbcDirectSecret>(profile.keyringAccount)
+      if (!secret.session) throw new Error('SMBC Direct authentication is required')
+      const session = await importSmbcDirectSession(secret.session as SmbcDirectSession)
+      return {
+        provider: createSmbcDirectProvider(session),
+        persist: () =>
+          saveSecret(profile.keyringAccount, {
+            ...secret,
+            session: exportSmbcDirectSession(session),
+          } satisfies StoredSmbcDirectSecret),
+      }
+    }
+  }
+
   async use<T>(
     profileOrId: AccountProfile | string,
     action: (open: OpenProvider) => Promise<T>,
     options: { forceLogin?: boolean } = {},
   ) {
     const profile = typeof profileOrId === 'string' ? await this.profile(profileOrId) : profileOrId
-    return withProfileLock(profile.id, async () => {
+    const use = async () => {
       const open = await this.open(profile, options)
       try {
         const value = await action(open)
@@ -771,7 +802,8 @@ export class ProviderRegistry {
       } finally {
         await open.release()
       }
-    })
+    }
+    return isProviderManagedBank(profile.provider) ? use() : withProfileLock(profile.id, use)
   }
 
   async connect(profileId: string): Promise<ProviderConnection> {
@@ -877,19 +909,15 @@ export class ProviderRegistry {
       throw new Error('profile authentication interaction was not found')
     }
     this.#pendingSmbc.delete(interactionId)
-    const imported = await pending.challenge.finished2fa()
-    const secret = await readSecret<StoredSmbcDirectSecret>(pending.profile.keyringAccount)
-    const open: OpenProvider = {
-      profile: pending.profile,
-      provider: asProvider(createSmbcDirectProvider(imported)),
-      persist: async () =>
-        saveSecret(pending.profile.keyringAccount, {
-          ...secret,
-          session: exportSmbcDirectSession(imported),
-        } satisfies StoredSmbcDirectSecret),
-      release: async () => {},
-    }
-    await open.persist()
+    await smbcDirectSessions.run(pending.profile.keyringAccount, async () => {
+      const imported = await pending.challenge.finished2fa()
+      const secret = await readSecret<StoredSmbcDirectSecret>(pending.profile.keyringAccount)
+      await saveSecret(pending.profile.keyringAccount, {
+        ...secret,
+        session: exportSmbcDirectSession(imported),
+      } satisfies StoredSmbcDirectSecret)
+    })
+    const open = await this.open(pending.profile)
     // smbc-direct defers account provisioning to the first completed login;
     // later re-authentications only restart the session.
     if (
@@ -899,12 +927,7 @@ export class ProviderRegistry {
         .where(eq(financialAccounts.profileId, pending.profile.id))
         .all().length === 0
     ) {
-      // The connection RPC already holds the profile lock.
-      try {
-        await provisionProfileAccounts(this.db, this, pending.profile.id, open)
-      } finally {
-        await open.persist()
-      }
+      await provisionProfileAccounts(this.db, this, pending.profile.id, open)
     }
     return {
       connection: {

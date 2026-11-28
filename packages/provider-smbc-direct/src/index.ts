@@ -87,6 +87,9 @@ class SmbcDirectTwoFactorRequiredError extends Error {
   override name = 'ProviderInteractionRequiredError'
 }
 
+export const sessionManager: ReturnType<typeof createProviderSessionManager> =
+  createProviderSessionManager('smbc-direct')
+
 /** Converts an authenticated SMBC Direct session to the provider-neutral API. */
 export const createProvider = (profile: SmbcDirectProfile): FinancialProvider<CommonMethods> => {
   const accountId = `${profile.branchNo}-${profile.accountNo}`
@@ -993,6 +996,7 @@ export const createSmbcDirectClient = (options: SmbcDirectClientOptions): SmbcDi
     importSession,
   }
 }
+import { createProviderSessionManager } from '@mnie/types'
 import type {
   Account,
   Balance,

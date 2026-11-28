@@ -3,3 +3,5 @@ export type * from './observations'
 export type * from './reconciliation'
 export type * from './auth-manager'
 export type * from './methods'
+
+export { createProviderSessionManager } from './provider-session'

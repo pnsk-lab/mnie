@@ -2,7 +2,7 @@ import { syncAccountOrdersUnlocked } from './account-sync'
 import { withProfileLock } from './profile-lock'
 import { and, eq, inArray } from 'drizzle-orm'
 import type { Db } from './db'
-import type { ProviderRegistry } from './providers/registry'
+import { isProviderManagedBank, type ProviderRegistry } from './providers/registry'
 import { PhysicalAccountGateway } from './physical-account-gateway'
 import { PUBLIC_READ_METHODS } from './rpc/methods'
 import {
@@ -30,6 +30,7 @@ import {
   apiKeys,
   apiKeyVirtualAccounts,
   financialAccounts,
+  accountProfiles,
 } from './db/schema'
 import { ProviderMethodUnavailableError } from './providers/operations'
 import { isTransactionOperation } from './security/trade-limits'
@@ -75,6 +76,15 @@ export class FinancialAccountService {
     this.#invalidateQuotes()
     return this.gateway.close()
   }
+  #usesProviderSession(profileId: string) {
+    const profile = this.db
+      .select({ provider: accountProfiles.provider })
+      .from(accountProfiles)
+      .where(eq(accountProfiles.id, profileId))
+      .get()
+    return profile !== undefined && isProviderManagedBank(profile.provider)
+  }
+
   async #runProfileConnection<T extends { status: string; providerId: string }>(
     operation: 'connect' | 'complete',
     profileId: string,
@@ -93,12 +103,15 @@ export class FinancialAccountService {
           ...details,
         }),
       )
-    log('waiting_for_lock')
     try {
-      const connection = await withProfileLock(profileId, () => {
-        log('lock_acquired')
-        return run()
-      })
+      const providerManaged = this.#usesProviderSession(profileId)
+      log(providerManaged ? 'started' : 'waiting_for_lock')
+      const connection = providerManaged
+        ? await run()
+        : await withProfileLock(profileId, () => {
+            log('lock_acquired')
+            return run()
+          })
       log('finished', { status: connection.status, provider: connection.providerId })
       return connection
     } catch (cause) {
@@ -132,7 +145,7 @@ export class FinancialAccountService {
   }
   async syncProfile(profileId: string) {
     if (!profileId) throw new Error('profileId is required')
-    return withProfileLock(profileId, async () => {
+    const sync = async () => {
       const physicals = this.db
         .select()
         .from(financialAccounts)
@@ -147,7 +160,8 @@ export class FinancialAccountService {
         results.push({ physicalAccountId: physical.id, locked: reconciliation.locked })
       }
       return { profileId, results }
-    })
+    }
+    return this.#usesProviderSession(profileId) ? sync() : withProfileLock(profileId, sync)
   }
   async #orderInput(
     target: Awaited<ReturnType<typeof getVirtualAccountTarget>>,
